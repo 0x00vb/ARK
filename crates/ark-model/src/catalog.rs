@@ -137,6 +137,7 @@ pub async fn catalog() -> Vec<Backend> {
             step: None,
         });
     }
+    out.push(crate::inference::installed::backend());
     out.extend(named);
     out
 }

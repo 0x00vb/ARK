@@ -1,4 +1,175 @@
+## Stopped for Claude handoff, 2026-10-29
+
+The owner stopped this session. No owned compute is active. Other work remains untouched.
+Read board/evidence/inference-decode-2026-10-25/handoff-for-claude-20261029.txt before continuing.
+Dtype79 passes isolated quality and cost. Engine integration80 has an approved plan and an unchanged accepted-source archive only.
+Quantized78 passes finite and bound checks but fails exact Q6 zero sign. Canonical fix81 is partially prepared and unreviewed.
+A new read-only observation identifies asymmetric process polling inside73 measured IPC. Review it before80 response comparisons.
+Overall goal remains unmet. No automatic Codex continuation, installation, commit or source promotion is authorized by this stopped state.
+
+## GPU and complete-response checkpoint, 2026-10-29
+
+Installed bridge39dc and CLI9ff remain unchanged. Original numerical tolerances remain unchanged.
+Projection58 passes its original quality gates. Screens63 and64 reject small-prefill speed regressions.
+Attention61 passes its original quality gates. Screen65 rejects its first short shape at ratio1.172656.
+Metal4 store73 passes six legal-layout and correspondence probes. No numerical quality follows from those probes.
+Corrected raw numerical74 passes independent audit:448512 values within the original2e-4 bound and stable repeats.
+Its scope excludes Q4/Q6, IEEE and model execution. Actual quantized integration76 is being planned.
+Full-precision73 passes independent audit:64 complete task calls,277 clear contention samples, verified GPU/KV placement and clean owned shutdown.
+Median milliseconds for ARK API, Ollama, llama F16 KV and llama F32 KV are175.281,85.030,53.712,74.823 for0.6B BF16.
+The4B F16 medians are451.315,121.564,109.728,121.471. These warmed requests exclude model startup.
+Prior Q4 and separate-weight MLX comparisons remain valid within their recorded scopes. The overall speed goal remains unmet.
+Dtype75 passes independent quality audit:240 fixtures,4620 output rows and four fallback proofs.
+Its real-shape cost77 is being prepared. Quantized76 source and fault fixtures are being finalized before review.
+Existing vstack remains at fix4. No commit, installation or source promotion occurs. Other work continues.
+Evidence: board/evidence/inference-decode-2026-10-25/handoff-20261029-continuation6.txt.
+
+## Numerical GPU checkpoint, 2026-10-29
+
+Installed bridge39dc and CLI9ff remain unchanged. Numerical tolerances remain unchanged.
+Candidate20 passes retained numerical qualification but complete replies regress15.22times and20.94times. It is rejected.
+Candidate40 real-weight prefill geometric mean improves10.03percent. Four individual regressions fail selection. It remains uninstalled.
+Candidate45 passes936 finite cases and240 conservative GPU bound cases. Its171 helper probes pass exact rational bounds without epsilon.
+Independent review permits composition after the packed repair candidate44 passes its pending quality gates. No combined timing has run.
+Attention41 fails extended512-context quality at the original1e-5 limit. Actual score capture identifies score rounding as this case's cause.
+Attention49 compensated scoring is being prepared in isolation. It must pass the original400 cases and all20 longer shapes before timing.
+Clean complete replies still trail Ollama and llama.cpp with F16 KV. MLX comparisons use separate weights and BF16 KV.
+Conditioning guards remain empirical. Current corpus results do not prove every FP32 input.
+Existing vstack bugfix remains at fix4. No commit, installation or source promotion occurs. Other work continues.
+Evidence: board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json and handoff-20261029-continuation3.txt.
+
+## Handoff checkpoint, 2026-10-28
+
+No owned compiler, model or UI phase is active. Installed bridge39dc and CLI9ff remain unchanged.
+Q6 compensated cache passes native and real-model quality, but short replies regress11.57percent and21.17percent. It is rejected.
+Three-arm diagnosis shows uncached compensation costs2.50percent and1.25percent on short replies. Cached preparation adds more cost.
+A four-chain compensated kernel passes324 operator rows and IEEE checks but regresses GPU geometric mean10.19percent. It is rejected.
+A32-use deferred-cache plan remains unimplemented. It would move the preparation penalty to medium replies.
+Current evidence: board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json. Preserve all failed and successful receipts.
+The current competitor gap and54.69second functional Desktop proof remain. No universal superiority or new installation claim.
+
+## Q6 cache measured rejection, 2026-10-28
+
+Isolated candidate passes Metal15, sanitizer15, CPU11, fault injection and real0.6B/4B CPU quality with exact natural answers.
+Complete short replies regress11.57percent and21.17percent. First-token latency regresses28.25percent and11.76percent. Candidate stays uninstalled.
+All owned groups and awake assertions close. Compatibility service remains absent. Installed39dc/9ff and Desktop proof remain unchanged.
+A three-arm installed/raw-compensated/cached-compensated diagnostic is source-ready. It cannot override failed selection.
+Evidence: inference-decode-2026-10-25/shared-gpu-continuation.json and q6-latency-short1-root-closure.json.
+
+## Long Q6 numerical case, 2026-10-28
+
+The exact installed baseline fails a newly added cancellation-sensitive9728-column operator case at the unchanged2e-4 bound.
+GPU0.22955322 differs from Float640.22864914. The approximate CPU path is also less accurate on this case.
+The canonical-cache candidate never executes. Preserve both failed studies and corrected-reference diagnosis. No acceptance threshold changes.
+A separate standalone compensated FP32 candidate now tests local and SIMD reduction accuracy, exact cached coefficients and nonfinite fallback.
+Its implementation review is pending. No model/compiler phase is active. Installed39dc/9ff remains unchanged.
+Prior accepted real-model results remain valid for their stated scope. This new synthetic case is not a Desktop wrong-answer reproduction.
+Primary evidence: board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json.
+
+## Latest measured gap, 2026-10-28
+
+Fresh installed comparisons retain16measured rows per model with actual GPU placement and precision evidence.
+0.6B request medians: ARK0.784s, Ollama0.475s, llamaF160.479s, llamaF320.840s.
+4B request medians: ARK2.736s, Ollama1.793s, llamaF161.794s, llamaF322.272s.
+Both whole-study sampled eligibility and independent owned closure pass. Warm128-token throughput is not completed-task quality.
+An initial4B registration404 remains preserved. Private official hashchecked metadata recovery passes without host registry changes.
+The global8row geometry screen fails, although every numerical and baseline-bit check passes. It stays uninstalled.
+A Q6-only2row geometry spike is source-ready and awaits implementation review. Its acceptance criteria are frozen before execution.
+Installed39dc/9ff and functional Desktop54.69second proof remain unchanged. No model/compiler phase is active at this checkpoint.
+
+## Current installed comparison, 2026-10-28
+
+Installed Desktop returns the exact reply in54.690seconds, one call and zero retries.
+App, engine and awake groups close. The absent compatibility service remains absent.
+Registration budgeting and mapped read-ahead preserve output but regress complete latency by4.37percent and6.91percent. Neither is installed.
+A larger shared tile remains unselected after mixed GPU results. Installed39dc/9ff remains unchanged.
+A reviewed fresh0.6B/4B comparison now runs against private Ollama and llama.cpp workers.
+Four arms retain KV precision differences and all128-token rows. No speed claim precedes final eligibility and closure.
+Primary evidence: board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json.
+
+## GPU registration cache validation, 2026-10-28
+
+Installed reachable capacity passes the actual root SDK and three installed CLI replies.
+The new Desktop attempt reaches native inference but stops after12.96GB global filesystem growth. No answer is accepted.
+Its partial engine sample reads22.75GB over47.8seconds. This is IO evidence, not proof of its cause.
+All owned Desktop groups and awake assertions close. The initially absent compatibility service remains absent.
+An isolated generic GPU cache now bounds reusable registration spans by device capacity.
+Release15/MetalASAN15/docs and pending-owner/grouped-operation tests pass. Injected allocation failure preserves output and permits exact recovery.
+The actual675/60Flint replay preserves all61GPUframes and natural tokens. All9158784CPUvalues pass unchanged bounds and rankings.
+The idle cached span is2.991GB, excluding active resources and overlapping physical-memory interpretation.
+Three profiling-OFF primary pairs are running against installed39dc. No candidate installation or speed claim is accepted yet.
+No Rust or UI source changes require broad application CI repetition.
+
+## Installed capacity optimization, 2026-10-28
+
+Engine bridge39dc6110 and CLI9ff820c3 are locally installed with rollback. No Rust or UI source changed.
+Real0.6B,4B and Flint logits preserve exact GPU output. Request allocations drop59.4to96.3percent.
+Limited paired fresh-process replies improve36.5percent,14.9percent and5.4percent. No Desktop or competitor speed claim follows.
+Actual root SDK, installed CLI and existing embedded Desktop proof are next. All owned check groups are closed.
+Primary continuation is ../board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json.
+
+## Installed engine checkpoint, 2026-10-28
+
+Shared GPU attention and batched feed-forward are installed as bridge3f0d9294, with rollback.
+Native complete-process median improves38.44to33.90seconds,11.80percent, with fixed numerical gates and identical outputs.
+Current SDK checks and three installed CLI answers pass. The embedded Desktop binary is unchanged.
+Actual Desktop returns the exact reply in89.125seconds,675prompt and60output tokens, one call and zero retries.
+The capture controller times out, but independent late proof validates actual UI/store/trace/argv/screenshot and complete process closure.
+Prior Rec934 restoration is retained historical evidence. The next diagnostic starts and ends with compatibility service absent.
+No Desktop speed improvement is claimed. A native replay aborts on disk growth, with substantial IO activity captured before cancellation.
+An isolated fresh-request capacity candidate passes15native and15Metal sanitizer tests. Installed engine remains unchanged.
+Next: real-model memory, full-logit and latency qualification after sufficient disk headroom. No model/compiler phase remains active.
+Primary evidence: ../board/evidence/inference-decode-2026-10-25/shared-gpu-continuation.json.
+No Rust or UI source change requires broad CI repetition at this checkpoint.
+
+## Flint engine consumer update, 2026-10-27
+
+Locally installed native bridge1fcd777f passes actual Desktop Flint response,675/60tokens,1call0tools0retries,50.908s.
+Dense CLI exact answers also pass. No client source or build changed for this engine update.
+No matched Desktop or universal superiority claim. All owned groups close, Rec55856 restores ready/idle/context8192.
+Engine numerical and performance evidence: ../board/evidence/inference-decode-2026-10-25/packed-attention-continuation.json.
+Further native affine optimization continues in ark-inference-flint.
+
 # Current state
+
+## Native latency follow-up, 2026-10-26
+
+The qualified QKV engine is locally installed with rollback. The actual exact CLI passes in56.720seconds with675input and60output tokens.
+The six-block compute study improves675+32median31.19to26.74seconds,14.28percent. Paired output bytes match.
+Short-workload compute and decode regressions remain within unchanged5percent guards. This is not a competitor or Desktop speed claim.
+CLI groups, awake assertions and lease are closed. Rec76782 was restored authenticated ready and idle with context8192.
+Desktop7 accepts the exact reply in53.146seconds,675input and60output tokens, one call, zero tools and zero retries.
+Actual installed engine identity, store, trace and screenshot pass. All owned groups and awake assertions are closed.
+Rec98571 is restored authenticated ready and idle with context8192. Independent final consumer QA passes.
+The next quantized GPU prototype has source review approval but no compiled or executed evidence.
+See `../ark-inference-flint/CURRENT_STATE.md` and `../board/evidence/inference-decode-2026-10-25/prefill-qkv-continuation.json`.
+
+## Flint latency optimization complete, 2026-10-25
+
+The selected grouped-expert and batched-router native engine is installed with rollback. Fixed CPU, sanitizer, Metal and checkpoint gates passed. Profiling-off complete compute improved 19.7986 percent on the primary workload and 22.0774 percent on the longer workload. Paired logits were exact.
+
+The installed ARK Flint preview returned the exact original Desktop request in 74.148 seconds, versus 551.035 seconds before. This single comparison reduced elapsed time by 86.5439 percent. Prompt usage fell from 6,044 to 675 tokens. Output usage was 60 tokens with no tools or retries. This remains substantial latency for a tiny reply.
+
+The runtime separates a recognized terminal tool-use constraint from model-facing task and current-goal copies. Original chat, history, stored state and trace remain unchanged. Current Core CI passed 1,148 tests with 14 intentional ignores, release and simulated benchmark checks. Focused runtime and interaction checks passed. Embedded Desktop7 and actual installed engine identities match.
+
+The verified Qwen3 0.6B CLI model is installed. A separate accounting-aware cold-worker comparison measured median request wall time of 0.396604 seconds in ARK and 0.586763 seconds in Ollama. Filesystem caches were warmed. Startup and transport boundaries differ. Ollama's reported generation component was lower. This does not establish warm-serving or universal superiority.
+
+All owned phases and awake assertions are closed. Rec84430 was restored authenticated ready and idle with context 8192. It is background compatibility, not the Flint generation path. Final independent QA accepted results and closure. Owned native build directories were removed after freezing source and test binaries. Shared Rust output and all foreign work were preserved.
+
+Test the local preview at `~/Applications/ARK Flint.app`. Production ARK is unchanged. Evidence: `../board/evidence/flint-latency-2026-10-24/`. No commit, push or release.
+
+
+Final reviews cleared both packaging/test findings. The consumer released lockfile is restored.
+The private Core patch used for the qualified preview is preserved in `../board/evidence/flint-latency-2026-10-24/desktop-dev-patch-used.toml`.
+It is not an active consumer checkout configuration or a published dependency pin.
+The bridge CTest registration now includes a 30-second timeout. Targeted metadata and registration checks passed.
+
+## Local Flint preview qualification complete, 2026-10-24
+
+Installed engine discovery and embedded Desktop response passed. Actual read/edit/fixed tests passed separately. Final independent reviews found no blockers. Existing vstack feature completed. All owned test processes and awake assertions closed, Rec86842 restored authenticated ready/idle/context8192.
+
+The final reply took551.035seconds with6044prompt/80output tokens and no retry. This is a major latency limitation, tracked separately. Local preview is installed at `~/Applications/ARK Flint.app`; production app is unchanged. No commit, push or release. Details: `../board/evidence/flint-native-next-2026-10-22/final-local-preview-qa.json`.
+
 
 ## Creative UI patch assembly (2026-10-23)
 
@@ -188,6 +359,30 @@ On `main` (ADR 0072): two active code runs, eight waiting, one per project, owne
 cancel, background children stopped, bounded capture. Left: native Windows and Linux runs and
 the owner's call on the 2/8 limits (board `17de65d1`).
 
+
+## Native Flint coding bridge in development
+
+2026-10-22. Worktree ark-flint-agent, branch codex/flint-agent.
+Version-two raw prompting, bounded tool rendering/parsing, linked history, finish-state validation and 32 GiB admission are implemented.
+Full workspace CI passes. Eleven parser tests, twelve serial provider tests and two fast fixture tests pass.
+One parallel cancellation observer timed out, then passed alone and serially without changing deadlines.
+The first two live trials are unqualified because fixture result formatting omitted source text. The second was aborted.
+The corrected shared fixture attaches ark_files::distill(); its regression proves source reaches the next provider request.
+Corrected trial3 was aborted after suspension under coordinated release policy.
+Awake trial4 read the source successfully, then exhausted its 4096-token output budget on the second model call.
+No edit or regression-test action was accepted. The native test failed after 1994.07 seconds.
+Final fixture-only clippy and both fast tests passed in the same admitted window.
+All owned groups and the shared lock closed. Rec PID 7493 is restored with context 8192, ready and idle.
+Owner resumed the diagnostic and real coding task on2026-10-23.
+The owner removed AC-only build/test restrictions and authorized battery execution.
+Trial5 exposed relay environment configuration failure before generation. Cleanup and rec restoration passed.
+Explicit-path relay6 passes empty-environment checks and independent review. The real trial6 is running.
+Its native provider, fixture, parser and budgets remain unchanged. Exact raw wire output is retained.
+Source-only diagnosis must capture actual raw generation before changing prompting or implementation.
+Real read/edit/test qualification remains open. Vstack remains verify 4/6.
+Evidence: ../board/evidence/flint-native-next-2026-10-22/trial4-closure.json. Installed binaries and manifests are retained.
+
+
 ## Advanced artifact surfaces in development
 
 `ark-advanced-artifacts` implements ADR 0071: map/model classification, route-bound immutable
@@ -229,8 +424,16 @@ Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 Local inference (ADR 0073) is on branch `codex/inference-bridge` (worktree `ark-inference-bridge`), not on `main`.
 It adds `ark_model::Inference`, a text-only provider over the ARK Inference engine's process bridge.
-Focused checks, the fake-worker suite and the installed Qwen3 4B consumer test (CPU and Metal) pass.
-It is a transport proof: tools are refused, Metal prefill is about 32 tokens/s, every call re-runs prefill.
+Commit f459b69 passed focused checks, fake-worker tests and the installed Qwen3 4B consumer test on CPU and Metal.
+The batch follow-up sets default capacity 256 and accepts 1 through 512. Threads stay at two.
+Source tests cover configuration, environment forwarding and a prompt exceeding 256 measured tokens.
+Focused verification now passes: 125 ark-model tests, 16 runtime retry tests, full formatting
+and Clippy for ark-model/ark-runtime with warnings denied. A fresh Metal-enabled engine build
+from `4abcace` passes nine CTest suites. The batch-256 installed-model test passes on CPU and
+Metal, each matching its own CLI reference across two completions and collected streaming text.
+Independent evidence QA accepts this functional scope. Full branch CI and the app consumer
+decision remain open. No new performance result or CPU-to-Metal equality is claimed.
+It is a transport proof: tools are refused and every call re-runs prefill. The documented timings predate this batch follow-up.
 Merging waits on the owner: the new public API has no app consumer yet. See `docs/LOCAL_INFERENCE.md`.
 
 | What | State |
@@ -393,3 +596,227 @@ The later guarded checks also pass: durable projection4Rusttests, protocol4tests
 nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
 and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
 interaction/host integration and complete application builds remain pending storage.
+
+## Flint follow-up after iPhone verification
+
+The owner authorized resuming after iPhone checks finish and keeping the laptop awake throughout testing.
+A conditional heartbeat checks every 15 minutes in this chat. It starts no native phase before iPhone completion and slot release.
+Next: final fixture lint, then the corrected native read/edit/test task. Fix failures and update the learning guide.
+Start the temporary sleep assertion before any admitted build or model load, and release it during teardown.
+
+October22: iPhone focused and device-development checks closed. Final fixture lint and2fast tests now pass.
+Trial4 is running with caffeinate before the shared wrapper, bounded checks and protected rec restoration.
+Real read/edit/test qualification remains open. Status: ../board/evidence/flint-native-next-2026-10-22/live-agent-run4.json.
+
+
+## Flint diagnostic6 follow-up,2026-10-23
+
+Real source read passed. Second prefill exceeded1200s before any output token. No edit/test acceptance.
+Exact wire capture is retained. trial6-closure.json verifies groups and lock closed, rec81260 ready/idle context8192.
+The owner permits battery execution. Other resource, suspension, deadline and cleanup controls remain.
+Native batching must remove this observed latency blocker before another coding retry.
+Engine vstack returned to design2/6 for staged prefill changes. Fixed numerical gates remain unchanged.
+
+October23: Native prefill candidate passes CPU9, sanitizer9, Metal13 and full checkpoint numerical gates.
+Its paired primary performance study failed the frozen10% complete-compute selection rule.
+No candidate installed. Capacity-one/helper versus batching diagnosis is next in the engine tree.
+The actual ARK read/edit/test remains unqualified until a corrected native candidate completes it.
+
+
+October23 trial7 CLOSED FAIL. Actual read passed:2448/30tokens,183.100s.
+Second call2931/4096tokens exhausted output inside unfinished reasoning, with no tool call.
+No edit/test accepted. trial7-closure.json verifies owned group closure and rec12937 ready/idle/context8192.
+Expert gather remains uninstalled. Correctness and paired performance results remain valid within their recorded scope.
+The reviewed single-variable tools-only Flint prompt instruction and focused presence/absence test are implemented.
+Independent implementation source QA GO. Compilation, fullCI, simulated benchmark and actual trial8 remain pending.
+Fresh disk27714688KiB is below35GiB admission and31GiB stop. Capacity request already pending.
+Foreign cargo9713 observed. No new native/compiler/model phase started. Refresh resources before admission.
+Exact ARK replay measurement and final coding qualification remain open. No commit or installation.
+
+October23 capacity recovered42528976KiB. Reviewed Rust runner admitted with early caffeinate and absolute ark-env.
+Focused Flint12/12 PASS. Full ARK CI active, group22938/session80690. Trial8 not started.
+Fresh trial8 runner/relay and15pins independently reviewed GO. Installed baseline unchanged.
+
+Full ARK CI includingrelease/simulatedbench PASS. Validation groups/lock/awake closed.
+Trial8 ACTIVE session24487/group38460/native38546, fresh15pins and42369180KiB admission.
+Actual Provider/agent loop uses uninstalled gather candidate and reviewed brief-reasoning prompt.
+Same fixture/scopedapprovals/budgets/parser. Rec12937 stoppedidle and protected restorationpending.
+
+Trial8 CLOSED FAIL after898.10s: read2475/30tokens217.589s PASS; second2958/2479tokens validhandoff withprosebeforecompleteeditcall.
+Strictparser refused mixedoutput. Noedit/testaccepted. Closure verified group/wrapper/lock/awakeempty andrec42364readyidle8192.
+Reviewed promptcontract correction now sourceimplemented, withtools-only placement andmixedprose refusaltests.
+Trial9 checks/actualrun pending independentimplementationQA andfreshsharedadmission. Installedbaselineunchanged.
+
+Trial9 focused13 PASS, fullCI stopped on cancellation-stage observation timeout2s. No native trial9 started.
+IndependentQA approved test-only observer alignment with existing10sstartup budget andmode-specificfailure message.
+This does not prove slowspawn caused the failure. Nativebudgets and80ms/death/restartassertions unchanged.
+Fresh trial9-rust-recheck.py will runfocused13/exactcancellation/fullCI withnewlogs beforeactualtrial9.
+
+Trial9 Rust recheck INVALID: actual suspension during release build, wall495.425s versus active301.414s.
+Owned groups47025/47033/47076, wrapper/lock/awake assertion closed. NativeTrial9 never started.
+Actual lid state reports closed. User request pending to keep lid open for continuous validation.
+Battery execution remains authorized. No AC requirement, parser relaxation or native budget change.
+Fresh awake fullCI and actual trial9 remain open. Preserve failed/invalid receipts and reuse reviewed source.
+
+Actual lid reopened. ForeignDesktop1942gate closed withphase release/cleanup/quarantineverified.
+FreshfullCIonly trial9-awake-ci.json active session50769/group59981,53592464KiBadmission.
+Updated sharedark-env retains reviewedfreshness/clock/disk/groupcontrols. NativeTrial9 notstarted.
+
+FreshawakefullCI/release/simulatedbenchPASS344.443s; group/wrapper/lock/awakeclosureverified.
+Trial9 ACTIVE session30641/group77063/wrapper77013/driver77032,15pinsverified/50855188KiBadmission/lidopen.
+ActualProvider/agent usesuninstalledgathercandidate/no-prosepromptcontract, samefixture/scopedapprovals/budgets/parser.
+Authorizedidlerec42364stopped, fullownedgroupclosure/protectedrestorationpending. Noacceptanceclaim.
+
+Trial9CLOSEDFAIL1064.95s: read2502/30tokens240.338s; tests.runbeforerepairguardrefused; get_evidenceusedundeclaredinv/invalidJSON.
+Noedit/fixedtestsaccepted. trial9closureverifiedownedgroups/wrapper/awakeclosed andrec84521readyidle8192.
+Genericruntimehint now schema-shapedinvocationJSON, actualcatalogregressionadded, sourceQA GO.
+OfflinecapturedtemplatecomparisonPASSdocumentedlimits/token-countagreement, nottokenID/numerical/behavioralevidence.
+Trial10 fresh16pins/relay/runner prepared; focusedruntime/fullCI thenfreshadmissionrequired. Installedbaselineunchanged.
+
+Trial10longhintbenchmarkFAILtinycostgates/team12calls; compactfunctionhintFAILonlyteam12calls. Bothreportsretained.
+Quotedfunctionstylehinttriggeredexistingtext-onlycall detector. FinalcolonlabeledJSONhint avoidsfalsecallsyntax, detectorunchanged.
+Actualhint-schema/negativedetectorregressionPASS, freshsimulatedbaselinecomparePASS/team11calls15991->15883tokens.
+FreshfullCIrequired beforeactualtrial10. No native10started/installedbaselineunchanged.
+
+FinalCIfailedtest-onlyteamrecordreplayanswerheadclippedID5hex; precedingreplay/success/tokenassertionspassed.
+Boundary-awarepartialreferenceIDnormalizer sourceQA GO, ordinarywordpreservationregressionsadded.
+Freshtrial10-replay-ci.json active session17593: focusednormalizerPASS, exactreplaythenfullCI pending.
+Allruntime/parser/modelbudgets andbenchmarkbaselineunchanged. Native10notstarted/17pinsrebound.
+
+Trial10replayCI PASS focusednormalizer/exactreplay/fullCI/release/simulatedbenchmark445.448wall/445.457active.
+Ownedgroups8409/8457/8499/wrapper/lock/awakeclosed.17pinsverified, live10/wire10fresh,lidopen/free42842088KiB.
+AwaitfinalQA/freshsharedadmissionbeforeactualtrial10. Nativecodingstillunqualified/installedbaselineunchanged.
+
+ActualTRIAL10 ACTIVE session81628/group24854/wrapper24819/driver24839/native24873.
+FinalfullCI/result/sourceQA/17pinsPASS; freshsharedadmission/lidopen, protectedidlerec84521stop.
+SameProvider/parser/sampling/fixture/nativebudgets/scopedapprovals, genericcolonJSONevidencehint.
+Read/edit/fixedtestsqualificationpending, candidateuninstalled. Monitorwire10/receiptsandverifyfullclosure/rec restoration.
+
+Trial10CLOSEDFAIL791.29s: read2502/30tokens198.325sPASS; second2981/1921normal150003 fencedJSONeditdescription, notXMLcall.
+Strictparserrefused/noedit/test. Actualgroups/wrapper/awakeclosed; rec27141freshreadyidle8192.
+Exactretainedpromptnumericaldiagnostic nowACTIVE session49651/group28077/frozenbaseline firstcase.
+35pinsverified/fresh4runoutputs;2502/2981tokenIDhashes frozen, samecontext12288/Metal8threads/3GiB/fixed32decode/.005gate.
+Onebaseline/candidatepairperinput, no performance/independentoracle/full1921trajectoryclaim.
+Plan/source/runnerQA GO; freshsharedadmission40117236KiB/lidopen/noactiveothergate. Rec27141stoppedidle/protectedrestorepending.
+
+Exact retained-prompt numerical diagnostic PASS. Both 2502/2981-token pairs are bit-identical after prefill and32 fixed decode steps.
+Four groups, wrapper, lock and awake assertion closed. Rec31347 ready/idle/context8192. Independent result QA GO.
+This is not full generated-trajectory, independent-oracle, performance-selection or coding acceptance evidence.
+Existing workflow returned to design2/6 for one bounded private provider regeneration. Design QA pending.
+
+Bounded provider regeneration implemented. Strict decoder errors now have typed eligibility.
+Both attempts share original output tokens/bytes/prefill/call budgets. EOF/reaping precedes replacement, which never enters the pool.
+Focused parser PASS and provider19PASS/one intentionally ignored environment helper. Initial500ms synthetic startup refusal retained; test3s now passes.
+Review additions cover parser outcome tracing, feedback message/input limits, normal-stop exhausted tokens and cancellation during EOF closure.
+Final implementation review and full CI pending. Native trial11 has not started.
+
+Current shared wrapper no longer creates caffeinate automatically. First fullCI stopped before acceptance and all groups closed.
+Fresh launches explicitly use caffeinate -is. Live11 driver now checks actual owned awake assertion before native admission.
+Protected focused attempt exposed a test's incorrect fixed worker-count assumption under the outer deadline.
+Test now bounds the3s logical call with an external5s timeout. Stage-observed cancellation tests separately prove EOF/reload cleanup.
+Final protected focused/fullCI ACTIVE session33634/wrapper35920/driver35938/awake35921. No native11 yet.
+
+Final protected CI PASS: focused14parser/21provider, fullCI/release/unchanged simulatedbenchmark408.121wall/408.146active.
+Groups35939/35949/36221/wrapper35920/awake35921 closed,17pinsmatch. Independent finalgateQA GO.
+ActualTRIAL11 ACTIVE session47785/testgroup50449/wrapper50383/driver50409/awake50385.
+Fresh admission47382355968bytes/lidopen/noforeigngate; driver verifiedownedawake and stoppedauthorizedidlerec31347.
+Uses native gathered Flint, same fixture/scopedapprovals/strictparser/sampling and aggregateoutput/prefill/call limits.
+Capture raw live-agent11-wire/argv plus Harness events/usage/approvals/tests. Full closure and rec restoration pending.
+
+Trial11 CLOSED SETUP FAIL before generation. New relay11 lacked executable permission0644.
+Provider refused process startup. No wire or model result exists. Allgroups/lock/awakeclosed, rec50493 authenticatedreadyidle8192.
+Fresh12 relay0755 and driver executableguard prepared. Empty-env two-worker byte/argv/EOF probe PASS, no native engine executed.
+Driver12 requires ready/idle/queued0 for stop and restoration. Core source and fullCI evidence unchanged.
+Fresh12 runnerQA/admission pending.
+
+Actual TRIAL12 ACTIVE session71342/testgroup51184/wrapper51150/driver51171/awake51152/relay51186/native51187.
+Executable relay and actual native process verified. Core unchanged since passed fullCI. Same fixture/sampling/strictparser/aggregatebudgets.
+Fresh17pins/modes/pureforwarding/sourceQA GO, admission47389306880bytes/lidopen/noothergate.
+Authorized idle rec50493 stopped. Monitor wire12 and retain every physical attempt. Full closure/restoration and qualification pending.
+
+Trial12 INVALID from actual clamshellsleep19:26. Phase607.131wall/297.981active; source read2502/30tokens187.995s before sleep.
+Second prefill interrupted, no edit/test. No model quality failure classification.
+Allgroups51184/wrapper51150/awake51152/lockclosed. Rec52108 authenticatedreadyidle8192, trial12-closure.json/power.log retained.
+Actual lid opened19:49:53. Fresh13 files/0755/17pins prepared; sourceQA, stableawakewindow andfreshsharedadmission pending.
+
+Actual TRIAL13 ACTIVE session9644/testgroup54810/wrapper54774/driver54793/awake54776/relay54815/native54822.
+Fresh17pins/sourceQA/0755 andsharedadmission46272106496bytes. Awakeinterval60.247wall/60.249active, lidopen/noothergate.
+Authorized idle rec52108 stopped. Same core/parser/sampling/fixture and original aggregatebudgets.
+No competing phase. Fullclosure/restoration, codingacceptance and remaining replay/profilefinalQA stillopen.
+
+Trial13 read PASS2502/30tokens213.392s. Actual files.edit PASS2977/1796tokens654.586s with exact reviewed one-line repair.
+Hidden tests and sentinel remain unchanged. Third response names unknown files.run (3176/4tokens, normal150005), strictly rejected.
+Real bounded regeneration ACTIVE: newrelay83100/native83101, remaining4092tokens/8388576bytes, otherargs unchanged.
+Oldrelay54815/native54822 freshly absent before replacement. Allremain in ownedgroup54810/session9644.
+Tests.run and final qualification remain pending. Read/edit and recovery milestones retained separately.
+
+Trial13 CLOSED PARTIAL. Read/exact edit passed. Real bounded regeneration rejected files.run, then accepted tests.run with eight aggregate output tokens.
+The fixed-test launch failed because canonicalizing the rustc proxy selected rustup. Fixed tests have not passed.
+trial13-closure.json verifies test/wrapper groups and awake assertion closed. Rec87410 is authenticated ready/idle/context8192.
+Foreign wrapper99721 now owns a shared gate. No owned phase is running. Preserve fullCI evidence and frozen repository sources.
+Next: protected compiler-path probe, actual compiler identity pin and independently reviewed fresh trial14, after shared admission.
+
+Compiler-path probe PASS. Canonicalized rustup proxy exited1, actual pinned compiler built exact trial13 repair and both fixed tests passed.
+Probe2.644wall/active seconds, owned groups/awake and wrapper closed, Rec87410 remains ready/idle/context8192.
+This is configuration evidence, not agent acceptance. Fresh actual14 remains required after resultsQA and admission.
+
+Actual TRIAL14 ACTIVE session52679/driver53153/testgroup53194/wrappergroup53131/awake53135.
+Compilerprobe/resultsQA GO,18pins exact, actual compiler verified before authorized idle Rec87410 stop.
+Fresh admission40856018944bytes, no foreign gate. Same fixture/scoped approvals/parser/sampling/aggregatebudgets.
+Full closure/restoration and actual coding acceptance remain pending. No competing phase.
+
+Trial14 live milestone: source read2502/30tokens209.513s and exact reviewed edit2983/1382tokens497.788s accepted.
+Actual source equals pinned original.txt. Hidden fixed tests and sentinel remain unchanged. Third call active, tests and final acceptance pending.
+
+SHARED WINDOW RELEASED TO DESKTOP. Trial14 stopped by reviewed owneddriver cancellation for priority handoff.
+Actual read/exact edit/fixed tests2/2 passed. Final model response canceled, so full-turn qualification remains incomplete.
+All owned test/wrapper groups and awake assertion closed. Rec78855 authenticated ready/idle/queued0/context8192 restored.
+Raw frames, actual approvals and full test invocation preserved. No new Flint compiler/model/performance phase until Desktop packaging closes.
+
+Latest direct human removed blanket Desktop wait and obsolete approvals. No new model run is needed for closing prose.
+Independent QA accepts actual14 real read/exact edit/fixed tests2/2 as the requested coding criterion. Full-turn/cost limitations remain explicit.
+Final profiling ACTIVE session18207/driver99959/wrapper99938/group99934/awake99937. Utilities built against correct respective frozen headers/libraries.
+Four-arm48run study retains OFF-mode10% complete-compute selection and fixed numerical bounds. Result/closure/finalQA/docs/cleanup remain.
+
+InstalledFlint/Desktop integration ACTIVE. Shared catalog and factory now discover the same bounded installation registry or legacy Flint layout.
+Core owned tree rebased onto Desktop Corev0.25.2. Preserved own stash32d168e3a5666f9ae70ebade713a4f3e6cf34a29 and previous evidence.
+New discovery9/9, provider21/1intentionalignore, ark-model clippy PASS. Full current-CoreCI running session19601/group23840, including new aggregate-size test.
+Own Desktop tree ark-desktop-flint at b8b79d0 uses ignored development Core patch. Native build/selection/actualFlintchat remain next.
+Frozen primary16runs accepted by independentQA, OFFcompute12.0686% reduction, all logits bitidentical. No primary repeats.
+Retained profiling tail and final cleanup/documentation remain open. No stale blanket Desktop hold.
+
+
+## Installed Flint Desktop proof, 24 October 2026
+
+Native Desktop build passed in43.29seconds using the owned Core patch. Own ARK Flint.app and profile preserve production.
+The optimized engine is installed locally with exact previous binaries retained for rollback. Frozen primary OFF compute improves12.0686%.
+The remaining32long profiling runs are unexecuted scope, superseded by human time priority. No repeated long-prompt speed claim.
+First own preview pid55142 waits inside optional account Keychain lookup before drawing. User asked to Deny the account prompt.
+Actual Desktop Flint picker and response remain pending. Focused checks pass; canceled post-rebase broadCI is not a PASS.
+
+Preview packaging correction: build2 passes with compiled Tauri identity dev.aiark.flint-preview. Outer plist identity alone did not isolate single-instance behavior.
+Original55142closed. Current66718waits at optional Account Keychain before UI. No model child or background service stop.
+
+Actual native preview now opens. Model menu confirms ARK Inference > Flint selected.
+Desktop provider metadata and description parsing corrected after realUI exposed the filter and phantom ARK choice. Four focused Node tests pass.
+Actual installed versioned engine80502 runs Metal batch256 from UI prompt, owned appgroup79858/controller9081/awake80281.
+Background service stopped safely for this model window. Response and whole-group closure/restoration pending. No other model or compiler phase.
+
+Desktop first installed-engine prompt FAILED its1800second call deadline. No answer was accepted.
+First physical generation used80output tokens before bounded regeneration; raw response text was not captured. Do not infer its contents.
+Actual app group79858 and engines80502/83869 closed. Awake80281closed. Background service89125authenticatedreadyidlequeued0/context8192 restored.
+Mac locked during final UI observation. Unlock requested once. Next source-only exact installed wire relay captures the owning defect before a fix.
+Desktop recognition is proven. Usable response and final embedded assets remain open.
+
+Captured diagnostic proved complete6044prompt/80output correctfinal atnext-user150003. EOS-onlyplainfinal branch incorrectly rejected it.
+IndependentQA approved narrowstopcontract correction. Toolgrammar, reasoning, framing, output limits and engine math remain unchanged.
+Focused16parser/22provider/clippyPASS. Full currentCoreCI PASS1138tests/14intentionalignored, release andsimulatedbenchmark in585.32seconds.
+EmbeddedDesktop3buildPASS35.27seconds. Local~/Applications/ARK Flint.app installed withfresh isolatedreadyprofile andverifiedbinaryhash.
+Actual Finderlaunch43948 usesnoarguments ordebugoverrides; freshprofile observed. OptionalCloud key Keychain promptawaitsDeny.
+No modelphase started. FinalactualembeddedUIresponse/cleanup/QA remain. Publishedproductionapp unchanged.
+
+Final embedded preview opened after Keychain cleared. Smoke3 stopped before inference: default Documents project scan remained in nested_files/read_dir/open for about15minutes; no engine spawned. Preserved sample, no model failure inferred. Owned appgroup/awake closed, exact Rec55911 restored authenticated ready/idle/context8192. Mac locked on reopen. Next choose an owned local test folder through native UI, then fresh same-prompt smoke.
+
+Mac unlocked. Actual UI changed Flint project to owned local evidence folder, avoiding the blocked Documents scan. Fresh independently reviewed live4 running: app75134/native76341 direct installed engine, Metal batch256/context12288/output4096. Same final reply prompt submitted. Rec55911 stopped verified idle. No response claimed; controller owns closure and restoration.
+
+Final embedded installed Desktop4 response PASS. Actual native UI and persisted turn show “Flint is running locally.” One model call, 6,044 prompt tokens, 80 output tokens, no format retry, no tool call or cancellation. End to end elapsed551.035seconds. The UI first_token field measures buffered accepted-text delivery, not native first-token or prefill-only latency. App75134/native76341/driver76262/awake76264 closed. Exact Rec86842 restored authenticated ready/idle/queued0/context8192 and independently verified. Local preview installed separately; production unchanged. Latency remains a product limitation.

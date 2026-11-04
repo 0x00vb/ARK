@@ -1,0 +1,6 @@
+{
+  "source": "crates/ark-tools/src/web/html.rs",
+  "revision": "f0d10f188e421753d42160a433ce4ac0e1f38b7f",
+  "original_sha256": "749871a0936d061a41eb33b4e18582400f9c60a2555ff491bfc95df207333098",
+  "seeded_fault": "Remove uppercase hexadecimal prefix acceptance"
+}

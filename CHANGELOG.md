@@ -16,19 +16,28 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+Explicit tool-free requests omit tool schemas, capability discovery and ready-action hints. Normal tool-enabled turns retain approvals and analysis.
+
+### Fixed
+
+- Accept complete Flint plain replies at the pinned next-user boundary instead of starting an unnecessary format retry. Tool-call grammar and completion limits remain strict.
+
 ### Added
 
-- `ark_model::Inference`, a local text provider over the separately built ARK Inference
-  engine. ARK runs the engine's `ark-inference-bridge` executable as a child process and
-  talks to it over stdin and stdout. Select it with `ARK_PROVIDER=inference`,
-  `ARK_INFERENCE_EXECUTABLE` and an absolute GGUF path in `ARK_MODEL`. It streams UTF-8, kills
-  the child on cancellation and bounds file, array, input, output and token sizes separately.
-  This is a text-only transport proof, not an agent backend: tool definitions, tool history
-  and images are refused before the child starts, prefill runs at about 32 to 36 tokens/s on
-  an M4 Pro with Metal, and every call re-runs the full prefill. Deadlines for startup, prefill,
-  each later frame and the whole call are set with `ARK_INFERENCE_*_SECONDS`. `inference` is now a reserved
-  provider name, so a named endpoint called `inference` is rejected
-  ([ADR 0073](docs/adr/0073-local-inference-process-bridge.md), `docs/LOCAL_INFERENCE.md`).
+- ARK Inference models appear in the shared model catalog when the engine and a complete supported model are installed.
+  Desktop can select `inference:flint` without environment configuration. A bounded versioned installation registry
+  and the existing local Flint layout share one resolver. Explicit executable and absolute model-path configuration remain supported.
+- Native Flint tools use strict framed transport, complete tool-call parsing, scoped approvals and bounded output.
+  Actual ARK source read, exact repair and two fixed tests passed. The final response was canceled for Desktop priority.
+  This proves those actions, not broad coding reliability or complete-turn cost.
+
+### Changed
+
+- Flint can regenerate one rejected final format within the original aggregate token, byte and time limits.
+  Rejected responses never execute. Reasoning and transport failures remain strict refusals.
+- Evidence retrieval hints use the offered `invocation` argument in a compact JSON example.
+- Local inference retains separate file, request-array, input, output and token bounds. Images remain unsupported.
+  Startup, prefill, progress and whole-call deadlines remain configurable. See `docs/LOCAL_INFERENCE.md` and ADR0073.
 
 ## [0.25.1] - 2026-10-23
 
@@ -106,6 +115,9 @@ What changed for people building on ARK, per release. Not a commit log.
   middle of the pane instead of at the bottom edge.
 - Code runs have a shared active-run limit and finite waiting queue. Each project runs one
   program at a time. CPU throttling stays off ([ADR 0072](docs/adr/0072-code-runs-have-bounded-admission-and-owned-cleanup.md)).
+
+- Local inference defaults to a prompt batch capacity of 256 and accepts capacities from 1 through 512.
+  CPU computation still defaults to two threads.
 - The default agent instructions reserve state updates for ongoing or later work, avoiding
   a separate bookkeeping step just to repeat a completed result.
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release

@@ -1,6 +1,9 @@
 //! Bounded local text generation through ARK Inference protocol version one.
 //!
 //! A dropped completion kills its child. Only a fully checked terminal frame permits reuse.
+mod flint;
+pub(crate) mod installed;
+
 use crate::{Completion, Message, Provider, ProviderError, Result, Role, TextSink, ToolDef, Usage};
 use async_trait::async_trait;
 use std::{path::PathBuf, process::Stdio, time::Duration};
@@ -8,7 +11,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
 const FRAME: usize = 1 << 20;
 fn refuse(detail: &str) -> ProviderError {
@@ -23,9 +26,33 @@ fn broken() -> ProviderError {
         detail: "Local inference transport failed. The next call starts a new process.".into(),
     }
 }
+fn installed_config(
+    executable: Option<PathBuf>,
+    model: &str,
+    resolve: impl FnOnce(&str, Option<&std::path::Path>) -> Result<InferenceConfig>,
+) -> Result<InferenceConfig> {
+    if std::path::Path::new(model).is_absolute() {
+        return executable
+            .map(|exe| InferenceConfig::new(exe, model))
+            .ok_or_else(|| {
+                refuse("Set an absolute ARK_INFERENCE_EXECUTABLE path for an explicit model path.")
+            });
+    }
+    let mut config = resolve(model, executable.as_deref())?;
+    if let Some(executable) = executable {
+        config.executable = executable;
+    }
+    Ok(config)
+}
+
 /// Explicit local configuration. Array bytes are not a total-process memory limit.
 #[derive(Clone, Debug)]
 pub struct InferenceConfig {
+    pub flint_tools: bool,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub top_k: u32,
+    pub seed: u64,
     pub executable: PathBuf,
     pub model: PathBuf,
     pub backend: String,
@@ -47,6 +74,11 @@ pub struct InferenceConfig {
 impl InferenceConfig {
     pub fn new(executable: impl Into<PathBuf>, model: impl Into<PathBuf>) -> Self {
         Self {
+            flint_tools: false,
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            seed: 0,
             executable: executable.into(),
             model: model.into(),
             backend: "cpu".into(),
@@ -56,7 +88,7 @@ impl InferenceConfig {
             file_bytes: 16 << 30,
             input_bytes: FRAME,
             output_bytes: 8 << 20,
-            batch: 32,
+            batch: 256,
             threads: 2,
             startup_timeout: Duration::from_secs(120),
             // Prefill is one wait before the first token. On CPU it can take minutes.
@@ -72,10 +104,16 @@ impl InferenceConfig {
             || !(1..=16384).contains(&self.context)
             || !(1..self.context).contains(&self.output_tokens)
             || !(1..=16 << 30).contains(&self.array_bytes)
-            || !(1..=16 << 30).contains(&self.file_bytes)
+            || !(1..=32 << 30).contains(&self.file_bytes)
+            || !self.temperature.is_finite()
+            || self.temperature < 0.0
+            || !self.top_p.is_finite()
+            || self.top_p <= 0.0
+            || self.top_p > 1.0
+            || self.top_k > 500000
             || !(4..=FRAME).contains(&self.input_bytes)
             || !(1..=8 << 20).contains(&self.output_bytes)
-            || !(1..=32).contains(&self.batch)
+            || !(1..=512).contains(&self.batch)
             || !(1..=64).contains(&self.threads)
             || self.startup_timeout.is_zero()
             || self.prefill_timeout.is_zero()
@@ -123,6 +161,20 @@ impl Worker {
         ] {
             command.arg(name).arg(value.to_string());
         }
+        if c.flint_tools {
+            command.args([
+                "--protocol",
+                "2",
+                "--temperature",
+                &c.temperature.to_string(),
+                "--top-p",
+                &c.top_p.to_string(),
+                "--top-k",
+                &c.top_k.to_string(),
+                "--seed",
+                &c.seed.to_string(),
+            ]);
+        }
         let mut child = command
             .spawn()
             .map_err(|_| refuse("Cannot start local inference. Check the executable path."))?;
@@ -139,10 +191,31 @@ impl Worker {
         if tag == b'E' && data == 3u32.to_le_bytes() {
             return Err(refuse("Local model loading failed. Check the file-byte limit, model format and selected backend."));
         }
-        if tag != b'R' || data != 1u32.to_le_bytes() {
+        if tag != b'R' || data != (if c.flint_tools { 2u32 } else { 1u32 }).to_le_bytes() {
             return Err(broken());
         }
         Ok(worker)
+    }
+    async fn finish(self) -> Result<()> {
+        let Self {
+            mut child,
+            input,
+            output,
+        } = self;
+        drop(input);
+        drop(output);
+        match timeout(Duration::from_secs(5), child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(_)) => Err(refuse(
+                "Local inference worker did not close cleanly. Regeneration refused.",
+            )),
+            _ => {
+                child.kill().await.map_err(|_| broken())?;
+                Err(refuse(
+                    "Local inference worker did not close cleanly. Regeneration refused.",
+                ))
+            }
+        }
     }
     async fn frame(&mut self) -> Result<(u8, Vec<u8>)> {
         let mut head = [0; 5];
@@ -155,7 +228,7 @@ impl Worker {
         let valid = match head[0] {
             b'R' | b'E' => size == 4,
             b'A' => size == 16,
-            b'D' => size == 32,
+            b'D' => size == 32 || size == 37,
             b'T' => (1..=FRAME).contains(&size),
             _ => false,
         };
@@ -185,17 +258,33 @@ impl Inference {
         })
     }
     pub(crate) fn from_env(model: Option<String>) -> Result<Self> {
-        let exe = std::env::var_os("ARK_INFERENCE_EXECUTABLE")
-            .ok_or_else(|| refuse("Set an absolute ARK_INFERENCE_EXECUTABLE path."))?;
         let model = model
             .filter(|m| !m.is_empty())
-            .ok_or_else(|| refuse("Select an absolute local GGUF model path."))?;
-        let mut config = InferenceConfig::new(PathBuf::from(exe), model);
+            .unwrap_or_else(|| "flint".into());
+        let mut config = installed_config(
+            std::env::var_os("ARK_INFERENCE_EXECUTABLE").map(PathBuf::from),
+            &model,
+            installed::resolve,
+        )?;
         if let Some(backend) = std::env::var_os("ARK_INFERENCE_BACKEND") {
             config.backend = backend
                 .into_string()
                 .map_err(|_| refuse("Invalid local inference backend."))?;
         }
+        if let Some(format) = std::env::var_os("ARK_INFERENCE_FORMAT") {
+            let format = format
+                .into_string()
+                .map_err(|_| refuse("Invalid local inference format."))?;
+            config.flint_tools = match format.as_str() {
+                "flint" => true,
+                "text" => false,
+                _ => return Err(refuse("Invalid local inference format.")),
+            };
+        }
+        env_number("ARK_INFERENCE_TEMPERATURE", &mut config.temperature)?;
+        env_number("ARK_INFERENCE_TOP_P", &mut config.top_p)?;
+        env_number("ARK_INFERENCE_TOP_K", &mut config.top_k)?;
+        env_number("ARK_INFERENCE_SEED", &mut config.seed)?;
         env_number("ARK_INFERENCE_CONTEXT", &mut config.context)?;
         env_number("ARK_INFERENCE_OUTPUT_TOKENS", &mut config.output_tokens)?;
         env_number("ARK_INFERENCE_ARRAY_BYTES", &mut config.array_bytes)?;
@@ -214,6 +303,15 @@ impl Inference {
         Self::new(config)
     }
     fn encode(&self, system: &str, messages: &[Message], tools: &[ToolDef]) -> Result<Vec<u8>> {
+        if self.config.flint_tools {
+            let prompt = flint::render(system, messages, tools)?;
+            if prompt.len() > self.config.input_bytes {
+                return Err(refuse(
+                    "Rendered local prompt exceeds the configured byte limit.",
+                ));
+            }
+            return Ok(prompt.into_bytes());
+        }
         if !tools.is_empty()
             || messages.iter().any(|m| {
                 !m.pictures.is_empty()
@@ -273,110 +371,258 @@ impl Inference {
         }
         Ok(data)
     }
-    async fn run(&self, payload: Vec<u8>, sink: TextSink<'_>) -> Result<Completion> {
-        let c = &self.config;
+    async fn run(
+        &self,
+        payload: Vec<u8>,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        sink: TextSink<'_>,
+    ) -> Result<Completion> {
         let mut slot = self
             .worker
             .try_lock()
             .map_err(|_| refuse("Local inference already has an active request."))?;
-        // The slot stays empty during every await. Dropping this future kills an owned worker.
-        // A cached child that exited while idle is replaced, not written to.
         let cached = slot
             .take()
             .and_then(|mut w| matches!(w.child.try_wait(), Ok(None)).then_some(w));
         let mut worker = match cached {
             Some(w) => w,
-            None => Worker::start(c).await?,
+            None => Worker::start(&self.config).await?,
         };
-        let mut head = [b'G', 0, 0, 0, 0];
-        head[1..].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+        let mut config = self.config.clone();
+        let mut prefill_left = config.prefill_timeout;
+        let mut payload = payload;
+        let mut usage = Usage::measured(0, 0);
+        for index in 0..2 {
+            let attempt = request(&mut worker, &config, payload, sink, &mut prefill_left).await?;
+            usage.prompt_tokens = usage
+                .prompt_tokens
+                .checked_add(attempt.prompt)
+                .ok_or_else(broken)?;
+            usage.completion_tokens = usage
+                .completion_tokens
+                .checked_add(attempt.output)
+                .ok_or_else(broken)?;
+            tracing::debug!(
+                attempt = index + 1,
+                prompt_tokens = attempt.prompt,
+                output_tokens = attempt.output,
+                output_bytes = attempt.bytes,
+                stop = attempt.stop,
+                "Local inference physical attempt validated"
+            );
+            let decoded = match attempt.stop {
+                Some(stop) => flint::decode(&attempt.content, stop, tools),
+                None => Ok((attempt.content.clone(), Vec::new())),
+            };
+            match decoded {
+                Ok((content, tool_calls)) => {
+                    tracing::debug!(
+                        attempt = index + 1,
+                        outcome = "accepted",
+                        "Local Flint parser outcome"
+                    );
+                    if index == 0 {
+                        *slot = Some(worker);
+                    } else {
+                        worker.finish().await?;
+                    }
+                    if config.flint_tools && !content.is_empty() {
+                        sink(&content);
+                    }
+                    return Ok(Completion {
+                        content,
+                        tool_calls,
+                        usage,
+                    });
+                }
+                Err(flint::DecodeFailure::FinalFormat { error, answer })
+                    if index == 0
+                        && !tools.is_empty()
+                        && attempt.stop != Some(150018)
+                        && answer.len() <= 8192 =>
+                {
+                    tracing::debug!(
+                        attempt = index + 1,
+                        outcome = "format_rejected",
+                        "Local Flint parser outcome"
+                    );
+                    config.output_tokens = config
+                        .output_tokens
+                        .checked_sub(attempt.output)
+                        .filter(|n| *n > 0)
+                        .ok_or(error)?;
+                    config.output_bytes = config
+                        .output_bytes
+                        .checked_sub(attempt.bytes)
+                        .filter(|n| *n > 0)
+                        .ok_or_else(|| {
+                            refuse("No local output bytes remain for format regeneration.")
+                        })?;
+                    if prefill_left.is_zero() {
+                        return Err(refuse("Local inference prefill deadline exceeded."));
+                    }
+                    let mut feedback = messages.to_vec();
+                    feedback.push(Message::assistant(answer));
+                    feedback.push(Message::user("The previous response was rejected before any action executed. Regenerate only complete XML tool_call blocks using the offered tool names and exact argument names. Do not add prose or fenced JSON. Do not repeat reasoning."));
+                    payload = self.encode(system, &feedback, tools)?;
+                    config.check()?;
+                    tracing::debug!(
+                        remaining_output_tokens = config.output_tokens,
+                        remaining_output_bytes = config.output_bytes,
+                        "Local Flint format regeneration"
+                    );
+                    worker.finish().await?;
+                    worker = Worker::start(&config).await?;
+                }
+                Err(error) => {
+                    let outcome = match &error {
+                        flint::DecodeFailure::Reasoning(_) => "reasoning_refused",
+                        flint::DecodeFailure::FinalFormat { .. } => "format_rejected",
+                    };
+                    tracing::debug!(attempt = index + 1, outcome, "Local Flint parser outcome");
+                    return Err(error.into_error());
+                }
+            }
+        }
+        Err(broken())
+    }
+}
+struct Attempt {
+    content: String,
+    prompt: u32,
+    output: u32,
+    bytes: usize,
+    stop: Option<u32>,
+}
+async fn request(
+    worker: &mut Worker,
+    c: &InferenceConfig,
+    payload: Vec<u8>,
+    sink: TextSink<'_>,
+    prefill_left: &mut Duration,
+) -> Result<Attempt> {
+    let prefill_started = Instant::now();
+    let prefill_deadline = prefill_started + *prefill_left;
+    let mut prefill_elapsed = None;
+    let mut head = [b'G', 0, 0, 0, 0];
+    head[1..].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    timeout_at(prefill_deadline, async {
         worker.input.write_all(&head).await.map_err(|_| broken())?;
         worker
             .input
             .write_all(&payload)
             .await
             .map_err(|_| broken())?;
-        worker.input.flush().await.map_err(|_| broken())?;
-        drop(payload);
-        let mut accepted = false;
-        let mut chunks = 0u64;
-        let mut bytes = 0usize;
-        let mut content = String::new();
-        let mut pending = Vec::new();
-        loop {
-            let (deadline, stage) = if chunks == 0 {
-                (c.prefill_timeout, "prefill")
-            } else {
-                (c.progress_timeout, "progress")
-            };
-            let (tag, data) = timeout(deadline, worker.frame())
+        worker.input.flush().await.map_err(|_| broken())
+    })
+    .await
+    .map_err(|_| refuse("Local inference prefill deadline exceeded."))??;
+    drop(payload);
+    let mut accepted = false;
+    let mut chunks = 0u64;
+    let mut bytes = 0usize;
+    let mut content = String::new();
+    let mut pending = Vec::new();
+    loop {
+        let (tag, data) = if chunks == 0 {
+            timeout_at(prefill_deadline, worker.frame())
                 .await
-                .map_err(|_| refuse(&format!("Local inference {stage} deadline exceeded.")))??;
-            match tag {
-                b'A' if !accepted => {
-                    let logical = integer(&data[..8]);
-                    let capacity = integer(&data[8..16]);
-                    if logical == 0 || capacity < logical || capacity > c.array_bytes {
-                        return Err(broken());
-                    }
-                    accepted = true;
+                .map_err(|_| refuse("Local inference prefill deadline exceeded."))??
+        } else {
+            timeout(c.progress_timeout, worker.frame())
+                .await
+                .map_err(|_| refuse("Local inference progress deadline exceeded."))??
+        };
+        match tag {
+            b'A' if !accepted => {
+                let logical = integer(&data[..8]);
+                let capacity = integer(&data[8..16]);
+                if logical == 0 || capacity < logical || capacity > c.array_bytes {
+                    return Err(broken());
                 }
-                b'T' if accepted && chunks < u64::from(c.output_tokens) => {
-                    bytes = bytes.checked_add(data.len()).ok_or_else(broken)?;
-                    if bytes > c.output_bytes {
-                        return Err(refuse("Local inference exceeded its output byte limit."));
-                    }
-                    chunks += 1;
-                    pending.extend_from_slice(&data);
-                    let valid = match std::str::from_utf8(&pending) {
-                        Ok(_) => pending.len(),
-                        Err(e) if e.error_len().is_none() => e.valid_up_to(),
-                        Err(_) => return Err(broken()),
-                    };
-                    if valid != 0 {
-                        let text = std::str::from_utf8(&pending[..valid]).map_err(|_| broken())?;
-                        content.push_str(text);
+                accepted = true;
+            }
+            b'T' if accepted && chunks < u64::from(c.output_tokens) => {
+                prefill_elapsed.get_or_insert_with(|| prefill_started.elapsed());
+                bytes = bytes.checked_add(data.len()).ok_or_else(broken)?;
+                if bytes > c.output_bytes {
+                    return Err(refuse("Local inference exceeded its output byte limit."));
+                }
+                chunks += 1;
+                pending.extend_from_slice(&data);
+                let valid = match std::str::from_utf8(&pending) {
+                    Ok(_) => pending.len(),
+                    Err(e) if e.error_len().is_none() => e.valid_up_to(),
+                    Err(_) => return Err(broken()),
+                };
+                if valid != 0 {
+                    let text = std::str::from_utf8(&pending[..valid]).map_err(|_| broken())?;
+                    content.push_str(text);
+                    if !c.flint_tools {
                         sink(text);
-                        pending.drain(..valid);
                     }
-                    if pending.len() > 3 {
+                    pending.drain(..valid);
+                }
+                if pending.len() > 3 {
+                    return Err(broken());
+                }
+            }
+            b'D' if accepted => {
+                if data.len() != if c.flint_tools { 37 } else { 32 } {
+                    return Err(broken());
+                }
+                let prompt = integer(&data[..8]);
+                let output = integer(&data[8..16]);
+                if integer(&data[16..24]) != 0
+                    || integer(&data[24..32]) != 0
+                    || !pending.is_empty()
+                    || prompt == 0
+                    || prompt > u64::from(c.context - c.output_tokens)
+                    || output != chunks
+                    || output > u64::from(c.output_tokens)
+                {
+                    return Err(broken());
+                }
+                *prefill_left = prefill_left
+                    .checked_sub(prefill_elapsed.unwrap_or_else(|| prefill_started.elapsed()))
+                    .ok_or_else(|| refuse("Local inference prefill deadline exceeded."))?;
+                let stop = if c.flint_tools {
+                    if data[32] != 1 {
+                        return Err(refuse(
+                            "Local Flint exhausted its output budget. No tool call was accepted.",
+                        ));
+                    }
+                    let stop = u32::from_le_bytes(data[33..37].try_into().map_err(|_| broken())?);
+                    if ![150001, 150003, 150005, 150018].contains(&stop) {
                         return Err(broken());
                     }
-                }
-                b'D' if accepted => {
-                    let prompt = integer(&data[..8]);
-                    let output = integer(&data[8..16]);
-                    if integer(&data[16..24]) != 0
-                        || integer(&data[24..32]) != 0
-                        || !pending.is_empty()
-                        || prompt == 0
-                        || prompt > u64::from(c.context - c.output_tokens)
-                        || output != chunks
-                        || output > u64::from(c.output_tokens)
-                    {
-                        return Err(broken());
-                    }
-                    let completion = Completion {
-                        content,
-                        usage: Usage::measured(prompt as u32, output as u32),
-                        ..Completion::default()
-                    };
-                    *slot = Some(worker);
-                    return Ok(completion);
-                }
-                b'E' => {
-                    let code = u32::from_le_bytes(data.try_into().map_err(|_| broken())?);
-                    return Err(match code {
+                    Some(stop)
+                } else {
+                    None
+                };
+                return Ok(Attempt {
+                    content,
+                    prompt: prompt as u32,
+                    output: output as u32,
+                    bytes,
+                    stop,
+                });
+            }
+            b'E' => {
+                let code = u32::from_le_bytes(data.try_into().map_err(|_| broken())?);
+                return Err(match code {
                         2 => refuse("Local inference refused the request. Check context, array and output limits."),
                         3 => refuse("Local inference computation failed. No completion was accepted."),
                         _ => broken(),
                     });
-                }
-                _ => return Err(broken()),
             }
+            _ => return Err(broken()),
         }
     }
 }
+
 fn env_number<T: std::str::FromStr>(name: &str, output: &mut T) -> Result<()> {
     if let Some(value) = std::env::var_os(name) {
         *output = value
@@ -414,15 +660,22 @@ impl Provider for Inference {
         sink: TextSink<'_>,
     ) -> Result<Completion> {
         let payload = self.encode(system, messages, tools)?;
-        timeout(self.config.call_timeout, self.run(payload, sink))
-            .await
-            .map_err(|_| refuse("Local inference call deadline exceeded."))?
+        timeout(
+            self.config.call_timeout,
+            self.run(payload, system, messages, tools, sink),
+        )
+        .await
+        .map_err(|_| refuse("Local inference call deadline exceeded."))?
     }
     fn context_window(&self) -> Option<u32> {
         Some(self.config.context - self.config.output_tokens)
     }
     fn describe(&self) -> String {
-        "ARK Inference (local text)".into()
+        if self.config.flint_tools {
+            "ARK Inference (local Flint)".into()
+        } else {
+            "ARK Inference (local text)".into()
+        }
     }
     fn model_id(&self) -> String {
         self.config.model.to_string_lossy().into_owned()

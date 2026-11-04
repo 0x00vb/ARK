@@ -19,10 +19,12 @@ impl Fixture {
         let exe = dir.join("worker");
         let model = dir.join(mode);
         std::fs::write(&exe, r#"#!/usr/bin/python3
-import os,sys,struct,time
+import json,os,sys,struct,time
 path=sys.argv[sys.argv.index('--model')+1]
 mode=os.path.basename(path)
 state=path+'.pids'
+with open(path+'.argv','w') as f:json.dump(sys.argv[1:],f)
+with open(path+'.argvs','a') as f:f.write(json.dumps(sys.argv[1:])+'\n')
 with open(state,'a') as f:f.write(str(os.getpid())+'\n')
 first=len(open(state).readlines())==1
 bad=mode if first else 'good'
@@ -32,20 +34,48 @@ def park():time.sleep(3600)
 def stage(name):
  with open(path+'.stage','w') as f:f.write(name)
 if bad=='startup':stage('startup');park()
+if mode=='flint-recover-startup' and not first:stage('reload');park()
 if bad=='stderr':os.write(2,b'x'*2097152)
-frame(b'R',struct.pack('<I',2 if bad=='version' else 1))
+frame(b'R',struct.pack('<I',2 if bad=='version' or mode.startswith('flint-') else 1))
 if bad=='write':stage('write');park()
 while True:
  head=sys.stdin.buffer.read(5)
- if not head:break
+ if not head:
+  if mode=='flint-recover-eof':stage('eof');park()
+  with open(path+'.closed','a') as f:f.write(str(os.getpid())+'\n')
+  break
  n=struct.unpack('<I',head[1:])[0]
- if len(sys.stdin.buffer.read(n))!=n:break
+ payload=sys.stdin.buffer.read(n)
+ if len(payload)!=n:break
+ with open(path+'.payloads','a') as f:f.write(json.dumps(payload.decode('utf-8','replace'))+'\n')
  if bad=='crash':sys.exit(1)
  if bad=='order':frame(b'T',b'x');park()
  if bad=='huge':sys.stdout.buffer.write(b'T'+struct.pack('<I',1048577));sys.stdout.buffer.flush();park()
  if bad=='error':frame(b'E',struct.pack('<I',99));park()
+ if mode=='flint-recover-prefill' or (mode=='flint-recover-zero' and not first):time.sleep(.09)
  frame(b'A',struct.pack('<QQ',100,1<<40 if bad=='capacity' else 100))
+ if mode=='flint-accept-late':time.sleep(.12)
  if bad=='prefill':stage('prefill');park()
+ if mode.startswith('flint-'):
+  if mode=='flint-block':stage('prefill');park()
+  answer=b'<think>Check.</think><tool_call>file.read<arg_key>path</arg_key><arg_value>src/lib.rs</arg_value></tool_call>'
+  stop=150005
+  if mode.startswith('flint-recover') and (first or mode=='flint-recover-twice'):
+   answer=b'<think>PRIVATE reasoning</think>```json {"name":"file.read"} ```'
+   stop=150005
+  if mode=='flint-recover-zero' and first:answer=b''
+  if mode=='flint-recover-bytes' and first:answer=b'x'*4096
+  if mode=='flint-recover-counter' and first:answer=b'bad'
+  if mode=='flint-recover-context' and not first:
+   frame(b'E',struct.pack('<I',2));continue
+  if mode=='flint-next-user-final':answer=b'<think>Check.</think>Flint is running locally.';stop=150003
+  if mode=='flint-reasoning':answer=b'<think>unfinished '+answer
+  if mode=='flint-partial':answer=answer[:-3]
+  if mode=='flint-accept-late':time.sleep(.12)
+  if mode=='flint-recover-zero' and first:time.sleep(.09)
+  if answer:frame(b'T',answer)
+  frame(b'D',struct.pack('<QQQQBI',12,1 if answer else 0,1 if mode=='flint-recover-counter' else 0,0,0 if mode=='flint-limit' else 1,0xffffffff if mode=='flint-limit' else stop))
+  continue
  if bad=='partial':sys.stdout.buffer.write(b'T\x01');sys.stdout.buffer.flush();park()
  if bad=='empty':frame(b'T',b'');park()
  if bad=='invalid':frame(b'T',b'\xff');park()
@@ -101,6 +131,52 @@ fn no_python() -> bool {
     }
     !ok
 }
+fn assert_batch_arguments(model: &std::path::Path, batch: u32) {
+    let args: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(model.with_extension("argv")).unwrap())
+            .unwrap();
+    for (name, value) in [("--batch", batch), ("--threads", 2)] {
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == name).count(), 1);
+        let index = args.iter().position(|arg| arg == name).unwrap();
+        assert_eq!(args[index + 1], value.to_string());
+    }
+}
+
+#[tokio::test]
+async fn batch_capacity_is_forwarded_and_reuses_one_worker() {
+    if no_python() {
+        return;
+    }
+    for batch in [1, 32, 256, 512] {
+        let fixture = Fixture::new("good");
+        let mut config = fixture.config();
+        assert_eq!(config.batch, 256);
+        config.batch = batch;
+        let provider = Inference::new(config).unwrap();
+        for _ in 0..2 {
+            let completion = provider
+                .complete("", &[Message::user("hello")], &[])
+                .await
+                .unwrap();
+            assert_eq!(completion.content, "€");
+        }
+        assert_batch_arguments(&fixture.model, batch);
+        assert_eq!(fixture.pids().len(), 1);
+    }
+}
+
+#[test]
+fn invalid_batch_capacity_is_refused_before_spawn() {
+    let fixture = Fixture::new("good");
+    for batch in [0, 513] {
+        let mut config = fixture.config();
+        config.batch = batch;
+        permanent(Inference::new(config));
+    }
+    assert!(fixture.pids().is_empty());
+    assert!(!fixture.model.with_extension("argv").exists());
+}
+
 /// Waits until the process is gone or a zombie. `kill -0` succeeds on a zombie, and this child
 /// stays one until the provider reaps it.
 async fn exited(pid: u32) {
@@ -291,6 +367,7 @@ async fn cancellation_during_startup_write_prefill_and_terminal_restarts() {
         let mut c = fixture.config();
         c.prefill_timeout = Duration::from_secs(2);
         c.progress_timeout = Duration::from_secs(2);
+        let stage_timeout = c.startup_timeout;
         let provider = Inference::new(c).unwrap();
         let text = if mode == "write" {
             "x".repeat(1000000)
@@ -314,7 +391,7 @@ async fn cancellation_during_startup_write_prefill_and_terminal_restarts() {
                 }
             };
             tokio::select! {
-                result = timeout(Duration::from_secs(2), observed) => { result.expect("cancellation stage not observed"); },
+                result = timeout(stage_timeout, observed) => { result.unwrap_or_else(|error| panic!("cancellation stage {mode} not observed: {error}")); },
                 result = &mut call => panic!("worker completed before cancellation stage {mode}: {result:?}"),
             }
             assert!(
@@ -446,11 +523,11 @@ async fn unsupported_or_oversized_input_never_starts_a_child() {
     permanent(Inference::new(c));
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "isolated environment helper, invoked by factory_environment_is_validated"]
-fn factory_environment_child() {
+async fn factory_environment_child() {
     let model = std::env::var("ARK_MODEL").unwrap();
-    let result = ark_model::build("inference", Some(model));
+    let result = ark_model::build("inference", Some(model.clone()));
     if std::env::var_os("ARK_INFERENCE_EXPECT_INVALID").is_some() {
         permanent(result);
     } else {
@@ -458,23 +535,44 @@ fn factory_environment_child() {
         assert_eq!(provider.context_window(), Some(124));
         assert_eq!(provider.describe(), "ARK Inference (local text)");
         assert!(!provider.reads_pictures());
+        let completion = provider
+            .complete("", &[Message::user("hello")], &[])
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "€");
+        let batch = std::env::var("ARK_INFERENCE_EXPECT_BATCH")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_batch_arguments(std::path::Path::new(&model), batch);
     }
 }
 #[test]
 fn factory_environment_is_validated() {
-    let fixture = Fixture::new("good");
-    for (key, value) in [
-        ("", ""),
-        ("ARK_INFERENCE_ARRAY_BYTES", "0"),
-        ("ARK_INFERENCE_CONTEXT", "not-a-number"),
-        ("ARK_INFERENCE_BACKEND", "cuda"),
-        ("ARK_INFERENCE_EXECUTABLE", "relative"),
-        ("ARK_INFERENCE_THREADS", "65"),
-        ("ARK_INFERENCE_OUTPUT_TOKENS", "128"),
-        ("ARK_INFERENCE_PROGRESS_SECONDS", "0"),
-        ("ARK_INFERENCE_PREFILL_SECONDS", "0"),
-        ("ARK_INFERENCE_CALL_SECONDS", "soon"),
+    let python_missing = no_python();
+    for (key, value, expected_batch) in [
+        ("", "", Some(256)),
+        ("ARK_INFERENCE_BATCH", "1", Some(1)),
+        ("ARK_INFERENCE_BATCH", "32", Some(32)),
+        ("ARK_INFERENCE_BATCH", "256", Some(256)),
+        ("ARK_INFERENCE_BATCH", "512", Some(512)),
+        ("ARK_INFERENCE_BATCH", "0", None),
+        ("ARK_INFERENCE_BATCH", "513", None),
+        ("ARK_INFERENCE_BATCH", "not-a-number", None),
+        ("ARK_INFERENCE_ARRAY_BYTES", "0", None),
+        ("ARK_INFERENCE_CONTEXT", "not-a-number", None),
+        ("ARK_INFERENCE_BACKEND", "cuda", None),
+        ("ARK_INFERENCE_EXECUTABLE", "relative", None),
+        ("ARK_INFERENCE_THREADS", "65", None),
+        ("ARK_INFERENCE_OUTPUT_TOKENS", "128", None),
+        ("ARK_INFERENCE_PROGRESS_SECONDS", "0", None),
+        ("ARK_INFERENCE_PREFILL_SECONDS", "0", None),
+        ("ARK_INFERENCE_CALL_SECONDS", "soon", None),
     ] {
+        if python_missing && expected_batch.is_some() {
+            continue;
+        }
+        let fixture = Fixture::new("good");
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
         command
             .env_clear()
@@ -484,9 +582,12 @@ fn factory_environment_is_validated() {
             .env("ARK_INFERENCE_CONTEXT", "128")
             .env("ARK_INFERENCE_OUTPUT_TOKENS", "4");
         if !key.is_empty() {
-            command
-                .env(key, value)
-                .env("ARK_INFERENCE_EXPECT_INVALID", "1");
+            command.env(key, value);
+        }
+        if let Some(batch) = expected_batch {
+            command.env("ARK_INFERENCE_EXPECT_BATCH", batch.to_string());
+        } else {
+            command.env("ARK_INFERENCE_EXPECT_INVALID", "1");
         }
         let result = command.output().unwrap();
         assert!(
@@ -494,6 +595,382 @@ fn factory_environment_is_validated() {
             "factory child failed: {}",
             String::from_utf8_lossy(&result.stdout)
         );
+        if expected_batch.is_some() {
+            assert_eq!(fixture.pids().len(), 1);
+        } else {
+            assert!(fixture.pids().is_empty());
+            assert!(!fixture.model.with_extension("argv").exists());
+        }
     }
-    assert!(fixture.pids().is_empty());
+}
+
+#[tokio::test]
+async fn flint_next_user_final_streams_without_format_regeneration() {
+    if no_python() {
+        return;
+    }
+    for tools in [Vec::new(), recovery_tools().to_vec()] {
+        let fixture = Fixture::new("flint-next-user-final");
+        let provider = Inference::new(recovery_config(&fixture)).unwrap();
+        let streamed = Mutex::new(String::new());
+        let completion = provider
+            .complete_streaming("", &[Message::user("Reply")], &tools, &|text| {
+                streamed.lock().unwrap().push_str(text)
+            })
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "Flint is running locally.");
+        assert_eq!(*streamed.lock().unwrap(), completion.content);
+        assert!(completion.tool_calls.is_empty());
+        assert_eq!(fixture.pids().len(), 1);
+        drop(provider);
+        dead(fixture.pids()[0]).await;
+    }
+}
+
+#[tokio::test]
+async fn flint_tools_handoff_reuses_and_rejects_partial_output() {
+    if no_python() {
+        return;
+    }
+    let tools = [ToolDef {
+        name: "file.read".into(),
+        description: "Read".into(),
+        parameters: serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
+    }];
+    for mode in [
+        "flint-good",
+        "flint-limit",
+        "flint-reasoning",
+        "flint-partial",
+    ] {
+        let fixture = Fixture::new(mode);
+        let mut config = fixture.config();
+        config.flint_tools = true;
+        config.file_bytes = 32 << 30;
+        config.output_bytes = 4096;
+        let provider = Inference::new(config).unwrap();
+        let streamed = Mutex::new(String::new());
+        let result = provider
+            .complete_streaming("", &[Message::user("Read the file")], &tools, &|s| {
+                streamed.lock().unwrap().push_str(s)
+            })
+            .await;
+        assert!(streamed.lock().unwrap().is_empty());
+        if mode == "flint-good" {
+            let completion = result.unwrap();
+            assert_eq!(completion.tool_calls.len(), 1);
+            assert_eq!(completion.tool_calls[0].arguments["path"], "src/lib.rs");
+            provider
+                .complete("", &[Message::user("Again")], &tools)
+                .await
+                .unwrap();
+            assert_eq!(fixture.pids().len(), 1);
+        } else {
+            assert!(result.is_err(), "{mode}");
+        }
+        drop(provider);
+        for pid in fixture.pids() {
+            dead(pid).await;
+        }
+    }
+}
+
+fn recovery_tools() -> [ToolDef; 1] {
+    [ToolDef {
+        name: "file.read".into(),
+        description: "Read".into(),
+        parameters: serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
+    }]
+}
+fn recovery_config(fixture: &Fixture) -> InferenceConfig {
+    let mut c = fixture.config();
+    c.flint_tools = true;
+    c.output_bytes = 4096;
+    c.prefill_timeout = Duration::from_secs(2);
+    c
+}
+#[tokio::test]
+async fn flint_regenerates_once_with_remaining_budgets_and_no_rejected_stream() {
+    if no_python() {
+        return;
+    }
+    let fixture = Fixture::new("flint-recover");
+    let provider = Inference::new(recovery_config(&fixture)).unwrap();
+    let streamed = Mutex::new(String::new());
+    let completion = provider
+        .complete_streaming("", &[Message::user("Read")], &recovery_tools(), &|s| {
+            streamed.lock().unwrap().push_str(s)
+        })
+        .await
+        .unwrap();
+    assert_eq!(completion.tool_calls[0].arguments["path"], "src/lib.rs");
+    assert_eq!(completion.usage.prompt_tokens, 24);
+    assert_eq!(completion.usage.completion_tokens, 2);
+    assert!(streamed.lock().unwrap().is_empty());
+    let args: Vec<Vec<String>> = std::fs::read_to_string(fixture.model.with_extension("argvs"))
+        .unwrap()
+        .lines()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    assert_eq!(args.len(), 2);
+    let at = args[1].iter().position(|s| s == "--tokens").unwrap();
+    assert_eq!(args[1][at + 1], "3");
+    let at = args[1].iter().position(|s| s == "--output-bytes").unwrap();
+    assert_eq!(
+        args[1][at + 1].parse::<usize>().unwrap(),
+        4096 - b"<think>PRIVATE reasoning</think>```json {\"name\":\"file.read\"} ```".len()
+    );
+    let payloads: Vec<String> = std::fs::read_to_string(fixture.model.with_extension("payloads"))
+        .unwrap()
+        .lines()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    assert!(!payloads[1].contains("PRIVATE reasoning"));
+    assert!(payloads[1].contains("Regenerate only complete XML"));
+    for pid in fixture.pids() {
+        dead(pid).await;
+    }
+    let closed = std::fs::read_to_string(fixture.model.with_extension("closed")).unwrap();
+    assert_eq!(closed.lines().count(), 2);
+    provider
+        .complete("", &[Message::user("Read again")], &recovery_tools())
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.pids().len(),
+        3,
+        "recovery worker must never enter the warm pool"
+    );
+    drop(provider);
+    for pid in fixture.pids() {
+        dead(pid).await;
+    }
+}
+#[tokio::test]
+async fn flint_recovery_refusals_never_publish_or_spawn_a_third_attempt() {
+    if no_python() {
+        return;
+    }
+    for (mode, workers) in [
+        ("flint-recover-twice", 2),
+        ("flint-recover-bytes", 1),
+        ("flint-recover-counter", 1),
+        ("flint-reasoning", 1),
+        ("flint-limit", 1),
+        ("flint-recover-context", 2),
+    ] {
+        let fixture = Fixture::new(mode);
+        let provider = Inference::new(recovery_config(&fixture)).unwrap();
+        let streamed = Mutex::new(String::new());
+        assert!(
+            provider
+                .complete_streaming("", &[Message::user("Read")], &recovery_tools(), &|s| {
+                    streamed.lock().unwrap().push_str(s)
+                })
+                .await
+                .is_err(),
+            "{mode}"
+        );
+        assert!(streamed.lock().unwrap().is_empty(), "{mode}");
+        assert_eq!(fixture.pids().len(), workers, "{mode}");
+        drop(provider);
+        for pid in fixture.pids() {
+            dead(pid).await;
+        }
+    }
+}
+#[tokio::test]
+async fn flint_acceptance_frame_does_not_restart_prefill_deadline() {
+    if no_python() {
+        return;
+    }
+    let fixture = Fixture::new("flint-accept-late");
+    let mut c = recovery_config(&fixture);
+    c.prefill_timeout = Duration::from_millis(200);
+    let provider = Inference::new(c).unwrap();
+    let error = provider
+        .complete("", &[Message::user("Read")], &recovery_tools())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("prefill deadline"), "{error}");
+    assert_eq!(fixture.pids().len(), 1);
+    drop(provider);
+    dead(fixture.pids()[0]).await;
+}
+#[tokio::test]
+async fn flint_recovery_prefills_share_the_original_deadline() {
+    if no_python() {
+        return;
+    }
+    for mode in ["flint-recover-prefill", "flint-recover-zero"] {
+        let fixture = Fixture::new(mode);
+        let mut c = recovery_config(&fixture);
+        c.prefill_timeout = Duration::from_millis(150);
+        let provider = Inference::new(c).unwrap();
+        let result = provider
+            .complete("", &[Message::user("Read")], &recovery_tools())
+            .await;
+        assert!(result.unwrap_err().to_string().contains("prefill deadline"));
+        drop(provider);
+        for pid in fixture.pids() {
+            dead(pid).await;
+        }
+    }
+}
+#[tokio::test]
+async fn flint_recovery_eof_and_reload_obey_the_original_call_deadline() {
+    if no_python() {
+        return;
+    }
+    for mode in ["flint-recover-eof", "flint-recover-startup"] {
+        let fixture = Fixture::new(mode);
+        let mut c = recovery_config(&fixture);
+        c.call_timeout = Duration::from_secs(3);
+        let provider = Inference::new(c).unwrap();
+        let messages = [Message::user("Read")];
+        let tools = recovery_tools();
+        let error = timeout(
+            Duration::from_secs(5),
+            provider.complete("", &messages, &tools),
+        )
+        .await
+        .expect("outer call deadline did not bound startup and recovery")
+        .unwrap_err();
+        assert!(error.to_string().contains("call deadline"), "{error}");
+        assert!(
+            fixture.pids().len() <= 2,
+            "a logical call spawned more than two attempts"
+        );
+        drop(provider);
+        for pid in fixture.pids() {
+            dead(pid).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn flint_feedback_expansion_is_checked_before_replacement() {
+    if no_python() {
+        return;
+    }
+    let probe = Fixture::new("flint-good");
+    let provider = Inference::new(recovery_config(&probe)).unwrap();
+    provider
+        .complete("", &[Message::user("Read")], &recovery_tools())
+        .await
+        .unwrap();
+    drop(provider);
+    dead(probe.pids()[0]).await;
+    let raw = std::fs::read_to_string(probe.model.with_extension("payloads")).unwrap();
+    let payload: String = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+    let fixture = Fixture::new("flint-recover");
+    let mut config = recovery_config(&fixture);
+    config.input_bytes = payload.len();
+    let provider = Inference::new(config).unwrap();
+    let error = provider
+        .complete("", &[Message::user("Read")], &recovery_tools())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("byte limit"), "{error}");
+    assert_eq!(fixture.pids().len(), 1);
+    drop(provider);
+    dead(fixture.pids()[0]).await;
+}
+#[tokio::test]
+async fn cancelling_format_regeneration_evicts_and_reaps_the_active_worker() {
+    if no_python() {
+        return;
+    }
+    let fixture = Fixture::new("flint-recover-startup");
+    let provider = Inference::new(recovery_config(&fixture)).unwrap();
+    let tools = recovery_tools();
+    let messages = [Message::user("Read")];
+    {
+        let call = provider.complete("", &messages, &tools);
+        tokio::pin!(call);
+        let observed = async {
+            loop {
+                if std::fs::read_to_string(fixture.model.with_extension("stage"))
+                    .ok()
+                    .as_deref()
+                    == Some("reload")
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::select! {
+            result=timeout(Duration::from_secs(10), observed)=>result.unwrap(),
+            result=&mut call=>panic!("completed before cancellation: {result:?}"),
+        }
+    }
+    assert_eq!(fixture.pids().len(), 2);
+    for pid in fixture.pids() {
+        dead(pid).await;
+    }
+}
+
+#[tokio::test]
+async fn flint_normal_stop_with_no_tokens_left_and_expanded_message_count_refuse() {
+    if no_python() {
+        return;
+    }
+    for message_limit in [false, true] {
+        let fixture = Fixture::new("flint-recover");
+        let mut config = recovery_config(&fixture);
+        if !message_limit {
+            config.output_tokens = 1;
+        }
+        let messages = vec![Message::user("Read"); if message_limit { 1023 } else { 1 }];
+        let provider = Inference::new(config).unwrap();
+        let error = provider
+            .complete("", &messages, &recovery_tools())
+            .await
+            .unwrap_err();
+        if message_limit {
+            assert!(error.to_string().contains("message count"), "{error}");
+        }
+        assert_eq!(fixture.pids().len(), 1);
+        drop(provider);
+        dead(fixture.pids()[0]).await;
+    }
+}
+#[tokio::test]
+async fn cancelling_first_worker_eof_closure_allows_a_fresh_later_call() {
+    if no_python() {
+        return;
+    }
+    let fixture = Fixture::new("flint-recover-eof");
+    let provider = Inference::new(recovery_config(&fixture)).unwrap();
+    let tools = recovery_tools();
+    let messages = [Message::user("Read")];
+    {
+        let call = provider.complete("", &messages, &tools);
+        tokio::pin!(call);
+        let observed = async {
+            loop {
+                if std::fs::read_to_string(fixture.model.with_extension("stage"))
+                    .ok()
+                    .as_deref()
+                    == Some("eof")
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::select! {
+            result=timeout(Duration::from_secs(10), observed)=>result.unwrap(),
+            result=&mut call=>panic!("completed before cancellation: {result:?}"),
+        }
+    }
+    assert_eq!(fixture.pids().len(), 1);
+    dead(fixture.pids()[0]).await;
+    let completion = provider.complete("", &messages, &tools).await.unwrap();
+    assert_eq!(completion.tool_calls.len(), 1);
+    assert_eq!(fixture.pids().len(), 2);
+    drop(provider);
+    dead(fixture.pids()[1]).await;
 }

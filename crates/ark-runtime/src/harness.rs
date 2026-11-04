@@ -280,6 +280,103 @@ pub struct Harness {
     execution_mode: ExecutionMode,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TurnTools {
+    Enabled,
+    Disabled,
+}
+
+const TOOL_FREE_RULE: &str = "Do not call tools. For a simple exact-output request, answer directly with only the requested content; add no explanation or tool-use instructions.";
+
+struct TurnInput<'a> {
+    raw: &'a str,
+    task_end: usize,
+    control_start: Option<usize>,
+    tools: TurnTools,
+}
+
+impl<'a> TurnInput<'a> {
+    fn unrestricted(raw: &'a str) -> Self {
+        Self {
+            raw,
+            task_end: raw.len(),
+            control_start: None,
+            tools: TurnTools::Enabled,
+        }
+    }
+
+    fn parse(question: &'a str) -> Self {
+        const DIRECTIVE: &str = "do not use tools.";
+        if question.contains(['\n', '\r', '\'', '"', '`', '“', '”', '‘', '’']) {
+            return Self::unrestricted(question);
+        }
+        let lower = question.trim().to_ascii_lowercase();
+        let Some(task) = lower.strip_suffix(DIRECTIVE) else {
+            return Self::unrestricted(question);
+        };
+        if !task.is_empty()
+            && (!task.ends_with(char::is_whitespace) || !task.trim_end().ends_with(['.', '!', '?']))
+        {
+            return Self::unrestricted(question);
+        }
+        let conflicting = task.split(|c: char| !c.is_alphanumeric()).any(|word| {
+            matches!(
+                word,
+                "tool"
+                    | "tools"
+                    | "ignore"
+                    | "disregard"
+                    | "except"
+                    | "unless"
+                    | "instead"
+                    | "but"
+                    | "however"
+                    | "not"
+                    | "never"
+                    | "negate"
+                    | "negated"
+                    | "quote"
+                    | "quoted"
+                    | "example"
+            )
+        });
+        if conflicting {
+            Self::unrestricted(question)
+        } else {
+            let control_start = question.trim_end().len() - DIRECTIVE.len();
+            Self {
+                raw: question,
+                task_end: question[..control_start].trim_end().len(),
+                control_start: Some(control_start),
+                tools: TurnTools::Disabled,
+            }
+        }
+    }
+
+    fn task(&self) -> &'a str {
+        if self.control_start.is_some() && !self.raw[..self.task_end].trim().is_empty() {
+            &self.raw[..self.task_end]
+        } else {
+            self.raw
+        }
+    }
+}
+
+impl TurnTools {
+    fn enabled(self) -> bool {
+        self == Self::Enabled
+    }
+
+    fn check(self, completion: &ark_model::Completion) -> Result<(), AgentError> {
+        if !self.enabled() && !completion.tool_calls.is_empty() {
+            return Err(AgentError::Provider(
+                "The model requested a tool during an explicitly tool-free turn.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// The pieces of the first user message, kept separate so the context report can attribute
 /// tokens to each.
 struct FirstTurn {
@@ -533,6 +630,28 @@ impl Harness {
         }
     }
 
+    fn current_goal(&self, question: &str) -> String {
+        self.goal
+            .as_ref()
+            .map(|goal| goal.request.clone())
+            .filter(|request| !request.trim().is_empty())
+            .unwrap_or_else(|| question.to_string())
+    }
+
+    fn model_digest(&self, state: &ResearchState, input: &TurnInput<'_>, items: usize) -> String {
+        let inherited = self
+            .goal
+            .as_ref()
+            .is_some_and(|goal| !goal.request.trim().is_empty());
+        if !inherited && state.goal == input.raw && input.task() != input.raw {
+            let mut current = state.clone();
+            current.goal = input.task().to_string();
+            current.digest(items)
+        } else {
+            state.digest(items)
+        }
+    }
+
     fn rules_text(&self) -> Option<String> {
         self.rules
             .as_ref()
@@ -562,15 +681,12 @@ impl Harness {
         // A turn that continues an unfinished one works on that one's goal, not on its own
         // words ("continue"), for everything chosen from the task (ADR 0050).
         let goal_text = self.goal_query(question);
-        state.goal = self
-            .goal
-            .as_ref()
-            .map(|g| g.request.clone())
-            .filter(|r| !r.trim().is_empty())
-            .unwrap_or_else(|| question.to_string());
+        state.goal = self.current_goal(question);
         state.touch();
         engine.store.put_research_state(project, &state)?;
         let budget = self.request_budget();
+        let input = TurnInput::parse(question);
+        let turn_tools = input.tools;
 
         let trivial = classify_trivial(&goal_text, &profile.investigation_markers);
         on_event(HarnessEvent::Classified { trivial });
@@ -586,7 +702,7 @@ impl Harness {
         // Plan (non-trivial only, when enabled).
         if !trivial && self.planner {
             match self
-                .cancellable(self.draft_plan(profile, question, &mut metrics, &mut on_event))
+                .cancellable(self.draft_plan(profile, &input, &mut metrics, &mut on_event))
                 .await
             {
                 None => cancelled = true,
@@ -601,11 +717,15 @@ impl Harness {
             }
         }
 
-        let sys = self.system_prompt(engine, profile, project).await?;
+        let sys = self
+            .system_prompt(engine, profile, project, turn_tools)
+            .await?;
         let system = sys.render();
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: self.execution_mode != ExecutionMode::Plan && acquisition_on(profile),
+            acquisition: turn_tools.enabled()
+                && self.execution_mode != ExecutionMode::Plan
+                && acquisition_on(profile),
             present: self.presentation,
         };
 
@@ -614,15 +734,23 @@ impl Harness {
         // Loaded action schemas: the profile's core set (present in the registry), then each
         // on-demand load appended. The order never changes within a turn, so loading one more
         // action keeps every earlier tool definition in the cacheable prefix.
-        let mut loaded: Vec<String> = core_loaded(engine, profile)
-            .into_iter()
-            .filter(|name| self.action_available(engine, name))
-            .collect();
-        for name in
-            catalog::matching_actions(&engine.registry, &self.with_focus(&goal_text), self.preload)
-        {
-            if self.action_available(engine, &name) && !loaded.contains(&name) {
-                loaded.push(name);
+        let mut loaded: Vec<String> = if turn_tools.enabled() {
+            core_loaded(engine, profile)
+                .into_iter()
+                .filter(|name| self.action_available(engine, name))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if turn_tools.enabled() {
+            for name in catalog::matching_actions(
+                &engine.registry,
+                &self.with_focus(&goal_text),
+                self.preload,
+            ) {
+                if self.action_available(engine, &name) && !loaded.contains(&name) {
+                    loaded.push(name);
+                }
             }
         }
 
@@ -632,11 +760,14 @@ impl Harness {
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
-            can_add: (self.execution_mode != ExecutionMode::Plan)
+            can_add: (turn_tools.enabled() && self.execution_mode != ExecutionMode::Plan)
                 .then(|| can_add(profile))
                 .flatten(),
-            ready: self.ready_block(engine, &loaded),
-            task: self.task_text(question, budget),
+            ready: turn_tools
+                .enabled()
+                .then(|| self.ready_block(engine, &loaded))
+                .flatten(),
+            task: self.task_text(&input, budget),
         };
         let first_text = first.render();
         // The first message is the task frame: pinned, so no number of steps drops the task
@@ -739,14 +870,18 @@ impl Harness {
             let refreshed = first.render();
             let first_tokens = estimate_tokens(&refreshed) + 4;
             ws.pin(Message::user(refreshed));
-            let state_digest = state.digest(STATE_DIGEST_ITEMS);
+            let state_digest = self.model_digest(&state, &input, STATE_DIGEST_ITEMS);
             let tail = state_message_with(&state_digest, &steered);
             let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
             let tail_tokens = WorkingSet::message_tokens(&tail);
             messages.push(tail);
             metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
 
-            let tools = self.tool_set(engine, &loaded, meta_cfg);
+            let tools = if turn_tools.enabled() {
+                self.tool_set(engine, &loaded, meta_cfg)
+            } else {
+                Vec::new()
+            };
             let mut report = self.report(
                 profile,
                 &sys,
@@ -818,6 +953,7 @@ impl Harness {
                 cancelled = true;
                 break;
             };
+            turn_tools.check(&completion)?;
             repairs_in_row = 0;
 
             // A full answer beside reads of what this turn changed is a check of its own work.
@@ -1257,6 +1393,7 @@ impl Harness {
                     profile,
                     &mut ws,
                     &sys,
+                    &input,
                     (&first, first_tokens, &retrieved, loaded.len(), steps_taken),
                     &state,
                     &mut metrics,
@@ -1320,6 +1457,7 @@ impl Harness {
                     profile,
                     &system,
                     &state,
+                    &input,
                     &answer,
                     &detail,
                     &mut metrics,
@@ -1392,19 +1530,29 @@ impl Harness {
         task: &str,
     ) -> Result<ContextReport, AgentError> {
         let query = self.goal_query(task);
-        let state = engine
+        let input = TurnInput::parse(task);
+        let turn_tools = input.tools;
+        let mut state = engine
             .store
             .get_research_state(project)?
             .unwrap_or_default();
-        let sys = self.system_prompt(engine, profile, project).await?;
+        if !turn_tools.enabled() {
+            state.goal = self.current_goal(task);
+        }
+        let sys = self
+            .system_prompt(engine, profile, project, turn_tools)
+            .await?;
         let system = sys.render();
         let wsctx = self.build_workspace_context(engine, project)?;
-        let mut loaded = core_loaded(engine, profile);
-        for name in
-            catalog::matching_actions(&engine.registry, &self.with_focus(&query), self.preload)
-        {
-            if !loaded.contains(&name) {
-                loaded.push(name);
+        let mut loaded = Vec::new();
+        if turn_tools.enabled() {
+            loaded = core_loaded(engine, profile);
+            for name in
+                catalog::matching_actions(&engine.registry, &self.with_focus(&query), self.preload)
+            {
+                if !loaded.contains(&name) {
+                    loaded.push(name);
+                }
             }
         }
         let first = FirstTurn {
@@ -1413,23 +1561,32 @@ impl Harness {
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
-            can_add: can_add(profile),
-            ready: self.ready_block(engine, &loaded),
-            task: self.task_text(task, self.request_budget()),
+            can_add: turn_tools.enabled().then(|| can_add(profile)).flatten(),
+            ready: turn_tools
+                .enabled()
+                .then(|| self.ready_block(engine, &loaded))
+                .flatten(),
+            task: self.task_text(&input, self.request_budget()),
         };
         let first_text = first.render();
         let first_tokens = estimate_tokens(&first_text) + 4;
         let mut ws = WorkingSet::new(self.request_budget());
         ws.pin(Message::user(first_text));
-        let state_digest = state.digest(STATE_DIGEST_ITEMS);
+        let state_digest = self.model_digest(&state, &input, STATE_DIGEST_ITEMS);
         let tail = state_message(&state_digest);
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: self.execution_mode != ExecutionMode::Plan && acquisition_on(profile),
+            acquisition: turn_tools.enabled()
+                && self.execution_mode != ExecutionMode::Plan
+                && acquisition_on(profile),
             present: self.presentation,
         };
-        let tools = self.tool_set(engine, &loaded, meta_cfg);
+        let tools = if turn_tools.enabled() {
+            self.tool_set(engine, &loaded, meta_cfg)
+        } else {
+            Vec::new()
+        };
         Ok(self.report(
             profile,
             &sys,
@@ -1689,10 +1846,25 @@ impl Harness {
     /// The task the model gets: the question, or for a turn that continues an unfinished one,
     /// its goal with what the person said since (the question last). The goal's request is
     /// clipped to fit the budget: `budget / 2` characters, 1,000 to 4,000.
-    fn task_text(&self, question: &str, budget: u32) -> String {
+    fn task_text(&self, input: &TurnInput<'_>, budget: u32) -> String {
         let task = match &self.goal {
-            Some(g) => g.render((budget as usize / 2).clamp(1_000, 4_000)),
-            None => question.to_string(),
+            Some(goal) if input.task() != input.raw => {
+                let mut current = goal.clone();
+                let mut original = crate::session::Goal::default();
+                original.then(input.raw);
+                if current.follow_ups.last() == original.follow_ups.last() {
+                    let mut normalized = crate::session::Goal::default();
+                    normalized.then(input.task());
+                    if let (Some(latest), Some(task)) =
+                        (current.follow_ups.last_mut(), normalized.follow_ups.pop())
+                    {
+                        *latest = task;
+                    }
+                }
+                current.render((budget as usize / 2).clamp(1_000, 4_000))
+            }
+            Some(goal) => goal.render((budget as usize / 2).clamp(1_000, 4_000)),
+            None => input.task().to_string(),
         };
         match self.execution_mode {
             ExecutionMode::Plan => format!(
@@ -2172,12 +2344,17 @@ impl Harness {
     async fn draft_plan(
         &self,
         profile: &AgentProfile,
-        question: &str,
+        input: &TurnInput<'_>,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Option<Vec<String>> {
-        let msgs = [Message::user(format!("Goal: {question}"))];
-        let instructions = estimate_tokens(&profile.prompts.plan_system);
+        let msgs = [Message::user(format!("Goal: {}", input.task()))];
+        let system = if input.tools.enabled() {
+            profile.prompts.plan_system.clone()
+        } else {
+            format!("{}\n\n{TOOL_FREE_RULE}", profile.prompts.plan_system)
+        };
+        let instructions = estimate_tokens(&system);
         let task = WorkingSet::message_tokens(&msgs[0]);
         on_event(HarnessEvent::Context {
             report: ContextReport {
@@ -2192,7 +2369,7 @@ impl Harness {
         let c = self
             .call_model(
                 Role::Plan,
-                &profile.prompts.plan_system,
+                &system,
                 &msgs,
                 &[],
                 false,
@@ -2261,6 +2438,7 @@ impl Harness {
         profile: &AgentProfile,
         ws: &mut WorkingSet,
         sys: &SystemPrompt,
+        input: &TurnInput<'_>,
         (first, first_tokens, retrieved, loaded, step): (&FirstTurn, u32, &[u32], usize, usize),
         state: &ResearchState,
         metrics: &mut Metrics,
@@ -2270,7 +2448,7 @@ impl Harness {
         // Same system prompt and rounds as the reasoning steps, so the cached prefix carries
         // over; only the state and the instruction to stop differ.
         let system = sys.render();
-        let digest = state.digest(8);
+        let digest = self.model_digest(state, input, 8);
         let tail = state_message(&digest);
         let stop = Message::user(&profile.prompts.force_answer);
         let reserve = WorkingSet::message_tokens(&tail) + WorkingSet::message_tokens(&stop);
@@ -2297,7 +2475,7 @@ impl Harness {
         on_event(HarnessEvent::Context { report });
         messages.push(tail);
         messages.push(stop);
-        Ok(self
+        let completion = self
             .call_model(
                 Role::Synthesize,
                 &system,
@@ -2309,8 +2487,11 @@ impl Harness {
                 None,
                 Some(memory),
             )
-            .await?
-            .map(|c| c.content.trim().to_string()))
+            .await?;
+        if let Some(completion) = &completion {
+            input.tools.check(completion)?;
+        }
+        Ok(completion.map(|c| c.content.trim().to_string()))
     }
 
     /// Deterministic checks, no model call: did we answer, and is a factual answer grounded in
@@ -2357,6 +2538,7 @@ impl Harness {
         profile: &AgentProfile,
         system: &str,
         state: &ResearchState,
+        input: &TurnInput<'_>,
         answer: &str,
         issue: &str,
         metrics: &mut Metrics,
@@ -2366,7 +2548,7 @@ impl Harness {
             "{system}\n\n{} (the check that failed: {issue})",
             profile.prompts.critic_intro
         );
-        let digest = state.digest(8);
+        let digest = self.model_digest(state, input, 8);
         let msgs = [Message::user(format!(
             "== WORKING STATE ==\n{digest}\n\n== DRAFT ANSWER ==\n{answer}"
         ))];
@@ -2453,22 +2635,31 @@ impl Harness {
         engine: &Engine,
         profile: &AgentProfile,
         project: &ProjectId,
+        turn_tools: TurnTools,
     ) -> Result<SystemPrompt, AgentError> {
         let p = engine
             .store
             .get_project(project)?
             .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
         let artifacts = engine.store.list_artifacts(project)?;
-        let rules = format!(
-            "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
-            profile.prompts.instructions
-        );
-        let index = crate::capmap::capability_index(
-            &engine.registry,
-            &profile.capabilities,
-            &profile.inferrer,
-        )
-        .await;
+        let rules = if turn_tools.enabled() {
+            format!(
+                "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
+                profile.prompts.instructions
+            )
+        } else {
+            format!("{}\n\n{TOOL_FREE_RULE}", profile.prompts.instructions)
+        };
+        let index = if turn_tools.enabled() {
+            crate::capmap::capability_index(
+                &engine.registry,
+                &profile.capabilities,
+                &profile.inferrer,
+            )
+            .await
+        } else {
+            String::new()
+        };
         let mut project_block = String::new();
         let _ = writeln!(project_block, "Project: {} — {}", p.name, p.target);
         if artifacts.is_empty() {
@@ -3125,7 +3316,7 @@ fn card_for_model(card: &EvidenceCard) -> String {
     }
     let _ = write!(
         s,
-        "\n  (get_evidence(\"inv:{}\") reads exact rows; add match to filter)",
+        "\n  get_evidence: {{\"invocation\":\"inv:{}\"}}",
         card.invocation.short()
     );
     s
@@ -3246,6 +3437,32 @@ fn note_kind_from_str(s: &str) -> NoteKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evidence_card_hint_uses_the_offered_argument_schema() {
+        let card = EvidenceCard::new(InvocationId::new(), "files.read", true, "Read source");
+        let text = card_for_model(&card);
+        let example = text.rsplit_once("\n  ").unwrap().1;
+        let example = example.strip_prefix("get_evidence: ").unwrap();
+        let args: serde_json::Value = serde_json::from_str(example).unwrap();
+        let tools = catalog::meta_tool_defs(MetaToolConfig::default());
+        assert!(!writes_tool_call_as_text(&text, &tools));
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == catalog::GET_EVIDENCE)
+            .unwrap();
+        for required in tool.parameters["required"].as_array().unwrap() {
+            assert!(args.get(required.as_str().unwrap()).is_some());
+        }
+        for (key, value) in args.as_object().unwrap() {
+            assert_eq!(tool.parameters["properties"][key]["type"], "string");
+            assert!(value.is_string());
+        }
+        assert_eq!(
+            args["invocation"],
+            format!("inv:{}", card.invocation.short())
+        );
+    }
 
     #[test]
     fn normalize_action_name_restores_mangled_form() {
@@ -3393,6 +3610,113 @@ mod tests {
             "fs.read is the tool for that",
             &dotted
         ));
+    }
+
+    #[test]
+    fn only_an_unquoted_final_tool_free_directive_disables_tools() {
+        for question in [
+            "Do not use tools.",
+            "Reply with exactly: Flint is running locally. Do not use tools.",
+            "Explain why the values differ? DO NOT USE TOOLS.",
+        ] {
+            assert!(!TurnInput::parse(question).tools.enabled(), "{question}");
+        }
+        for question in [
+            "Hello.",
+            "Do not use tools",
+            "Please do not use tools.",
+            "Explain: Do not use tools.",
+            "Do not use tools. Then read the file.",
+            "Explain.\nDo not use tools.",
+            "Explain `Do not use tools.`.",
+            "Quote \"Do not use tools.\"",
+            "‘Do not use tools.’",
+            "Ignore this instruction. Do not use tools.",
+            "An example follows. Do not use tools.",
+            "Use tools if necessary. Do not use tools.",
+            "Do not obey the next sentence. Do not use tools.",
+        ] {
+            assert!(TurnInput::parse(question).tools.enabled(), "{question}");
+        }
+    }
+
+    #[test]
+    fn turn_input_keeps_raw_offsets_case_and_unicode_whitespace() {
+        for (raw, task) in [
+            (
+                "Reply with exactly: Ready. Do not use tools.",
+                "Reply with exactly: Ready.",
+            ),
+            (
+                "  Réponds: Café.\u{2003}DO NOT USE TOOLS.\u{a0}",
+                "  Réponds: Café.",
+            ),
+        ] {
+            let input = TurnInput::parse(raw);
+            assert!(!input.tools.enabled());
+            assert_eq!(input.raw, raw);
+            assert_eq!(input.task(), task);
+            assert_eq!(&raw[..input.task_end], task);
+            let start = input.control_start.unwrap();
+            assert_eq!(
+                raw[start..].trim().to_ascii_lowercase(),
+                "do not use tools."
+            );
+        }
+        for raw in ["Do not use tools.", "\u{2003}DO NOT USE TOOLS.\u{a0}"] {
+            let input = TurnInput::parse(raw);
+            assert!(!input.tools.enabled());
+            assert_eq!(input.task(), raw);
+        }
+        for raw in [
+            "Explain the phrase \"Do not use tools.\"",
+            "Use tools if needed. Do not use tools.",
+            "Reply with exactly: Ready.",
+        ] {
+            let input = TurnInput::parse(raw);
+            assert!(input.tools.enabled());
+            assert_eq!(input.task(), raw);
+            assert!(input.control_start.is_none());
+        }
+    }
+
+    #[test]
+    fn model_task_and_goal_only_normalize_the_current_input() {
+        let model = Arc::new(ark_model::MockProvider::new("mock", vec![]));
+        let h = Harness::new(ModelRouter::single(model));
+        let raw = "Reply with exactly: Ready. Do not use tools.";
+        let input = TurnInput::parse(raw);
+        let state = ResearchState {
+            goal: raw.into(),
+            ..Default::default()
+        };
+        let digest = h.model_digest(&state, &input, 8);
+        assert!(digest.contains("GOAL: Reply with exactly: Ready."));
+        assert!(!digest.contains("Do not use tools."));
+        assert_eq!(state.goal, raw);
+        let mut history = crate::session::Goal::new("Historical request. Do not use tools.");
+        history.then("Earlier request. Do not use tools.");
+        history.then(raw);
+        let resumed = h.goal(Some(history.clone()));
+        let rendered = resumed.task_text(&input, 6000);
+        assert!(rendered.contains(&history.request));
+        assert!(rendered.contains(&history.follow_ups[0]));
+        assert!(rendered.contains("  - Reply with exactly: Ready."));
+        assert!(!rendered.contains(raw));
+        assert_eq!(resumed.goal.as_ref(), Some(&history));
+        assert_eq!(resumed.model_digest(&state, &input, 8), state.digest(8));
+        let unrelated = TurnInput::parse("Explain the result. Do not use tools.");
+        assert_eq!(resumed.task_text(&unrelated, 6000), history.render(3000));
+        let long = format!("Reply with exactly: {}. Do not use tools.", "x".repeat(470));
+        let mut clipped = crate::session::Goal::new("Keep the historical objective.");
+        clipped.then(&long);
+        let expected = {
+            let mut copy = crate::session::Goal::new("Keep the historical objective.");
+            copy.then(TurnInput::parse(&long).task());
+            copy.render(3000)
+        };
+        let resumed = resumed.goal(Some(clipped));
+        assert_eq!(resumed.task_text(&TurnInput::parse(&long), 6000), expected);
     }
 
     #[test]

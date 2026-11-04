@@ -9,22 +9,29 @@ async fn real_engine_streams_reuses_and_enforces_limits() {
     let cli = PathBuf::from(std::env::var_os("ARK_INFERENCE_TEST_CLI").expect("CLI path"));
     let model = PathBuf::from(std::env::var_os("ARK_INFERENCE_TEST_MODEL").expect("GGUF path"));
     let mut config = InferenceConfig::new(&exe, &model);
-    config.context = 128;
+    config.context = 1024;
     config.output_tokens = 4;
+    config.batch = 256;
     config.backend = std::env::var("ARK_INFERENCE_TEST_BACKEND").unwrap_or_else(|_| "cpu".into());
+    let prompt = format!(
+        "{}What is 2 + 2? Answer briefly.",
+        "The cat sat on the mat. ".repeat(48)
+    );
     let reference = std::process::Command::new(cli)
         .arg("generate")
         .arg("--model")
         .arg(&model)
         .args([
             "--prompt",
-            "What is 2 + 2? Answer briefly.",
+            &prompt,
             "--context",
-            "128",
+            "1024",
             "--tokens",
             "4",
             "--threads",
             "2",
+            "--batch-size",
+            "256",
             "--backend",
             &config.backend,
         ])
@@ -34,8 +41,8 @@ async fn real_engine_streams_reuses_and_enforces_limits() {
     let expected =
         String::from_utf8(reference.stdout).expect("explicit fixture must produce UTF-8");
     let provider = Inference::new(config.clone()).unwrap();
-    assert_eq!(provider.context_window(), Some(124));
-    let messages = [Message::user("What is 2 + 2? Answer briefly.")];
+    assert_eq!(provider.context_window(), Some(1020));
+    let messages = [Message::user(prompt)];
     for _ in 0..2 {
         let streamed = Mutex::new(String::new());
         let completion = provider
@@ -47,6 +54,7 @@ async fn real_engine_streams_reuses_and_enforces_limits() {
         assert_eq!(completion.content, expected);
         assert_eq!(*streamed.lock().unwrap(), expected);
         assert!(completion.usage.measured);
+        assert!(completion.usage.prompt_tokens > 256);
         assert!(completion.tool_calls.is_empty());
     }
     // Budget refusal cannot return a truncated successful completion.

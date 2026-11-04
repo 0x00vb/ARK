@@ -458,8 +458,8 @@ pub trait Provider: Send + Sync {
 /// Build a provider from the environment:
 /// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex | inference, or a
 ///   named endpoint ([`endpoints`]). `inference` runs a local ARK Inference bridge
-///   executable from `ARK_INFERENCE_EXECUTABLE` and needs `ARK_MODEL` as an absolute GGUF path
-///   (`docs/LOCAL_INFERENCE.md`)
+///   executable from the installed model registry (for example `inference:flint`). Explicit
+///   `ARK_INFERENCE_EXECUTABLE` and absolute model paths remain supported (`docs/LOCAL_INFERENCE.md`).
 /// - `ARK_MODEL` overrides the model
 /// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, else a saved key ([`keys`])
 pub fn from_env() -> Result<Box<dyn Provider>> {

@@ -1,0 +1,1 @@
+<think>We need answer. User gives task: Reply with exactly: Flint is running locally. Do not use tools. We must comply. No tools. Need exact phrase likely just "Flint is running locally." Maybe they said Reply with exactly: Flint is running locally. Do not use tools. So final should be exactly that, no extra. Ensure no quotes.</think>Flint is running locally.

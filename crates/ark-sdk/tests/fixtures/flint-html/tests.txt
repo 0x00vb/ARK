@@ -1,0 +1,14 @@
+include!("src/lib.rs");
+#[test] fn examples() {
+    assert_eq!(decode("&#X41;&#x42;&#67;"), "ABC");
+    assert_eq!(decode("&amp;&lt;&gt;&quot;&apos;"), "&<>\"'");
+    assert_eq!(decode("a&#X1F680;b"), "a🚀b");
+    for text in ["&unknown;", "&#xD800;", "&#X110000;", "&#Xoops;", "&broken", "plain text"] { assert_eq!(decode(text), text); }
+}
+#[test] fn all_ascii() {
+    for n in 1..128u32 {
+        assert_eq!(decode(&format!("&#X{n:X};")), char::from_u32(n).unwrap().to_string());
+        assert_eq!(decode(&format!("&#x{n:x};")), char::from_u32(n).unwrap().to_string());
+        assert_eq!(decode(&format!("&#{n};")), char::from_u32(n).unwrap().to_string());
+    }
+}

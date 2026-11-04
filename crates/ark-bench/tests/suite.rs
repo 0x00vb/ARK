@@ -177,7 +177,7 @@ async fn record_replay_and_faults_are_reproducible() {
     assert!(injected(&a).iter().sum::<u32>() > 0);
 }
 
-/// An answer without its ids (runs of 8 or more hex digits), which differ between runs.
+/// Removes reference ids, including clipped ids, and long numeric hex runs from answers.
 fn strip_ids(s: &str) -> String {
     let mut out = String::new();
     let mut run = String::new();
@@ -186,11 +186,35 @@ fn strip_ids(s: &str) -> String {
             run.push(c);
             continue;
         }
-        if run.len() < 8 || !run.chars().any(|x| x.is_ascii_digit()) {
+        let reference = ["inv:", "t-"].iter().any(|prefix| {
+            out.strip_suffix(*prefix).is_some_and(|before| {
+                !before
+                    .chars()
+                    .last()
+                    .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '-'))
+            })
+        });
+        if !reference && (run.len() < 8 || !run.chars().any(|x| x.is_ascii_digit())) {
             out.push_str(&run);
         }
         run.clear();
         out.push(c);
     }
     out
+}
+
+#[test]
+fn clipped_reference_ids_do_not_change_answer_comparisons() {
+    for (answer, expected) in [
+        ("[inv:f57d9", "[inv:"),
+        ("[inv:abcdefab]", "[inv:]"),
+        ("inv:face", "inv:"),
+        ("task t-abcd", "task t-"),
+        ("decade faced", "decade faced"),
+        ("format-decade print-faced", "format-decade print-faced"),
+        ("myinv:face x.t-face", "myinv:face x.t-face"),
+        ("value 1234abcd", "value"),
+    ] {
+        assert_eq!(strip_ids(answer).trim_end(), expected, "{answer}");
+    }
 }

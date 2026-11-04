@@ -59,7 +59,19 @@ pub fn list(ark: &Ark) -> Vec<Listed> {
 
 /// [`list`] from [`Parts`].
 pub fn list_parts(p: &Parts) -> Vec<Listed> {
-    let tools: Vec<String> = ark_sdk::offered_tools(&p.engine, &p.per_agent)
+    list_parts_for(p, None)
+}
+
+pub fn list_for(ark: &Ark, project: &ark_sdk::prelude::ProjectId) -> Vec<Listed> {
+    list_parts_for(&Parts::of(ark), Some(project))
+}
+
+pub fn list_parts_for(p: &Parts, project: Option<&ark_sdk::prelude::ProjectId>) -> Vec<Listed> {
+    let registry = match project {
+        Some(project) => ark_sdk::offered_tools_for(&p.engine, project, &p.per_agent),
+        None => ark_sdk::offered_tools(&p.engine, &p.per_agent),
+    };
+    let tools: Vec<String> = registry
         .adapters()
         .iter()
         .map(|a| a.name().to_string())

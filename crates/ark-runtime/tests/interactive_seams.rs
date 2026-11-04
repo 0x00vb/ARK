@@ -424,7 +424,7 @@ async fn steering_reaches_the_model_at_the_next_step() {
                 HarnessEvent::ToolResult {
                     context_tokens: n, ..
                 } => context_tokens = n,
-                HarnessEvent::Steered { text } => delivered.push(text),
+                HarnessEvent::Steered { text, .. } => delivered.push(text),
                 _ => {}
             },
         )
@@ -442,6 +442,39 @@ async fn steering_reaches_the_model_at_the_next_step() {
         .iter()
         .any(|m| m.content.contains("also check the door")));
     assert!(steer.take_undelivered().is_empty());
+}
+
+#[tokio::test]
+async fn steering_context_reaches_the_model_and_recovery_without_changing_visible_text() {
+    let (_d, engine, project) = setup(Arc::default());
+    let mock = Arc::new(MockProvider::new(
+        "m",
+        tools_then(vec![call("c1", "notes.read")], "Updated."),
+    ));
+    let steer = ark_runtime::Steering::new();
+    let sending = steer.clone();
+    let context = r#"{"resource":"notes","revision":7}"#;
+    let mut delivered = Vec::new();
+    let out = Harness::new(ModelRouter::single(mock.clone()))
+        .planner(false)
+        .critic(false)
+        .steering(Some(steer.clone()))
+        .ask(&engine, &profile(), &project, "read", |event| match event {
+            HarnessEvent::ToolCall { .. } => {
+                sending.push_with_context("Change this", context).unwrap()
+            }
+            HarnessEvent::Steered { text, context } => delivered.push((text, context)),
+            _ => {}
+        })
+        .await
+        .unwrap();
+    assert_eq!(delivered, vec![("Change this".into(), context.into())]);
+    assert!(mock.recorded()[1]
+        .messages
+        .iter()
+        .any(|message| message.content.contains(context)));
+    assert!(out.steered[0].contains(context));
+    assert!(steer.take_undelivered_inputs().is_empty());
 }
 
 #[tokio::test]

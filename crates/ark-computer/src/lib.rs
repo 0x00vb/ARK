@@ -31,16 +31,19 @@ use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use ring::hmac;
+use ring::rand::{SecureRandom as _, SystemRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::watch;
 
+#[cfg(target_os = "macos")]
+mod desktop;
 pub mod fake;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
-pub use macos::tree;
+pub use desktop::tree;
 
 pub const APPS: &str = "computer.apps";
 pub const ACTIVE_WINDOW: &str = "computer.active_window";
@@ -207,6 +210,39 @@ pub trait Control: Send + Sync {
     fn press(&self) -> std::result::Result<(), String>;
     /// Replace its text (a field).
     fn set_text(&self, text: &str) -> std::result::Result<(), String>;
+    /// Dispatch a click through the backend's target validation.
+    fn click(
+        &self,
+        how: Pointer,
+        screen: &dyn Screen,
+        app: &str,
+    ) -> std::result::Result<(), String> {
+        match how {
+            Pointer::Click => self.press(),
+            Pointer::Double | Pointer::Right => {
+                let frame = self.frame().ok_or("the control has no position")?;
+                in_front(screen, app)?;
+                let (x, y) = frame.center();
+                screen.pointer(x, y, how)
+            }
+        }
+    }
+    /// Replace the whole field without submitting it.
+    fn replace_text(
+        &self,
+        text: &str,
+        screen: &dyn Screen,
+        app: &str,
+    ) -> std::result::Result<(), String> {
+        self.press()?;
+        in_front(screen, app)?;
+        screen.keys("cmd+a")?;
+        if text.is_empty() {
+            screen.keys("delete")
+        } else {
+            screen.type_text(text)
+        }
+    }
     /// Where it is on the screen, for the pointer and for scrolling.
     fn frame(&self) -> Option<Frame> {
         None
@@ -279,6 +315,13 @@ pub struct HazardStatus {
     pub app: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct MessageRecoveryReview {
+    pub app: String,
+    pub kind: HazardKind,
+    pub token: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivityPhase {
@@ -307,7 +350,7 @@ pub struct ComputerActivity {
     pub target: Option<Frame>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Hazard {
     kind: HazardKind,
     app: String,
@@ -325,8 +368,15 @@ struct HazardFile {
     hazard: Option<Hazard>,
 }
 
+struct MessageReview {
+    token: String,
+    hazard: Hazard,
+    generation: u64,
+}
+
 #[derive(Clone)]
 struct ActiveDraft {
+    id: u64,
     owner: String,
     app: String,
     recipient: String,
@@ -344,9 +394,49 @@ pub enum Access {
     NotYet(String),
 }
 
+/// One operation's revocable authority. A native dispatch already in flight cannot be recalled.
+#[derive(Clone)]
+pub struct OperationPermit {
+    pub(crate) generation: Arc<AtomicU64>,
+    pub(crate) expected: u64,
+    pub(crate) active: Arc<AtomicBool>,
+}
+
+impl OperationPermit {
+    pub(crate) fn check(&self) -> std::result::Result<(), String> {
+        if self.active.load(Ordering::SeqCst)
+            && self.generation.load(Ordering::SeqCst) == self.expected
+        {
+            Ok(())
+        } else {
+            Err("the Computer operation was canceled before dispatch".into())
+        }
+    }
+}
+
+struct OperationLifetime(Arc<AtomicBool>);
+
+impl Drop for OperationLifetime {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// The platform underneath: reads windows and acts on them. Calls block; the service runs them
 /// off the async runtime.
 pub trait Screen: Send + Sync {
+    /// Bind queued native work to this operation, including cancellation while it waits.
+    fn scoped(
+        &self,
+        _generation: Arc<AtomicU64>,
+        _expected: u64,
+        _active: Arc<AtomicBool>,
+    ) -> Option<Arc<dyn Screen>> {
+        None
+    }
+    fn operation_permit(&self) -> Option<OperationPermit> {
+        None
+    }
     fn access(&self) -> Access;
     /// Ask the system to show the person its permission prompt.
     fn request_access(&self);
@@ -355,10 +445,29 @@ pub trait Screen: Send + Sync {
     fn window_metadata(&self, app: &str) -> std::result::Result<WindowMetadata, String>;
     /// The front window of the open app named `app`.
     fn look(&self, app: &str) -> std::result::Result<Look, String>;
+    /// All possible copies of a staged composer, for recovery after a window is recreated.
+    /// The default preserves exact-window recovery for screens that cannot enumerate them.
+    fn recovery_looks(
+        &self,
+        app: &str,
+        original_window: &str,
+        _conversation: &str,
+        _composer: &str,
+    ) -> std::result::Result<Vec<Look>, String> {
+        let look = self.look(app)?;
+        if look.window_identifier.as_deref() != Some(original_window) {
+            return Err("the original message window is unavailable".into());
+        }
+        Ok(vec![look])
+    }
     /// Start the app, or bring it to the front.
     fn open(&self, app: &str) -> std::result::Result<(), String>;
     /// A key or a shortcut (`return`, `cmd+s`) to the app in front.
     fn keys(&self, keys: &str) -> std::result::Result<(), String>;
+    /// Post a key only to the exact window proved by the caller's observation.
+    fn keys_in_window(&self, _keys: &str, _window: &str) -> std::result::Result<(), String> {
+        Err("This screen cannot bind keyboard input to the proved message window".into())
+    }
     /// Type text into whatever has the focus.
     fn type_text(&self, text: &str) -> std::result::Result<(), String>;
     /// How long ago anyone used the keyboard or mouse (this process's own keys included).
@@ -399,6 +508,7 @@ struct State {
     /// The number of the last picture taken.
     pictures: u64,
     hazard: Option<Hazard>,
+    message_review: Option<MessageReview>,
     active_draft: Option<ActiveDraft>,
     safety_error: Option<String>,
     /// Front app sampled before an ambient window takes focus. Never a title or window id.
@@ -430,7 +540,7 @@ pub struct ComputerService {
     state: Mutex<State>,
     holder: watch::Sender<Option<String>>,
     messages: Option<Arc<dyn MessageEvidence>>,
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
     /// Serializes the irreversible key post with Stop, off and owner release.
     dispatch: Mutex<()>,
     safety_path: Option<PathBuf>,
@@ -439,6 +549,8 @@ pub struct ComputerService {
     activity: watch::Sender<Option<ComputerActivity>>,
     activity_sequence: AtomicU64,
     effect_sequence: AtomicU64,
+    draft_sequence: AtomicU64,
+    hazards: watch::Sender<Option<HazardStatus>>,
 }
 
 impl ComputerService {
@@ -446,7 +558,7 @@ impl ComputerService {
     pub fn native() -> Option<Arc<Self>> {
         #[cfg(target_os = "macos")]
         {
-            Some(Self::with_screen(Arc::new(macos::Mac)))
+            Some(Self::with_screen(Arc::new(desktop::Desktop::new())))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -465,7 +577,7 @@ impl ComputerService {
             state: Mutex::new(State::default()),
             holder: watch::channel(None).0,
             messages: None,
-            generation: AtomicU64::new(0),
+            generation: Arc::new(AtomicU64::new(0)),
             dispatch: Mutex::new(()),
             safety_path: None,
             safety_key: None,
@@ -473,6 +585,8 @@ impl ComputerService {
             activity: watch::channel(None).0,
             activity_sequence: AtomicU64::new(0),
             effect_sequence: AtomicU64::new(0),
+            draft_sequence: AtomicU64::new(0),
+            hazards: watch::channel(None).0,
         })
     }
 
@@ -675,46 +789,149 @@ impl ComputerService {
             })
     }
 
+    pub fn message_status(&self) -> std::result::Result<Option<HazardStatus>, String> {
+        if !self.is_on() {
+            return Ok(self.message_hazard());
+        }
+        if self.safety_path.is_some() {
+            self.initialize_safety()?;
+        }
+        Ok(self.message_hazard())
+    }
+
+    pub fn watch_message_status(&self) -> watch::Receiver<Option<HazardStatus>> {
+        self.hazards.subscribe()
+    }
+
     /// Re-read the app after the person has checked it. This clears only the safety block. It
     /// never changes an unconfirmed external effect into a confirmed one.
     pub async fn check_message_again(&self) -> std::result::Result<HazardStatus, String> {
+        if !self.is_on() && self.hmac_key.lock().unwrap().is_none() {
+            return Err(OFF.into());
+        }
         self.initialize_safety()?;
         let hazard = self
             .hazard()?
             .ok_or_else(|| "there is no message draft to check".to_string())?;
+        self.take_back();
+        let generation = self.generation.load(Ordering::SeqCst);
         let app = hazard.app.clone();
-        let look = self.blocking(move |s| s.look(&app)).await?;
+        let original_window = hazard.window_identifier.clone();
+        let conversation = hazard.conversation_identifier.clone();
+        let composer = hazard.composer_identifier.clone();
+        let looks = self
+            .blocking(move |s| s.recovery_looks(&app, &original_window, &conversation, &composer))
+            .await?;
         let provider = self
             .messages
             .as_ref()
             .ok_or_else(|| "this app has no message evidence provider".to_string())?;
-        let context = provider
-            .context(
-                &look,
-                None,
-                None,
-                Some((&hazard.conversation_identifier, &hazard.composer_identifier)),
-            )?
-            .ok_or_else(|| {
-                "ARK cannot identify the current conversation and composer".to_string()
-            })?;
-        let same = context.window_identifier == hazard.window_identifier
-            && context.conversation_identifier == hazard.conversation_identifier
-            && context.composer_identifier == hazard.composer_identifier
-            && self.recipient_mac(&context.conversation)? == hazard.recipient_mac;
-        if !same {
+        let mut matching = 0;
+        for look in looks {
+            let context = provider
+                .context(
+                    &look,
+                    None,
+                    None,
+                    Some((&hazard.conversation_identifier, &hazard.composer_identifier)),
+                )?
+                .ok_or_else(|| {
+                    "ARK cannot identify the current conversation and composer".to_string()
+                })?;
+            let same = context.conversation_identifier == hazard.conversation_identifier
+                && context.composer_identifier == hazard.composer_identifier
+                && self.recipient_mac(&context.conversation)? == hazard.recipient_mac;
+            if !same {
+                continue;
+            }
+            matching += 1;
+            if !context.composer_value.is_empty() {
+                return Err(format!(
+                    "the draft is still present in {}; clear it there, then choose Check again",
+                    hazard.app
+                ));
+            }
+        }
+        if matching == 0 {
             return Err(format!(
                 "open the conversation that needs attention in {}, then choose Check again",
                 hazard.app
             ));
         }
-        if !context.composer_value.is_empty() {
-            return Err(format!(
-                "the draft is still present in {}; clear it there, then choose Check again",
-                hazard.app
-            ));
+        let _dispatch = self.dispatch.lock().unwrap();
+        if self.generation.load(Ordering::SeqCst) != generation
+            || self.hazard()?.as_ref() != Some(&hazard)
+        {
+            return Err("the Computer state changed while checking the draft; check again".into());
         }
         self.keep_hazard(None)?;
+        self.take_back_locked();
+        self.state.lock().unwrap().active_draft = None;
+        self.activity("", "", ActivityPhase::Idle, None);
+        Ok(HazardStatus {
+            kind: hazard.kind,
+            app: hazard.app,
+        })
+    }
+
+    /// Prepare the local person's acknowledgement without revealing recipient or draft text.
+    pub fn review_message_block(&self) -> std::result::Result<MessageRecoveryReview, String> {
+        if !self.is_on() && self.hmac_key.lock().unwrap().is_none() {
+            return Err(OFF.into());
+        }
+        self.initialize_safety()?;
+        let _dispatch = self.dispatch.lock().unwrap();
+        let hazard = self
+            .hazard()?
+            .ok_or("there is no message draft to review")?;
+        let mut nonce = [0u8; 32];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| "could not prepare a message review")?;
+        let token = B64.encode(nonce);
+        self.state.lock().unwrap().message_review = Some(MessageReview {
+            token: token.clone(),
+            hazard: hazard.clone(),
+            generation: self.generation.load(Ordering::SeqCst),
+        });
+        Ok(MessageRecoveryReview {
+            token,
+            app: hazard.app,
+            kind: hazard.kind,
+        })
+    }
+
+    /// The person accepts an unresolved block. This proves neither absence nor delivery.
+    /// Expose this only through human controls, never as an agent action.
+    pub fn acknowledge_message_block(
+        &self,
+        token: &str,
+    ) -> std::result::Result<HazardStatus, String> {
+        if !self.is_on() && self.hmac_key.lock().unwrap().is_none() {
+            return Err(OFF.into());
+        }
+        self.initialize_safety()?;
+        let _dispatch = self.dispatch.lock().unwrap();
+        let hazard = self
+            .hazard()?
+            .ok_or("there is no message draft to review")?;
+        let current = self
+            .state
+            .lock()
+            .unwrap()
+            .message_review
+            .as_ref()
+            .is_some_and(|review| {
+                review.token == token
+                    && review.hazard == hazard
+                    && review.generation == self.generation.load(Ordering::SeqCst)
+            });
+        if !current {
+            return Err("the message block changed; review it again".into());
+        }
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.keep_hazard(None)?;
+        self.take_back_locked();
         self.state.lock().unwrap().active_draft = None;
         self.activity("", "", ActivityPhase::Idle, None);
         Ok(HazardStatus {
@@ -726,13 +943,14 @@ impl ComputerService {
     /// The person takes the screen back: whoever holds it loses it, and its actions fail until
     /// its turn or task ends. Returns who held it.
     pub fn take_back(&self) -> Option<String> {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let _dispatch = self.dispatch.lock().unwrap();
         self.take_back_locked()
     }
 
     fn take_back_locked(&self) -> Option<String> {
-        self.generation.fetch_add(1, Ordering::SeqCst);
         let mut st = self.state.lock().unwrap();
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let had = st.lease.take().map(|(o, _)| o);
         if let Some(o) = &had {
             st.looks.remove(o);
@@ -746,13 +964,16 @@ impl ComputerService {
     }
 
     fn release(&self, owner: &str) {
+        if self.holds(owner) {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        }
         let _dispatch = self.dispatch.lock().unwrap();
-        self.generation.fetch_add(1, Ordering::SeqCst);
         let mut st = self.state.lock().unwrap();
         st.looks.remove(owner);
         st.shots.remove(owner);
         st.taken.remove(owner);
         if st.lease.as_ref().is_some_and(|(o, _)| o == owner) {
+            self.generation.fetch_add(1, Ordering::SeqCst);
             st.lease = None;
             drop(st);
             self.holder.send_replace(None);
@@ -763,6 +984,30 @@ impl ComputerService {
     fn holds(&self, owner: &str) -> bool {
         let st = self.state.lock().unwrap();
         st.lease.as_ref().is_some_and(|(o, _)| o == owner)
+    }
+
+    fn staged_draft_for_dispatch(&self, active: &ActiveDraft) -> std::result::Result<(), String> {
+        let state = self.state.lock().unwrap();
+        if !self.is_on()
+            || self.generation.load(Ordering::SeqCst) != active.generation
+            || !state
+                .lease
+                .as_ref()
+                .is_some_and(|(owner, _)| owner == &active.owner)
+            || !state
+                .active_draft
+                .as_ref()
+                .is_some_and(|current| current.id == active.id)
+            || !state.hazard.as_ref().is_some_and(|hazard| {
+                hazard.kind == HazardKind::DraftPresent && hazard.effect_id.is_none()
+            })
+        {
+            return Err(
+                "the draft changed or was already submitted; check the app before continuing"
+                    .into(),
+            );
+        }
+        Ok(())
     }
 
     /// Wait until `owner` holds the screen.
@@ -863,7 +1108,8 @@ impl ComputerService {
     }
 
     fn initialize_safety(&self) -> std::result::Result<(), String> {
-        if self.hmac_key.lock().unwrap().is_some() {
+        let mut initialized = self.hmac_key.lock().unwrap();
+        if initialized.is_some() {
             return self
                 .state
                 .lock()
@@ -915,10 +1161,15 @@ impl ComputerService {
             }
             Err(e) => return Err(format!("read Computer safety state: {e}")),
         };
-        *self.hmac_key.lock().unwrap() = Some(key);
+        *initialized = Some(key);
         let mut st = self.state.lock().unwrap();
         st.hazard = loaded;
         st.safety_error = None;
+        let status = st.hazard.as_ref().map(|hazard| HazardStatus {
+            kind: hazard.kind.clone(),
+            app: hazard.app.clone(),
+        });
+        self.hazards.send_replace(status);
         Ok(())
     }
 
@@ -947,7 +1198,14 @@ impl ComputerService {
             self.state.lock().unwrap().safety_error = Some(e.clone());
             return Err(e);
         }
-        self.state.lock().unwrap().hazard = hazard;
+        let mut state = self.state.lock().unwrap();
+        state.hazard = hazard;
+        state.message_review = None;
+        let status = state.hazard.as_ref().map(|hazard| HazardStatus {
+            kind: hazard.kind.clone(),
+            app: hazard.app.clone(),
+        });
+        self.hazards.send_replace(status);
         Ok(())
     }
 
@@ -963,10 +1221,24 @@ impl ComputerService {
         &self,
         f: impl FnOnce(&dyn Screen) -> std::result::Result<T, String> + Send + 'static,
     ) -> std::result::Result<T, String> {
-        let screen = self.screen.clone();
-        tokio::task::spawn_blocking(move || f(screen.as_ref()))
-            .await
-            .map_err(|e| format!("the computer did not answer: {e}"))?
+        let expected = self.generation.load(Ordering::SeqCst);
+        let active = Arc::new(AtomicBool::new(true));
+        let _lifetime = OperationLifetime(active.clone());
+        let permit = OperationPermit {
+            generation: self.generation.clone(),
+            expected,
+            active: active.clone(),
+        };
+        let screen = self
+            .screen
+            .scoped(self.generation.clone(), expected, active)
+            .unwrap_or_else(|| self.screen.clone());
+        tokio::task::spawn_blocking(move || {
+            permit.check()?;
+            f(screen.as_ref())
+        })
+        .await
+        .map_err(|e| format!("the computer did not answer: {e}"))?
     }
 }
 
@@ -1070,6 +1342,26 @@ fn unix_seconds() -> u64 {
 }
 
 impl Computer {
+    async fn blocking<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&dyn Screen) -> std::result::Result<T, String> + Send + 'static,
+    ) -> std::result::Result<T, String> {
+        let svc = self.svc.clone();
+        let owner = self.owner.clone();
+        let expected = svc.generation.load(Ordering::SeqCst);
+        self.svc
+            .blocking(move |screen| {
+                if !svc.is_on()
+                    || svc.generation.load(Ordering::SeqCst) != expected
+                    || !svc.holds(&owner)
+                {
+                    return Err(TAKEN.into());
+                }
+                f(screen)
+            })
+            .await
+    }
+
     /// Hold the screen and have the person's go-ahead to act now.
     async fn ready(&self, app: &str, action: &str) -> Result<()> {
         if !self.svc.is_on() {
@@ -1153,10 +1445,7 @@ impl Computer {
 
     async fn fresh_look(&self, app: &str) -> Result<Look> {
         let name = app.to_string();
-        self.svc
-            .blocking(move |s| s.look(&name))
-            .await
-            .map_err(tool)
+        self.blocking(move |s| s.look(&name)).await.map_err(tool)
     }
 
     fn message_context(&self, look: &Look, recipient: &str, text: &str) -> Result<MessageContext> {
@@ -1220,10 +1509,7 @@ impl Computer {
         let recipient = required_text(DRAFT, input, "recipient")?;
         let text = required_text(DRAFT, input, "text")?;
         let name = app.to_string();
-        self.svc
-            .blocking(move |s| s.open(&name))
-            .await
-            .map_err(tool)?;
+        self.blocking(move |s| s.open(&name)).await.map_err(tool)?;
         let look = self.fresh_look(app).await?;
         let (conversation_el, _) =
             self.input_element(DRAFT, &look, "conversation_ref", "conversation_name", input)?;
@@ -1246,6 +1532,7 @@ impl Computer {
             ));
         }
         let generation = self.svc.generation.load(Ordering::SeqCst);
+        let draft_id = self.svc.draft_sequence.fetch_add(1, Ordering::SeqCst);
         let hazard = Hazard {
             kind: HazardKind::DraftPresent,
             app: look.app.clone(),
@@ -1256,27 +1543,36 @@ impl Computer {
             created_at: unix_seconds(),
             effect_id: None,
         };
-        self.svc.keep_hazard(Some(hazard)).map_err(tool)?;
-        self.svc
-            .activity(app, DRAFT, ActivityPhase::Acting, context.composer_frame);
-        self.svc.state.lock().unwrap().active_draft = Some(ActiveDraft {
-            owner: self.owner.clone(),
-            app: look.app.clone(),
-            recipient: recipient.clone(),
-            text: text.clone(),
-            context: context.clone(),
-            before: context.outgoing.clone(),
-            generation,
-        });
+        {
+            let _dispatch = self.svc.dispatch.lock().unwrap();
+            if self.svc.generation.load(Ordering::SeqCst) != generation
+                || !self.svc.holds(&self.owner)
+                || !self.svc.is_on()
+            {
+                return Err(tool(TAKEN.into()));
+            }
+            if self.svc.hazard().map_err(tool)?.is_some() {
+                return Err(tool(
+                    "a previous message draft still needs attention".into(),
+                ));
+            }
+            self.svc.keep_hazard(Some(hazard)).map_err(tool)?;
+            self.svc
+                .activity(app, DRAFT, ActivityPhase::Acting, context.composer_frame);
+            self.svc.state.lock().unwrap().active_draft = Some(ActiveDraft {
+                id: draft_id,
+                owner: self.owner.clone(),
+                app: look.app.clone(),
+                recipient: recipient.clone(),
+                text: text.clone(),
+                context: context.clone(),
+                before: context.outgoing.clone(),
+                generation,
+            });
+        }
         let name = app.to_string();
         let staged = text.clone();
-        self.svc
-            .blocking(move |s| {
-                composer.press()?;
-                in_front(s, &name)?;
-                s.keys("cmd+a")?;
-                s.type_text(&staged)
-            })
+        self.blocking(move |s| composer.replace_text(&staged, s, &name))
             .await
             .map_err(tool)?;
         self.svc.sent_input();
@@ -1292,9 +1588,19 @@ impl Computer {
                     .into(),
             ));
         }
-        if let Some(active) = self.svc.state.lock().unwrap().active_draft.as_mut() {
-            active.context = proven.clone();
-        }
+        let _dispatch = self.svc.dispatch.lock().unwrap();
+        let mut active = self
+            .svc
+            .state
+            .lock()
+            .unwrap()
+            .active_draft
+            .clone()
+            .filter(|active| active.id == draft_id)
+            .ok_or_else(|| tool(TAKEN.into()))?;
+        self.svc.staged_draft_for_dispatch(&active).map_err(tool)?;
+        active.context = proven.clone();
+        self.svc.state.lock().unwrap().active_draft = Some(active);
         self.svc
             .activity(app, DRAFT, ActivityPhase::Hazardous, proven.composer_frame);
         Ok(ActionOutput::json(json!({
@@ -1335,10 +1641,20 @@ impl Computer {
         let text_for_dispatch = text.clone();
         let app_for_dispatch = app.to_string();
         let effect_for_dispatch = effect_id.clone();
+        let dispatch_active = Arc::new(AtomicBool::new(true));
+        let submission_started = Arc::new(AtomicBool::new(false));
+        let dispatched_submission = submission_started.clone();
+        let _lifetime = OperationLifetime(dispatch_active.clone());
+        let screen = svc
+            .screen
+            .scoped(svc.generation.clone(), active.generation, dispatch_active)
+            .unwrap_or_else(|| svc.screen.clone());
+        let dispatch_draft = active.clone();
         let dispatched = tokio::task::spawn_blocking(move || {
             let _gate = svc.dispatch.lock().unwrap();
+            svc.staged_draft_for_dispatch(&dispatch_draft)?;
             if svc.generation.load(Ordering::SeqCst) != active.generation
-                || svc.screen.access() != Access::Allowed
+                || screen.access() != Access::Allowed
             {
                 return Err("the Computer stopped before the message was sent".to_string());
             }
@@ -1348,8 +1664,8 @@ impl Computer {
                     return Err(TAKEN.into());
                 }
             }
-            in_front(svc.screen.as_ref(), &app_for_dispatch)?;
-            let look = svc.screen.look(&app_for_dispatch)?;
+            in_front(screen.as_ref(), &app_for_dispatch)?;
+            let look = screen.look(&app_for_dispatch)?;
             let provider = svc
                 .messages
                 .as_ref()
@@ -1379,7 +1695,8 @@ impl Computer {
             hazard.kind = HazardKind::SubmittedUnconfirmed;
             hazard.effect_id = Some(effect_for_dispatch);
             svc.keep_hazard(Some(hazard))?;
-            svc.screen.keys("return")?;
+            dispatched_submission.store(true, Ordering::SeqCst);
+            screen.keys_in_window("return", &now.window_identifier)?;
             svc.sent_input();
             Ok(())
         })
@@ -1387,7 +1704,7 @@ impl Computer {
         match dispatched {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                if self.effect_is_uncertain(&effect_id) {
+                if submission_started.load(Ordering::SeqCst) {
                     return Ok(self.unconfirmed_output(
                         app,
                         &recipient,
@@ -1399,7 +1716,7 @@ impl Computer {
                 return Err(tool(error));
             }
             Err(error) => {
-                if self.effect_is_uncertain(&effect_id) {
+                if submission_started.load(Ordering::SeqCst) {
                     return Ok(self.unconfirmed_output(
                         app,
                         &recipient,
@@ -1443,6 +1760,19 @@ impl Computer {
             }
         };
         let new_outgoing = has_new_fingerprint(&active.before, &proven.outgoing);
+        let _dispatch = self.svc.dispatch.lock().unwrap();
+        let Some(mut hazard) = self.svc.hazard().map_err(tool)?.filter(|hazard| {
+            hazard.effect_id.as_deref() == Some(effect_id.as_str())
+                && self.svc.generation.load(Ordering::SeqCst) == active.generation
+        }) else {
+            return Ok(self.unconfirmed_output(
+                app,
+                &recipient,
+                &effect_id,
+                proven.composer_frame,
+                Some("the person resolved the message block while verification was pending"),
+            ));
+        };
         if proven.composer_value.is_empty() && new_outgoing {
             self.svc.keep_hazard(None).map_err(tool)?;
             self.svc.state.lock().unwrap().active_draft = None;
@@ -1460,11 +1790,6 @@ impl Computer {
                 user_message: None,
             }));
         }
-        let mut hazard = self
-            .svc
-            .hazard()
-            .map_err(tool)?
-            .ok_or_else(|| tool("the message safety record is missing".into()))?;
         hazard.kind = if proven.composer_value.is_empty() {
             HazardKind::SubmittedUnconfirmed
         } else {
@@ -1481,13 +1806,6 @@ impl Computer {
         Ok(self.unconfirmed_output(app, &recipient, &effect_id, proven.composer_frame, None))
     }
 
-    fn effect_is_uncertain(&self, effect_id: &str) -> bool {
-        self.svc.hazard().ok().flatten().is_some_and(|hazard| {
-            hazard.kind == HazardKind::SubmittedUnconfirmed
-                && hazard.effect_id.as_deref() == Some(effect_id)
-        })
-    }
-
     fn unconfirmed_output(
         &self,
         app: &str,
@@ -1496,7 +1814,15 @@ impl Computer {
         target: Option<Frame>,
         detail: Option<&str>,
     ) -> ActionOutput {
-        self.svc.state.lock().unwrap().active_draft = None;
+        let mut state = self.svc.state.lock().unwrap();
+        if state
+            .hazard
+            .as_ref()
+            .is_some_and(|hazard| hazard.effect_id.as_deref() == Some(effect_id))
+        {
+            state.active_draft = None;
+        }
+        drop(state);
         self.svc
             .activity(app, SEND, ActivityPhase::SubmittedUnconfirmed, target);
         let user_message = format!(
@@ -1564,21 +1890,23 @@ impl Computer {
             .ok_or_else(|| tool("the composer control is no longer available".into()))?;
         let composer = look.controls[at].clone();
         let name = app.to_string();
-        self.svc
-            .blocking(move |screen| {
-                composer.press()?;
-                in_front(screen, &name)?;
-                screen.keys("cmd+a")?;
-                screen.keys("delete")
-            })
-            .await
-            .map_err(tool)?;
+        let svc = self.svc.clone();
+        let canceling = active.clone();
+        self.blocking(move |screen| {
+            let _dispatch = svc.dispatch.lock().unwrap();
+            svc.staged_draft_for_dispatch(&canceling)?;
+            composer.replace_text("", screen, &name)
+        })
+        .await
+        .map_err(tool)?;
         self.svc.sent_input();
         let after = self.fresh_look(app).await?;
         let cleared = self.message_context(&after, &recipient, &text)?;
         if !cleared.composer_value.is_empty() {
             return Err(tool("ARK could not prove the composer is empty. Clear it in the app, then choose Check again".into()));
         }
+        let _dispatch = self.svc.dispatch.lock().unwrap();
+        self.svc.staged_draft_for_dispatch(&active).map_err(tool)?;
         self.svc.keep_hazard(None).map_err(tool)?;
         self.svc.state.lock().unwrap().active_draft = None;
         self.svc.activity(app, CANCEL, ActivityPhase::Idle, None);
@@ -1591,7 +1919,6 @@ impl Computer {
     async fn see(&self, app: &str) -> Result<ActionOutput> {
         let name = app.to_string();
         let shot = self
-            .svc
             .blocking(move |s| s.capture(&name, PICTURE))
             .await
             .map_err(tool)?;
@@ -1626,18 +1953,37 @@ impl Computer {
 
     async fn look(&self, app: &str) -> Result<ActionOutput> {
         let name = app.to_string();
-        let look = self
-            .svc
-            .blocking(move |s| s.look(&name))
-            .await
-            .map_err(tool)?;
+        let look = self.blocking(move |s| s.look(&name)).await.map_err(tool)?;
+        let mut elements: Vec<_> = look.elements.iter().collect();
+        elements.sort_by_key(|element| {
+            if element.focused {
+                0
+            } else if matches!(
+                element.role.as_str(),
+                "text field"
+                    | "text area"
+                    | "combo box"
+                    | "button"
+                    | "checkbox"
+                    | "link"
+                    | "menu item"
+            ) {
+                1
+            } else {
+                2
+            }
+        });
+        elements.truncate(150);
+        elements.sort_by_key(|element| element.number);
+        let text: String = look.text.chars().take(8000).collect();
         let out = json!({
             "app": look.app,
             "window": look.window,
             "window_identifier": look.window_identifier,
-            "text": look.text,
+            "text": text,
             "lines": look.text.lines().count(),
-            "elements": look.elements,
+            "elements": elements,
+            "truncated": look.elements.len() > 150 || look.text.chars().count() > 8000,
         });
         self.svc.state.lock().unwrap().looks.insert(
             self.owner.clone(),
@@ -1836,8 +2182,7 @@ impl Adapter for Computer {
             ACTIVE_WINDOW => {
                 let name = app.clone();
                 let metadata = self
-                    .svc
-                    .blocking(move |screen| screen.window_metadata(&name))
+            .blocking(move |screen| screen.window_metadata(&name))
                     .await
                     .map_err(tool)?;
                 self.svc.touch(&self.owner);
@@ -1848,7 +2193,7 @@ impl Adapter for Computer {
             LOOK => self.look(&app).await,
             OPEN => {
                 let name = app.clone();
-                self.svc
+                self
                     .blocking(move |s| s.open(&name))
                     .await
                     .map_err(tool)?;
@@ -1861,22 +2206,14 @@ impl Adapter for Computer {
                 self.svc
                     .activity(&app, action, ActivityPhase::Acting, c.frame());
                 let how = if input["right"] == json!(true) {
-                    Some(Pointer::Right)
+                    Pointer::Right
                 } else if input["double"] == json!(true) {
-                    Some(Pointer::Double)
+                    Pointer::Double
                 } else {
-                    None
+                    Pointer::Click
                 };
                 let name = app.clone();
-                // The control's own press first; the pointer when asked for or when the control
-                // takes no press (some web and custom controls).
-                self.svc
-                    .blocking(move |s| match how {
-                        None => c.press().or_else(|e| {
-                            point(s, &name, c.as_ref(), Pointer::Click).map_err(|_| e)
-                        }),
-                        Some(how) => point(s, &name, c.as_ref(), how),
-                    })
+                self.blocking(move |screen| c.click(how, screen, &name))
                     .await
                     .map_err(tool)?;
                 self.svc.sent_input();
@@ -1893,8 +2230,7 @@ impl Adapter for Computer {
                     .collect();
                 let name = app.clone();
                 let menu = self
-                    .svc
-                    .blocking(move |s| {
+            .blocking(move |s| {
                         if !path.is_empty() {
                             in_front(s, &name)?;
                         }
@@ -1981,7 +2317,7 @@ impl Adapter for Computer {
                     }),
                 );
                 let name = app.clone();
-                self.svc
+                self
                     .blocking(move |s| {
                         // The window may have moved since the picture: a click would land
                         // elsewhere.
@@ -2016,7 +2352,7 @@ impl Adapter for Computer {
                     Err(_) => None,
                 };
                 let name = app.clone();
-                self.svc
+                self
                     .blocking(move |s| {
                         let frame = match at.and_then(|c| c.frame()) {
                             Some(f) => f,
@@ -2038,25 +2374,7 @@ impl Adapter for Computer {
                     .activity(&app, action, ActivityPhase::Acting, c.frame());
                 let text = input["text"].as_str().unwrap_or("").to_string();
                 let name = app.clone();
-                // Typed as a person types: the field focused, what it holds selected, the text
-                // as keys, so the app hears every change (a text set from outside leaves some
-                // apps' Send button off). Keys go to the app in front: only once the approved
-                // app is that app. A field that can't take focus gets its text set directly.
-                self.svc
-                    .blocking(move |s| {
-                        if c.press().is_ok() {
-                            in_front(s, &name)?;
-                            s.keys("cmd+a")?;
-                            if text.is_empty() {
-                                s.keys("delete")?;
-                            } else {
-                                s.type_text(&text)?;
-                            }
-                        } else {
-                            c.set_text(&text)?;
-                        }
-                        Ok(())
-                    })
+                self.blocking(move |screen| c.replace_text(&text, screen, &name))
                     .await
                     .map_err(tool)?;
                 self.svc.sent_input();
@@ -2073,7 +2391,7 @@ impl Adapter for Computer {
                 }
                 // Keys go to the app in front: only once the approved app is that app.
                 let name = app.clone();
-                self.svc
+                self
                     .blocking(move |s| {
                         in_front(s, &name)?;
                         s.keys(&keys)
@@ -2120,21 +2438,6 @@ fn in_front(s: &dyn Screen, app: &str) -> std::result::Result<(), String> {
     Err(format!(
         "{app} did not come to the front, so nothing was typed"
     ))
-}
-
-/// Press `c` with the pointer, once `app` is in front: a click goes to whatever is at that point.
-fn point(
-    s: &dyn Screen,
-    app: &str,
-    c: &dyn Control,
-    how: Pointer,
-) -> std::result::Result<(), String> {
-    let frame = c
-        .frame()
-        .ok_or("the app did not say where that element is, so it can't be clicked")?;
-    in_front(s, app)?;
-    let (x, y) = frame.center();
-    s.pointer(x, y, how)
 }
 
 fn same_app(listed: &str, asked: &str) -> bool {

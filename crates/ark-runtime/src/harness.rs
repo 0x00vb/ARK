@@ -168,6 +168,8 @@ pub enum HarnessEvent {
     /// A message the user sent while the turn was running reached the model.
     Steered {
         text: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        context: String,
     },
     /// A model call failed with a temporary error and is tried again after `delay_ms`. Text
     /// the failed attempt had streamed was withdrawn just before
@@ -548,6 +550,26 @@ impl Harness {
     }
     /// Run a task grounded in a project, shaped by `profile`.
     pub async fn ask(
+        &self,
+        engine: &Engine,
+        profile: &AgentProfile,
+        project: &ProjectId,
+        question: &str,
+        on_event: impl FnMut(HarnessEvent),
+    ) -> Result<HarnessOutcome, AgentError> {
+        let outcome = self
+            .ask_inner(engine, profile, project, question, on_event)
+            .await;
+        if let Some(cancel) = &self.cancel {
+            cancel
+                .wait_for_commit()
+                .await
+                .map_err(std::io::Error::other)?;
+        }
+        outcome
+    }
+
+    async fn ask_inner(
         &self,
         engine: &Engine,
         profile: &AgentProfile,
@@ -1656,8 +1678,12 @@ impl Harness {
             .collect();
         let runs = futures::stream::iter(jobs.into_iter().map(
             |(name, input, approved, invocation)| async move {
+                let fence = self
+                    .cancel
+                    .clone()
+                    .map(|token| Arc::new(token) as Arc<dyn ark_tools::CommitFence>);
                 engine
-                    .run_approved_action(project, &name, input, approved, invocation)
+                    .run_approved_action(project, &name, input, approved, invocation, fence)
                     .await
             },
         ))
@@ -1676,6 +1702,12 @@ impl Harness {
             self.cancellable(runs).await
         };
         let Some(results) = results else {
+            if let Some(cancel) = &self.cancel {
+                cancel
+                    .wait_for_commit()
+                    .await
+                    .map_err(std::io::Error::other)?;
+            }
             return Ok(false);
         };
         for (p, inv) in pending.iter().zip(results) {
@@ -1771,16 +1803,20 @@ impl Harness {
     /// Hand the user's mid-turn messages to the model at the end of `round`.
     fn deliver_steering(
         &self,
-        texts: Vec<String>,
+        texts: Vec<steer::SteeringInput>,
         round: &mut Vec<Message>,
         steered: &mut Vec<String>,
         on_event: &mut impl FnMut(HarnessEvent),
     ) {
-        for text in texts {
+        for input in texts {
+            let text = input.model_text();
             round.push(Message::user(format!(
                 "The user added this while you were working. Take it into account and continue:\n{text}"
             )));
-            on_event(HarnessEvent::Steered { text: text.clone() });
+            on_event(HarnessEvent::Steered {
+                text: input.text,
+                context: input.context,
+            });
             steered.push(text);
         }
     }

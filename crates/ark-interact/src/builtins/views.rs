@@ -321,7 +321,7 @@ pub struct Tools;
 impl Command for Tools {
     meta!("tools", "The tools this agent can use");
     async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        let mut actions = ix.ark().tools().actions();
+        let mut actions = ix.ark().tools_for(&ix.project().id).actions();
         actions.sort_by(|a, b| a.name.cmp(&b.name));
         let core = ix.ark().profile().core_actions.clone();
         let mut t = Table::plain(3);
@@ -380,8 +380,10 @@ impl Command for Connect {
                 r.text(format!("Open this page to sign in, then come back:\n{url}"))
             };
         }
-        r.blocks
-            .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+        r.blocks.extend(
+            crate::capabilities::report(&crate::capabilities::list_for(ix.ark(), &ix.project().id))
+                .blocks,
+        );
         Ok(r.into())
     }
 }
@@ -476,8 +478,13 @@ impl Command for Disconnect {
             crate::capabilities::turn(ix.ark().computer(), which, false)?;
             let mut r = Report::new()
                 .success("The Computer is off. Agents ask before they use your apps again.");
-            r.blocks
-                .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+            r.blocks.extend(
+                crate::capabilities::report(&crate::capabilities::list_for(
+                    ix.ark(),
+                    &ix.project().id,
+                ))
+                .blocks,
+            );
             return Ok(r.into());
         }
         let account = crate::capabilities::disconnect(ix.ark().connections(), which).await?;
@@ -485,8 +492,10 @@ impl Command for Disconnect {
             "Disconnected {}. ARK's access is revoked; every capability it served needs connecting again.",
             account.name
         ));
-        r.blocks
-            .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+        r.blocks.extend(
+            crate::capabilities::report(&crate::capabilities::list_for(ix.ark(), &ix.project().id))
+                .blocks,
+        );
         Ok(r.into())
     }
 }

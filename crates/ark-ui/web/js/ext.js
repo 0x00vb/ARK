@@ -1,7 +1,10 @@
 import { setAgentIdentity } from "./dom.js";
 // The extension points an app's scripts use, available as `window.ark`:
 //
-//   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
+//   ark.panel({ id, title, icon, nav, presents, wide, fill, expandable, render(el, params, api) })
+//                      expandable offers a full workspace with the active conversation's
+//                      existing composer and approvals in a floating dock. It does not
+//                      create a conversation or bind the resource to an agent.
 //   ark.view({ id, title, icon, nav, command, render(el, params, api) })
 //                      a view of the current project in the main column, in place of the
 //                      conversation; `nav` makes it a destination in the fixed workspace rail.
@@ -11,6 +14,10 @@ import { setAgentIdentity } from "./dom.js";
 //                      focusInput(), cancel(), show(), hide(), and captureUploadOrigin() for a primary conversation.
 //                      Choosing Chat brings the conversation back. A panel's `nav` lists it in
 //                      the title bar's + menu, after ARK's Terminal, Browser and Files.
+//                      A view with its own conversation can return conversation():
+//                      { surface, title, location, focus(resourceFocus) }. The surface is its
+//                      existing chatView element; location names the actual runtime/project.
+//                      focus receives a frozen snapshot to include in that recipient's work.
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
 //                      configuration, not one project's. `advanced` lists it under Advanced.
@@ -277,6 +284,7 @@ export function installApi(api) {
 /// Who handles a `present` directive for `view`: a panel or an artifact viewer that lists it.
 /// An app's panel comes before ARK's built-in one for the same view.
 export function presenterFor(view) {
+  for (const v of registry.views.values()) if ((v.presents || []).includes(view)) return { view: v };
   const panels = [...registry.panels.values()].sort((a, b) => !!a.builtin - !!b.builtin);
   for (const p of panels) if ((p.presents || []).includes(view)) return { panel: p };
   for (const v of registry.viewers) if ((v.presents || []).includes(view)) return { viewer: v };

@@ -93,7 +93,7 @@ test("pending decisions take precedence over work, deduplicate, resolve and reco
   await page.locator('.project[data-id="a"] > .project-row .session-attention').waitFor();
   assert.equal(await page.locator('.project[data-id="a"] > .project-row .session-attention').innerText(), "1");
   assert.equal(await page.locator('.project[data-id="b"] .session-attention').count(), 0);
-  const project = page.locator('.project[data-id="a"] .project-row');
+  const project = page.locator('.project[data-id="a"] .project-row .project-name');
   await project.focus();
   emit({ kind: "approval", ...request, id: 8 });
   await page.locator('.project[data-id="a"] > .project-row .session-attention').getByText("2", { exact: true }).waitFor();
@@ -369,4 +369,38 @@ test("view navigation stays immediate while a turn is running", () => fixture(as
   await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor();
   assert.equal(await page.locator("#queue").innerText(), "");
   assert.equal(await page.locator(".app").getAttribute("data-running"), "true");
+}));
+
+
+test("agent chat navigation uses the registered conversation view with a session fallback", () => fixture(async page => {
+  assert.equal(await page.evaluate(async () => {
+    const opened = [];
+    const original = window.ark.openSession;
+    window.ark.openSession = id => opened.push(id);
+    await window.ark.openAgentChat("Editor", "work-conversation");
+    window.ark.openSession = original;
+    return opened[0];
+  }), "work-conversation");
+  await page.evaluate(async () => {
+    window.ark.view({ id: "owned-agent-chat", title: "Agent", agentConversation: true, resourceScoped: true, render(el, params) { el.textContent = `Conversation with ${params.name}`; } });
+    await window.ark.openAgentChat("Editor", "work-conversation");
+  });
+  await page.getByText("Conversation with Editor", { exact: true }).waitFor();
+}));
+
+
+test("a property menu stays within the window at the bottom edge", () => fixture(async page => {
+  const bounds = await page.evaluate(() => {
+    const anchor = document.createElement("button");
+    anchor.textContent = "Owner";
+    Object.assign(anchor.style, { position: "fixed", bottom: "0", right: "12px" });
+    document.body.append(anchor);
+    const menu = window.ark.popover(anchor, Array.from({ length: 12 }, (_, index) => {
+      const button = document.createElement("button"); button.className = "menu-item"; button.textContent = `Agent ${index}`; return button;
+    }));
+    const rect = menu.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: innerHeight };
+  });
+  assert.ok(bounds.top >= 0 && bounds.bottom <= bounds.height, JSON.stringify(bounds));
+  await page.getByRole("button", { name: "Agent 11", exact: true }).click();
 }));

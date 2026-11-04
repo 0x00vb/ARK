@@ -183,7 +183,14 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 | `ark.status({ id, render })` | A line at the bottom of the sidebar |
 | `ark.on(name, fn)` | App events, and ARK's own as `ark:<kind>` (`ark:turn_finished`, `ark:event`, ...; in a browser also `ark:reconnecting`, `ark:disconnected` with `retry()`, `ark:connected`) |
 
-`render(el, params, api)` may return `{ update(params), refresh(), focus(), dispose() }`.
+`render(el, params, api)` may return `{ update(params), refresh(), focus(), beforeRemove(), dispose() }`.
+`beforeRemove()` may return a promise. ARK removes the tab only when it resolves to `true`.
+Returning another value or rejecting keeps the controller and view. ARK coalesces concurrent close
+requests and makes the view inert during the handoff. The controller must also stop changes from
+its own asynchronous callbacks and retain any unsaved work before returning `true`. A project tab
+is hidden while a project-change handoff is pending or refused. Opening it again waits for that
+handoff. Closing the pane only hides it and does not call `beforeRemove`. This hook does not guard
+process termination, crashes, or window shutdown; consumers must retain drafts independently.
 `presents` lists the `PresentDirective` views it handles, so an agent's "show this" opens
 it. `focus()` returns `{ surface, selection }`: while the panel is visible the agent is told
 what the person is looking at.
@@ -357,3 +364,36 @@ continue to use the runtime's revisioned automation_layout record.
 Drag overview cards to arrange them. Alt plus an arrow moves a focused card. Enter on the
 canvas creates a draft; all tools are also reachable with Tab. Escape restores selection.
 Tasks uses the same boardView, itemPanel and ticketShell as an ordinary project board.
+Its status and owner controls keep accessible names without repeated visible labels. Delete
+lives under the three-dot actions menu. Enter sends from the composer; Shift+Enter adds a
+line. Sending creates and assigns an agent if none is assigned, retains the submission for
+safe retries, and opens the assigned agent's existing chat directly. Changing the owner starts a
+compatible admission instead of reusing another agent's receipt.
+
+Automation names are editable in the header. New drafts start as New automation. Name
+validation remains active for edits; the name is not repeated inside Start.
+
+A consumer can mark its agent chat view with `agentConversation: true`. The shared
+`ark.openAgentChat(name, conversation)` opens that view with `{name}` through the scoped
+view API. Without a registered agent conversation view it opens the supplied conversation.
+Navigation refuses a different runtime or project.
+
+Start and step configuration expands within the selected card. Collapse card returns focus
+to its handle. Cards scroll internally and retain their saved canvas positions. The permissions
+editor is removed. Saved authority and the activation review remain unchanged.
+
+Secondary click and Shift+F10 open the relevant card, canvas, project, chat, task, message or
+file actions. Menus skip disabled items with arrow keys and support Home, End and Escape.
+Text fields, links and text selections retain their native menus.
+
+Product control sizes follow the brand `--ark-control-*` tokens through the shared
+`--control-*` aliases. Chat and file close buttons are 24px square with zero padding.
+Standard desktop buttons are 32px. Coarse-pointer targets are at least 44px.
+
+Consumer views can call `ark.contextMenu(event, anchor, actions)` with action records containing
+`label`, `run` and optional `disabled`. It returns a close function when opened. The shared
+menu preserves native text editing and owns keyboard navigation, placement and dismissal.
+
+Automation canvas selection does not create a draft. Add automation and the canvas's
+Enter action create explicitly. Studio places the shared conversation at the right;
+its content, history and composer are the same chat surface.

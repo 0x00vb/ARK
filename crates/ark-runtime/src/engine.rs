@@ -25,6 +25,14 @@ use crate::plugins::{PluginSpec, PluginStatus, Plugins};
 /// have happened.
 pub const INTERRUPTED_CALL: &str = "interrupted: the process stopped before this call finished";
 
+enum ActionAuthorization<'a> {
+    Direct(bool),
+    Reviewed {
+        approved: bool,
+        pending: Option<&'a Invocation>,
+    },
+}
+
 #[derive(Clone)]
 pub struct Engine {
     /// Shared with every engine made by [`scoped`](Engine::scoped).
@@ -38,6 +46,7 @@ pub struct Engine {
     plugins: Option<Arc<Plugins>>,
     /// Other sources of tools that change while the engine runs (connected accounts).
     sources: Vec<Arc<dyn ToolSource>>,
+    project_scope: Option<ProjectId>,
     /// Folders of skills that come with the app's tools ([`crate::skills::dirs`]).
     skills: Vec<std::path::PathBuf>,
     skill_packages: Vec<Arc<crate::skills::packages::SkillPackage>>,
@@ -122,6 +131,7 @@ impl Engine {
             sniffers: Vec::new(),
             plugins: None,
             sources: Vec::new(),
+            project_scope: None,
             skills: Vec::new(),
             skill_packages: Vec::new(),
             stopping: Arc::default(),
@@ -144,6 +154,7 @@ impl Engine {
             sniffers: self.sniffers.clone(),
             plugins: None,
             sources: Vec::new(),
+            project_scope: self.project_scope.clone(),
             skills: self.skills.clone(),
             skill_packages: self.skill_packages.clone(),
             stopping: self.stopping.clone(),
@@ -156,6 +167,15 @@ impl Engine {
         }
     }
 
+    /// A registry view bound to a project. Existing narrower scope cannot be widened.
+    pub fn scoped_for(&self, project: &ProjectId, registry: Registry) -> Engine {
+        let mut engine = self.scoped(registry);
+        if engine.project_scope.is_none() {
+            engine.project_scope = Some(project.clone());
+        }
+        engine
+    }
+
     /// This engine, with every call it runs naming `work` ([`Invocation::work`]): a
     /// conversation's turn, so the calls of a turn that stopped can be found when it continues.
     pub fn for_work(&self, work: impl Into<String>) -> Engine {
@@ -165,6 +185,7 @@ impl Engine {
             sniffers: self.sniffers.clone(),
             plugins: self.plugins.clone(),
             sources: self.sources.clone(),
+            project_scope: self.project_scope.clone(),
             skills: self.skills.clone(),
             skill_packages: self.skill_packages.clone(),
             stopping: self.stopping.clone(),
@@ -285,30 +306,129 @@ impl Engine {
     /// sources as they are at this moment. A turn or task takes this once, when it starts, and
     /// keeps it. A source's adapter whose name is taken is left out.
     pub fn tools(&self) -> Registry {
-        let mut registry = self.registry.clone();
-        let mut taken: Vec<String> = registry
-            .adapters()
+        self.tools_for_scope(None)
+    }
+
+    /// Snapshot dynamic sources for one project.
+    pub fn tools_for(&self, project: &ProjectId) -> Registry {
+        if self
+            .project_scope
+            .as_ref()
+            .is_some_and(|scope| scope != project)
+        {
+            return Registry::new();
+        }
+        self.tools_for_scope(Some(project))
+    }
+
+    fn tools_for_scope(&self, project: Option<&ProjectId>) -> Registry {
+        self.source_snapshot(project).0
+    }
+
+    /// Names a reserved source cannot use because another source or plugin owns them.
+    pub fn source_conflicts_for(&self, project: &ProjectId) -> Vec<String> {
+        self.source_snapshot(Some(project)).1
+    }
+
+    fn source_snapshot(&self, project: Option<&ProjectId>) -> (Registry, Vec<String>) {
+        let sources: Vec<_> = self
+            .sources
             .iter()
-            .map(|a| a.name().to_string())
+            .map(|source| {
+                let adapters = match project {
+                    Some(project) => source.adapters_for(project.as_str()),
+                    None => source.adapters(),
+                };
+                (source.reserved_names(), adapters)
+            })
             .collect();
-        let plugins = self
-            .plugins
-            .iter()
-            .map(|p| p.clone() as Arc<dyn ToolSource>);
-        for source in plugins.chain(self.sources.iter().cloned()) {
-            for a in source.adapters() {
-                if !taken.iter().any(|n| n == a.name()) {
-                    taken.push(a.name().to_string());
-                    registry.register(a);
+        let mut conflicts = std::collections::BTreeSet::new();
+        for (owner, (names, _)) in sources.iter().enumerate() {
+            for name in names {
+                let in_registry = self
+                    .registry
+                    .adapters()
+                    .iter()
+                    .any(|adapter| adapter.name() == name);
+                let in_plugin = self.plugins.as_ref().is_some_and(|plugins| {
+                    plugins.list().iter().any(|plugin| &plugin.name == name)
+                });
+                let in_source = sources
+                    .iter()
+                    .enumerate()
+                    .any(|(index, (reserved, adapters))| {
+                        index != owner
+                            && (reserved.contains(name)
+                                || adapters.iter().any(|adapter| adapter.name() == name))
+                    });
+                if in_registry || in_plugin || in_source {
+                    conflicts.insert(name.clone());
                 }
             }
         }
-        registry
+        let mut registry = self.registry.filtered(|action| {
+            let namespace = action.split('.').next().unwrap_or(action);
+            !conflicts.contains(namespace)
+        });
+        let mut taken: std::collections::BTreeSet<String> = registry
+            .adapters()
+            .iter()
+            .map(|adapter| adapter.name().to_owned())
+            .collect();
+        if let Some(plugins) = &self.plugins {
+            for adapter in plugins.adapters() {
+                if !conflicts.contains(adapter.name()) && taken.insert(adapter.name().to_owned()) {
+                    registry.register(adapter);
+                }
+            }
+        }
+        for (_, adapters) in sources {
+            for adapter in adapters {
+                if conflicts.contains(adapter.name()) {
+                    continue;
+                }
+                if taken.insert(adapter.name().to_owned()) {
+                    registry.register(adapter);
+                }
+            }
+        }
+        (registry, conflicts.into_iter().collect())
     }
 
     /// Add a source of tools that change while the engine runs ([`ToolSource`]).
     pub fn add_source(&mut self, source: Arc<dyn ToolSource>) {
+        if source.reserved_names().is_empty() {
+            self.sources.push(source);
+        } else if let Err(error) = self.try_add_source(source) {
+            tracing::error!(%error, "tool source could not be registered");
+        }
+    }
+
+    /// Register a source only when its reserved names are not already in use.
+    pub fn try_add_source(&mut self, source: Arc<dyn ToolSource>) -> Result<(), AgentError> {
+        let names = source.reserved_names();
+        let mut taken: std::collections::BTreeSet<String> = self
+            .registry
+            .adapters()
+            .iter()
+            .map(|a| a.name().to_owned())
+            .collect();
+        if let Some(plugins) = &self.plugins {
+            taken.extend(plugins.list().into_iter().map(|p| p.name));
+        }
+        for existing in &self.sources {
+            taken.extend(existing.reserved_names());
+            taken.extend(existing.adapters().into_iter().map(|a| a.name().to_owned()));
+        }
+        for name in names {
+            if name.is_empty() || !taken.insert(name.clone()) {
+                return Err(AgentError::Plugin(format!(
+                    "Tool namespace `{name}` is already in use"
+                )));
+            }
+        }
         self.sources.push(source);
+        Ok(())
     }
 
     /// Whether a turn's tools can differ from the registry (plugins or other sources).
@@ -352,6 +472,11 @@ impl Engine {
         self.scoped(self.tools())
     }
 
+    /// A turn snapshot whose dynamic sources are scoped to its project.
+    pub fn for_project_turn(&self, project: &ProjectId) -> Engine {
+        self.scoped_for(project, self.tools_for(project))
+    }
+
     /// The MCP plugins, when this engine was opened on a root (they live in its
     /// `plugins.json`).
     pub fn plugins(&self) -> Option<&Arc<Plugins>> {
@@ -363,12 +488,17 @@ impl Engine {
         let plugins = self.plugins.as_ref().ok_or_else(|| {
             AgentError::Plugin("this app was not opened on a store root; it has no plugins".into())
         })?;
-        let taken: Vec<String> = self
+        let mut taken: Vec<String> = self
             .registry
             .adapters()
             .iter()
             .map(|a| a.name().to_string())
             .collect();
+        taken.extend(
+            self.sources
+                .iter()
+                .flat_map(|source| source.reserved_names()),
+        );
         plugins.add(spec, &taken)
     }
 
@@ -391,16 +521,20 @@ impl Engine {
     /// as still in progress (or, worse, as finished) after a crash. Returns how many.
     pub fn recover_interrupted(&self) -> Result<usize, AgentError> {
         let mut n = 0;
-        for (project, mut inv) in self.store.list_running_invocations()? {
+        for observed in self.store.list_running_invocations_for_recovery()? {
+            let inv = observed.invocation();
             if inv
                 .pid
                 .is_some_and(|p| crate::process::writer_alive(p, inv.pid_start))
             {
                 continue;
             }
-            inv.mark_failed(INTERRUPTED_CALL);
-            self.store.put_invocation(&project, &inv)?;
-            n += 1;
+            if self
+                .store
+                .interrupt_invocation_if_unchanged(&observed, INTERRUPTED_CALL)?
+            {
+                n += 1;
+            }
         }
         // A chat's turn a stopped process left begun: opening its session marks it, so the
         // chat lists it, interrupted, before anyone opens it (ADR 0048).
@@ -425,7 +559,24 @@ impl Engine {
 
     /// Register an adapter on the engine's registry.
     pub fn register(&mut self, a: Arc<dyn ark_tools::Adapter>) {
+        if let Err(error) = self.try_register(a) {
+            tracing::error!(%error, "tool adapter could not be registered");
+        }
+    }
+
+    pub fn try_register(&mut self, a: Arc<dyn ark_tools::Adapter>) -> Result<(), AgentError> {
+        if self
+            .sources
+            .iter()
+            .any(|source| source.reserved_names().iter().any(|name| name == a.name()))
+        {
+            return Err(AgentError::Plugin(format!(
+                "Tool namespace `{}` is reserved",
+                a.name()
+            )));
+        }
         self.registry.register(a);
+        Ok(())
     }
 
     /// Classify bytes: consumer sniffers first, then the built-in text/json/binary detector.
@@ -775,9 +926,11 @@ impl Engine {
             project,
             &pending.action.clone(),
             pending.input.clone(),
-            true,
-            true,
-            Some(pending),
+            ActionAuthorization::Reviewed {
+                approved: true,
+                pending: Some(&pending),
+            },
+            None,
         )
         .await
     }
@@ -789,8 +942,14 @@ impl Engine {
         input: serde_json::Value,
         allow_mutate: bool,
     ) -> Result<Invocation, AgentError> {
-        self.run_action_authorized(project, action, input, allow_mutate, false, None)
-            .await
+        self.run_action_authorized(
+            project,
+            action,
+            input,
+            ActionAuthorization::Direct(allow_mutate),
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn run_approved_action(
@@ -800,9 +959,37 @@ impl Engine {
         input: serde_json::Value,
         approved: bool,
         pending: Option<Invocation>,
+        fence: Option<Arc<dyn ark_tools::CommitFence>>,
     ) -> Result<Invocation, AgentError> {
-        self.run_action_authorized(project, action, input, approved, true, pending)
-            .await
+        self.run_action_authorized(
+            project,
+            action,
+            input,
+            ActionAuthorization::Reviewed {
+                approved,
+                pending: pending.as_ref(),
+            },
+            fence,
+        )
+        .await
+    }
+
+    pub async fn run_action_with_fence(
+        &self,
+        project: &ProjectId,
+        action: &str,
+        input: serde_json::Value,
+        allow_mutate: bool,
+        fence: Option<Arc<dyn ark_tools::CommitFence>>,
+    ) -> Result<Invocation, AgentError> {
+        self.run_action_authorized(
+            project,
+            action,
+            input,
+            ActionAuthorization::Direct(allow_mutate),
+            fence,
+        )
+        .await
     }
 
     async fn run_action_authorized(
@@ -810,12 +997,24 @@ impl Engine {
         project: &ProjectId,
         action: &str,
         input: serde_json::Value,
-        allow_mutate: bool,
-        guarded_approval: bool,
-        pending: Option<Invocation>,
+        authorization: ActionAuthorization<'_>,
+        fence: Option<Arc<dyn ark_tools::CommitFence>>,
     ) -> Result<Invocation, AgentError> {
+        let (allow_mutate, guarded_approval, pending) = match authorization {
+            ActionAuthorization::Direct(allow) => (allow, false, None),
+            ActionAuthorization::Reviewed { approved, pending } => {
+                (approved, true, pending.cloned())
+            }
+        };
+        if self
+            .project_scope
+            .as_ref()
+            .is_some_and(|scope| scope != project)
+        {
+            return Err(AgentError::ProjectScopeMismatch);
+        }
         // A turn's engine has its plugins in its registry already; the root engine adds them.
-        let registry = self.tools();
+        let registry = self.tools_for(project);
         let desc = registry
             .descriptor(action)
             .ok_or_else(|| AgentError::UnknownAction(action.to_string()))?;
@@ -892,13 +1091,45 @@ impl Engine {
             reservation.started().map_err(AgentError::NotAllowed)?;
         }
 
+        let publication_intent = Arc::new(ark_tools::AtomicPublicationIntent::default());
         let blobs = StoreBlobs(&self.store);
         let ctx = RunCtx::new(&blobs)
             .with_workspace(self.workspace_dir(project)?)
             .with_work(self.work.clone(), self.continues.clone())
-            .with_invocation(inv.id.as_str());
+            .with_invocation(inv.id.as_str())
+            .with_project(project.as_str())
+            .with_commit_fence(fence)
+            .with_atomic_publication(publication_intent.clone());
 
-        match registry.run(action, input, &ctx).await {
+        let outcome = registry.run(action, input, &ctx).await;
+        if publication_intent.requested() {
+            let terminal = if let Some(committed) = self.committed_invocation(project, &inv)? {
+                committed
+            } else {
+                let message = match outcome {
+                    Ok(_) => "Atomic publication was not committed".to_string(),
+                    Err(error) => error.to_string(),
+                };
+                if self
+                    .store
+                    .fail_running_invocation_if_unchanged(project, &inv, &message)?
+                {
+                    self.store
+                        .get_invocation(project, inv.id.as_str())?
+                        .ok_or(ark_store::StoreError::ImmutableConflict)?
+                } else {
+                    self.committed_invocation(project, &inv)?
+                        .ok_or(ark_store::StoreError::ImmutableConflict)?
+                }
+            };
+            if let Some(reservation) = &mut reservation {
+                reservation
+                    .finish(&terminal)
+                    .map_err(AgentError::NotAllowed)?;
+            }
+            return Ok(terminal);
+        }
+        match outcome {
             Ok(out) => {
                 inv.command = out.command;
                 inv.effect = out.effect;
@@ -919,6 +1150,34 @@ impl Engine {
             reservation.finish(&inv).map_err(AgentError::NotAllowed)?;
         }
         Ok(inv)
+    }
+
+    fn committed_invocation(
+        &self,
+        project: &ProjectId,
+        running: &Invocation,
+    ) -> Result<Option<Invocation>, AgentError> {
+        let Some(publication) = self
+            .store
+            .load_output_publication(project, running.id.as_str())?
+        else {
+            return Ok(None);
+        };
+        let result = publication.invocation;
+        if result.id != running.id
+            || result.action != running.action
+            || result.risk != running.risk
+            || result.input != running.input
+            || result.consumed != running.consumed
+            || result.created_at != running.created_at
+            || result.pid != running.pid
+            || result.pid_start != running.pid_start
+            || result.work != running.work
+            || result.narration != running.narration
+        {
+            return Err(ark_store::StoreError::ImmutableConflict.into());
+        }
+        Ok(Some(result))
     }
 }
 

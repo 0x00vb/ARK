@@ -129,7 +129,7 @@ async fn a_long_task_keeps_its_goal_what_the_person_said_and_what_it_did() {
         .goal(Some(goal))
         .steering(Some(steer))
         .ask(&engine, &profile(), &project, "cointinue", |e| match e {
-            HarnessEvent::Steered { text } => steered.push(text),
+            HarnessEvent::Steered { text, .. } => steered.push(text),
             HarnessEvent::Context { report } => dropped = dropped.max(report.compressed_rounds),
             _ => {}
         })

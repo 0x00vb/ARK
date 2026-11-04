@@ -206,7 +206,7 @@ pub fn describe(
             }
             Activity::new(K::Warning, detail.clone()).tone(Tone::Warning)
         }
-        HarnessEvent::Steered { text } => {
+        HarnessEvent::Steered { text, .. } => {
             Activity::new(K::Steered, "Your message reached the agent").detail(text.clone())
         }
         HarnessEvent::Retry { repair: true, .. } => {

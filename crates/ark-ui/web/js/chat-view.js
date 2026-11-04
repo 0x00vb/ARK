@@ -15,9 +15,14 @@ import { createChatSurface } from "./chat-surface.js";
 
 const NEAR_END = 80;
 
-export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null } = {}) {
+export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null, location = null } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
+  if (location) Object.defineProperty(api, "location", {get: () => {
+    const next = location(), origin = base.location || base.summary?.()?.location;
+    if (!next || next.runtime !== origin?.runtime || next.project !== origin?.project) throw Error("The conversation belongs to another project or computer");
+    return {...next};
+  }});
   let submitDisabled = false;
   let unavailable = false;
   api.submit = (text) => submitDisabled ? composer.set(text) : submit(text);
@@ -31,7 +36,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
   input.placeholder = placeholder;
   el.append(surface);
 
-  const inspect = typeof call === "function" ? (turn, row) => call(turn.key, row.dataset.call) : false;
+  const inspect = typeof call === "function" ? (turn, row) => call(turn.key, row.dataset.call, Number(row.dataset.n)) : false;
   const thread = new Thread(root, scroller, api, { inspect });
   const composer = new Composer(api, { ...elements, modelOpen: model?.open, captureOrigin: files?.captureOrigin });
   composer.placeholder = placeholder;

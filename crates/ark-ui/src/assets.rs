@@ -85,9 +85,7 @@ impl Assets {
     }
 
     pub(crate) fn is_frame_asset(&self, path: &str) -> bool {
-        let path = path.trim_start_matches('/');
-        let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
-        let path = path.strip_prefix(&prefix).unwrap_or(path);
+        let path = self.unversioned(path);
         confined_asset_path(path) && self.frame_assets.contains(path)
     }
 
@@ -97,10 +95,25 @@ impl Assets {
     }
 
     pub(crate) fn is_wasm_worker(&self, path: &str) -> bool {
+        let path = self.unversioned(path);
+        confined_asset_path(path) && self.wasm_workers.contains(path)
+    }
+
+    fn unversioned<'a>(&self, path: &'a str) -> &'a str {
         let path = path.trim_start_matches('/');
         let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
         let path = path.strip_prefix(&prefix).unwrap_or(path);
-        confined_asset_path(path) && self.wasm_workers.contains(path)
+        if self.development() {
+            if let Some((revision, rest)) = path
+                .strip_prefix("__dev/")
+                .and_then(|value| value.split_once('/'))
+            {
+                if revision.len() == 16 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return rest;
+                }
+            }
+        }
+        path
     }
 
     fn current_namespace(&self) -> String {
@@ -133,9 +146,7 @@ impl Assets {
 
     /// A file by path (`index.html`, `js/app.js`, `ext/app.js`), with its media type.
     pub fn get(&self, path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
-        let path = path.trim_start_matches('/');
-        let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
-        let path = path.strip_prefix(&prefix).unwrap_or(path);
+        let path = self.unversioned(path);
         let path = if path.is_empty() { "index.html" } else { path };
         if !confined_asset_path(path) {
             return None;
@@ -227,6 +238,18 @@ impl Assets {
             "    <script type=\"module\" src=\"js/dev-reload.js\"></script>\n"
         } else {
             ""
+        };
+        let raw = if self.development() {
+            raw.replace(
+                "<head>",
+                &format!(
+                    "<head>\n    <base href=\"/{VERSIONED_ROOT}/{}/__dev/{}/\">",
+                    self.current_namespace(),
+                    self.development_revision()
+                ),
+            )
+        } else {
+            raw
         };
         raw.replace("<!--ark:title-->", &escape(&self.title))
             .replace("<!--ark:theme-->", self.theme.as_str())
@@ -600,6 +623,18 @@ mod tests {
         std::fs::write(&file, "two").unwrap();
         let after = a.get(DEV_REVISION).unwrap().0;
         assert_ne!(before, after);
+        let html_after = String::from_utf8(a.get("/").unwrap().0.into_owned()).unwrap();
+        assert_ne!(
+            html, html_after,
+            "development reloads must change transitive module URLs"
+        );
+        let revision = String::from_utf8(after.into_owned()).unwrap();
+        let path = format!(
+            "_ark/{}/__dev/{revision}/ext/change.js",
+            a.current_namespace()
+        );
+        assert_eq!(a.get(&path).unwrap().0.as_ref(), b"two");
+        assert!(!html_after.contains("file://"));
 
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -28,6 +28,43 @@ pub use error::AdapterError;
 pub use mcp::{McpAdapter, McpClient, McpTool};
 pub type Result<T> = std::result::Result<T, AdapterError>;
 
+/// A durable consumer transition invoked when a turn stops or finishes.
+pub type TurnLifecycleCallback = Arc<dyn Fn() -> std::result::Result<(), String> + Send + Sync>;
+
+/// One consumer's idempotent lifecycle for a turn. Reuse the same `Arc` for retries.
+pub struct TurnLifecycle {
+    pub key: String,
+    pub initialize: TurnLifecycleCallback,
+    pub on_stop: TurnLifecycleCallback,
+    pub on_finish: TurnLifecycleCallback,
+}
+
+/// Serializes a short synchronous commit with cancellation acknowledgement.
+pub trait CommitFence: Send + Sync {
+    /// Trusted opaque identity for this turn.
+    fn turn_id(&self) -> &str;
+    /// Registers a lifecycle under the fence. This may block and must run off async workers.
+    /// Failed initialization stays registered for stop or finish reconciliation.
+    fn register_lifecycle(
+        &self,
+        lifecycle: Arc<TurnLifecycle>,
+    ) -> std::result::Result<bool, String>;
+
+    /// Runs `commit` only if cancellation has not won. A cancellation acknowledgement must
+    /// drain the fence. The callback must not await or call cancellation.
+    fn if_active(&self, commit: &mut dyn FnMut()) -> bool;
+}
+
+/// One-way runtime signal that an adapter is attempting an atomic publication.
+#[derive(Default)]
+pub struct AtomicPublicationIntent(std::sync::atomic::AtomicBool);
+
+impl AtomicPublicationIntent {
+    pub fn requested(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 /// How an adapter reads the bytes of an artifact it was asked to operate on. Implemented
 /// by whoever owns the blob store (the engine), so adapters stay ignorant of the store.
 pub trait BlobResolver: Send + Sync {
@@ -53,6 +90,12 @@ pub struct RunCtx<'a> {
     /// The durable invocation currently executing. Adapters use this opaque id for external
     /// idempotency. They must not send a chat or work id to a provider.
     pub invocation: Option<String>,
+    /// The project selected by the runtime, never supplied by tool input.
+    pub project: Option<String>,
+    /// Turn cancellation fence, when this invocation belongs to a cancellable turn.
+    pub commit_fence: Option<Arc<dyn CommitFence>>,
+    /// Runtime-owned marker; adapters declare intent through `request_atomic_publication`.
+    pub atomic_publication: Option<Arc<AtomicPublicationIntent>>,
 }
 
 impl<'a> RunCtx<'a> {
@@ -63,6 +106,9 @@ impl<'a> RunCtx<'a> {
             work: None,
             continues: Vec::new(),
             invocation: None,
+            project: None,
+            commit_fence: None,
+            atomic_publication: None,
         }
     }
     pub fn with_workspace(mut self, workspace: PathBuf) -> Self {
@@ -78,6 +124,28 @@ impl<'a> RunCtx<'a> {
     pub fn with_invocation(mut self, invocation: impl Into<String>) -> Self {
         self.invocation = Some(invocation.into());
         self
+    }
+    pub fn with_project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
+        self
+    }
+    pub fn with_commit_fence(mut self, fence: Option<Arc<dyn CommitFence>>) -> Self {
+        self.commit_fence = fence;
+        self
+    }
+    /// Install the runtime-owned marker for a call that may publish atomically.
+    pub fn with_atomic_publication(mut self, marker: Arc<AtomicPublicationIntent>) -> Self {
+        self.atomic_publication = Some(marker);
+        self
+    }
+    /// Declare publication intent before attempting any durable output commit.
+    pub fn request_atomic_publication(&self) -> Result<()> {
+        let marker = self
+            .atomic_publication
+            .as_ref()
+            .ok_or_else(|| AdapterError::Tool("Atomic publication is unavailable".into()))?;
+        marker.0.store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 }
 
@@ -270,6 +338,14 @@ impl AdapterHealth {
 pub trait ToolSource: Send + Sync {
     /// The adapters available right now.
     fn adapters(&self) -> Vec<Arc<dyn Adapter>>;
+    /// The adapters available for this project at the start of a turn.
+    fn adapters_for(&self, _project: &str) -> Vec<Arc<dyn Adapter>> {
+        self.adapters()
+    }
+    /// Names reserved even when no project currently offers an adapter.
+    fn reserved_names(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// The set of adapters available in a session. This is what the agent enumerates as its

@@ -6,7 +6,7 @@ export function createChatSurface({ kind = "secondary", session, capabilities = 
   const scroller = h("section.scroller", id("scroller"));
   const threadEl = h("div.thread", id("thread"));
   scroller.append(threadEl);
-  const asks = h("div.asks", { ...id("asks"), "aria-live": "polite" });
+  const asks = h("div.asks", { ...id("asks"), "aria-live": "polite", ...(primary ? { role: "region", "aria-label": "Questions from all conversations" } : {}) });
   const uploads = h("div.uploads");
   const queue = h("div.queue", id("queue"));
   const slash = h("div.palette", { ...id("slash"), hidden: true });

@@ -536,8 +536,11 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
         contacts: vec!["lead".into()],
         can_create: false,
     }));
-    let weather = ark_runtime::catalog::matching_actions(&registry,
-        "Task t-weather delegated by lead (from its task t-lead).\n\n== OBJECTIVE ==\nGet the current temperature in Paris and in Tokyo.", 2);
+    let weather = ark_runtime::catalog::matching_actions(
+        &registry,
+        "Task t-weather delegated by lead (from its task t-lead).\n\n== OBJECTIVE ==\nGet the current temperature in Paris and in Tokyo.",
+        2,
+    );
     assert!(
         weather.iter().any(|name| name == "weather.current"),
         "{weather:?}"
@@ -546,8 +549,11 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
         !weather.iter().any(|name| name == crate::START),
         "{weather:?}"
     );
-    let customer = ark_runtime::catalog::matching_actions(&registry,
-        "Task t-customer delegated by lead (from its task t-lead).\n\n== OBJECTIVE ==\nFind the customer Ada Lovelace: her tier, and the total of all her orders.", 2);
+    let customer = ark_runtime::catalog::matching_actions(
+        &registry,
+        "Task t-customer delegated by lead (from its task t-lead).\n\n== OBJECTIVE ==\nFind the customer Ada Lovelace: her tier, and the total of all her orders.",
+        2,
+    );
     assert_eq!(customer.len(), 2);
     assert!(
         customer.iter().all(|name| name.starts_with("crm.")),
@@ -976,7 +982,9 @@ async fn a_refused_retry_does_not_queue_or_change_the_failed_task() {
             None,
         )
         .unwrap();
-    o.inner.finish(&failed, Final::failed("original failure"));
+    o.inner
+        .finish(&failed, Final::failed("original failure"))
+        .await;
     let next = o
         .inner
         .create_task(
@@ -6469,4 +6477,50 @@ async fn legacy_policy_refresh_is_explicit_revisioned_and_cannot_replace_an_acti
             Some(adoption)
         )
         .is_err());
+}
+
+#[tokio::test]
+async fn context_messages_cannot_control_another_live_execution() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("reader")).await.unwrap();
+    let receipt = o
+        .admit_work(
+            crate::WorkTarget::Agent {
+                name: "reader".into(),
+            },
+            TaskSpec::new("request"),
+            "desktop",
+            "context-owner",
+        )
+        .await
+        .unwrap();
+    let task = receipt.task.as_deref().unwrap();
+    let mut record = o.task(task).unwrap();
+    record.execution_owner = Some("another-runtime".into());
+    record.pid = Some(std::process::id());
+    record.pid_start = process::own_start();
+    ark.engine()
+        .store
+        .put_record(
+            TASK,
+            task,
+            project.id.as_str(),
+            &serde_json::to_value(&record).unwrap(),
+        )
+        .unwrap();
+    assert!(o
+        .message("user", "reader", "plain")
+        .unwrap_err()
+        .to_string()
+        .contains("another live runtime"));
+    assert!(o
+        .message_with_context("user", "reader", "selected", "{selection}")
+        .unwrap_err()
+        .to_string()
+        .contains("another live runtime"));
+    assert!(o.agent("reader").unwrap().inbox.is_empty());
 }

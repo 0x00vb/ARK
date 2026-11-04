@@ -447,7 +447,7 @@ impl Orchestrator {
         let listed = self
             .inner
             .engine
-            .tools()
+            .tools_for(&self.inner.project.id)
             .adapters()
             .iter()
             .map(|a| a.name().to_string())
@@ -654,13 +654,30 @@ impl Orchestrator {
         v
     }
 
-    /// Stop a task and every task it delegated that has not ended.
+    /// Request cancellation of a task and every unfinished task it delegated. This returns
+    /// when cancellation is requested; observe the final task state for completion.
     pub fn cancel(&self, task: &str) -> Result<(), OrchError> {
         self.inner.require_execution_control(task)?;
         if !self.inner.state.lock().unwrap().tasks.contains_key(task) {
             return Err(OrchError::UnknownTask(task.into()));
         }
         self.inner.cancel_tree(task, Stop::Cancel);
+        Ok(())
+    }
+
+    /// Requests cancellation, then waits until the task and its delegated descendants finish.
+    pub async fn cancel_and_wait(&self, task: &str) -> Result<(), OrchError> {
+        self.cancel(task)?;
+        let mut pending = vec![task.to_string()];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            self.cancel(&id)?;
+            let record = self.wait(&id).await?;
+            pending.extend(record.children);
+        }
         Ok(())
     }
 
@@ -706,6 +723,19 @@ impl Orchestrator {
     pub fn message(&self, from: &str, agent: &str, text: &str) -> Result<bool, OrchError> {
         self.inner.require_agent_control(agent)?;
         self.inner.send(from, agent, text, None)
+    }
+
+    /// Send a note with a frozen, descriptive context snapshot.
+    pub fn message_with_context(
+        &self,
+        from: &str,
+        agent: &str,
+        text: &str,
+        context: &str,
+    ) -> Result<bool, OrchError> {
+        self.inner.require_agent_control(agent)?;
+        self.inner
+            .send_with_context(from, agent, text, None, context)
     }
 
     /// Live events, including streamed text (which is not stored).
@@ -786,7 +816,7 @@ impl Orchestrator {
         match self.agent(agent) {
             None => return Err(OrchError::UnknownAgent(agent.into())),
             Some(a) if a.state == AgentState::Terminated => {
-                return Err(OrchError::Terminated(agent.into()))
+                return Err(OrchError::Terminated(agent.into()));
             }
             _ => {}
         }
@@ -2820,7 +2850,7 @@ impl Inner {
                     }
                 }
             }
-            me.finish(&id, f);
+            me.finish(&id, f).await;
             if let Err(error) = me.cleanup_work_result(&id) {
                 tracing::error!(task = %id, %error, "could not settle the retained work result");
             }
@@ -2844,23 +2874,19 @@ impl Inner {
     }
 
     fn stop(&self, id: &str, stop: Stop) {
-        let token = {
-            let mut st = self.state.lock().unwrap();
-            let Some(t) = st.tasks.get_mut(id) else {
-                return;
-            };
-            if t.record.state.is_final() {
-                return;
-            }
-            // A cancel overrides a suspend or a limit; nothing overrides a cancel.
-            match (&t.stop, &stop) {
-                (Some(Stop::Cancel), _) => {}
-                (None, _) | (_, Stop::Cancel) => t.stop = Some(stop),
-                _ => {}
-            }
-            t.cancel.clone()
+        let mut st = self.state.lock().unwrap();
+        let Some(t) = st.tasks.get_mut(id) else {
+            return;
         };
-        token.cancel();
+        if t.record.state.is_final() {
+            return;
+        }
+        match (&t.stop, &stop) {
+            (Some(Stop::Cancel), _) => {}
+            (None, _) | (_, Stop::Cancel) => t.stop = Some(stop),
+            _ => {}
+        }
+        t.cancel.cancel();
     }
 
     /// Stop a task and every open task below it.
@@ -3162,10 +3188,15 @@ impl Inner {
                 }
             };
             if !owner_known {
-                self.finish(
-                    id,
-                    Final::failed(format!("{INTERRUPTED}; its agent is gone")),
-                );
+                let me = self.arc();
+                let id = id.clone();
+                tokio::spawn(async move {
+                    me.finish(
+                        &id,
+                        Final::failed(format!("{INTERRUPTED}; its agent is gone")),
+                    )
+                    .await;
+                });
                 continue;
             }
             if !asking {
@@ -3566,7 +3597,7 @@ impl Inner {
 
         // Its tools: the allowed app actions, its agent tools, diagrams, rules.
         // The app's tools and the plugins connected now, as this agent may use them.
-        let mut registry: Registry = self.engine.tools().filtered(|a| {
+        let mut registry: Registry = self.engine.tools_for(&scope).filtered(|a| {
             spec.tools.iter().any(|p| action_matches(p, a))
                 && (task.run.is_none() || !a.starts_with("agents."))
         });
@@ -3689,9 +3720,9 @@ impl Inner {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
         }
         let engine = if task.submission.is_some() {
-            self.engine.for_work(id).scoped(registry)
+            self.engine.for_work(id).scoped_for(&scope, registry)
         } else {
-            self.engine.scoped(registry)
+            self.engine.scoped_for(&scope, registry)
         };
         let mut profile = self.agent_profile(spec, &delegates);
         if !turn_on.is_empty() {
@@ -3786,6 +3817,9 @@ impl Inner {
             }
         };
         let steer = Steering::new();
+        let Some(attempt_cancel) = cancel.child() else {
+            return Attempt::Stopped(self.stop_reason(id).unwrap_or(Stop::Cancel));
+        };
         let budget = &task.budget;
         if task.submission.is_some() {
             match session.execution_project(&self.engine) {
@@ -3825,7 +3859,7 @@ impl Inner {
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(spec.allow_mutate)
             .approvals(approvals.clone())
-            .cancel(Some(cancel.clone()))
+            .cancel(Some(attempt_cancel.clone()))
             .stopping(Some(self.engine.stopping()))
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
@@ -3932,10 +3966,11 @@ impl Inner {
             if let Some(a) = self.state.lock().unwrap().agents.get_mut(owner) {
                 a.steering = None;
                 // A program takes no messages while it works: they wait for the next task.
-                for text in steer.take_undelivered() {
+                for input in steer.take_undelivered_inputs() {
                     a.record.inbox.push(Mail {
                         from: "?".into(),
-                        text,
+                        text: input.text,
+                        context: input.context,
                         task: None,
                         at_ms: now_ms(),
                     });
@@ -3963,6 +3998,17 @@ impl Inner {
         if let Some(t) = timer {
             t.abort();
         }
+        let mut cleanup_delay = Duration::from_millis(250);
+        while let Err(error) = attempt_cancel.wait_for_commit().await {
+            tracing::error!(task = %id, %error, "could not finish pending task changes");
+            self.queued(
+                id,
+                TaskState::Waiting,
+                "Could not finish this task. Retrying.".into(),
+            );
+            tokio::time::sleep(cleanup_delay).await;
+            cleanup_delay = (cleanup_delay * 2).min(Duration::from_secs(5));
+        }
         let ran = started.elapsed().as_millis() as u64;
         self.update_task(id, |t| t.run_ms += ran);
         {
@@ -3970,10 +4016,11 @@ impl Inner {
             if let Some(a) = st.agents.get_mut(owner) {
                 a.steering = None;
                 // Messages that arrived too late for this task wait for the next one.
-                for text in steer.take_undelivered() {
+                for input in steer.take_undelivered_inputs() {
                     a.record.inbox.push(Mail {
                         from: "?".into(),
-                        text,
+                        text: input.text,
+                        context: input.context,
                         task: None,
                         at_ms: now_ms(),
                     });
@@ -4225,26 +4272,59 @@ impl Inner {
         }
     }
 
-    fn finish(&self, id: &str, f: Final) {
+    async fn finish(&self, id: &str, mut f: Final) {
         if !f.state.is_final() {
             return self.leave(id);
         }
-        let rec = self.update_task(id, |t| {
-            t.state = f.state;
-            t.result = f.result.clone();
-            t.error = f.error.clone();
-            t.waiting_on = None;
-            t.finished_ms = Some(now_ms());
-            if t.submission.is_none() {
-                t.pid = None;
-                t.pid_start = None;
+        let mut drained = false;
+        let mut cleanup_delay = Duration::from_millis(250);
+        let (rec, token) = loop {
+            let pending = {
+                let mut state = self.state.lock().unwrap();
+                let Some(task) = state.tasks.get_mut(id) else {
+                    return;
+                };
+                if task.cancel.is_cancelled() && !drained {
+                    Err(task.cancel.clone())
+                } else {
+                    if matches!(task.stop, Some(Stop::Cancel)) {
+                        f = Final::cancelled("cancelled");
+                    } else if let Some(Stop::Limit(reason)) = &task.stop {
+                        f = Final::failed(format!("budget exceeded: {reason}"));
+                    }
+                    task.record.state = f.state;
+                    task.record.result = f.result.clone();
+                    task.record.error = f.error.clone();
+                    task.record.waiting_on = None;
+                    task.record.finished_ms = Some(now_ms());
+                    if task.record.submission.is_none() {
+                        task.record.pid = None;
+                        task.record.pid_start = None;
+                    }
+                    task.record.question = None;
+                    task.answer = None;
+                    Ok((task.record.clone(), task.cancel.clone()))
+                }
+            };
+            match pending {
+                Ok(value) => break value,
+                Err(token) => match token.wait_for_commit().await {
+                    Ok(()) => drained = true,
+                    Err(error) => {
+                        tracing::error!(task = %id, %error, "could not finish pending task changes");
+                        self.queued(
+                            id,
+                            TaskState::Waiting,
+                            "Could not finish this task. Retrying.".into(),
+                        );
+                        tokio::time::sleep(cleanup_delay).await;
+                        cleanup_delay = (cleanup_delay * 2).min(Duration::from_secs(5));
+                    }
+                },
             }
-            t.question = None;
-        });
-        if let Some(t) = self.state.lock().unwrap().tasks.get_mut(id) {
-            t.answer = None;
-        }
-        let Some(rec) = rec else { return };
+        };
+        self.save_task(&rec);
+        token.release_drained_children();
         let owner = rec.owner.clone();
         let current = self
             .state
@@ -4303,6 +4383,7 @@ impl Inner {
                 );
                 self.update_agent(agent, |a| {
                     a.inbox.push(Mail {
+                        context: String::new(),
                         from: rec.owner.clone(),
                         text,
                         task: Some(rec.id.clone()),
@@ -4854,8 +4935,24 @@ impl Inner {
         text: &str,
         task: Option<&str>,
     ) -> Result<bool, OrchError> {
+        self.send_with_context(from, to, text, task, "")
+    }
+
+    fn send_with_context(
+        &self,
+        from: &str,
+        to: &str,
+        text: &str,
+        task: Option<&str>,
+        context: &str,
+    ) -> Result<bool, OrchError> {
         if text.trim().is_empty() {
             return Err(OrchError::NotAllowed("an empty message".into()));
+        }
+        if context.len() > ark_runtime::steer::MAX_STEERING_CONTEXT {
+            return Err(OrchError::NotAllowed(
+                "message context exceeds its size limit".into(),
+            ));
         }
         let delivered = {
             let mut st = self.state.lock().unwrap();
@@ -4866,15 +4963,26 @@ impl Inner {
             if a.record.state == AgentState::Terminated {
                 return Err(OrchError::Terminated(to.into()));
             }
+            let queued: usize = a.record.inbox.iter().map(|mail| mail.context.len()).sum();
+            let running = a.steering.as_ref().map_or(0, Steering::context_bytes);
+            if queued.saturating_add(running).saturating_add(context.len())
+                > ark_runtime::steer::MAX_QUEUED_CONTEXT
+            {
+                return Err(OrchError::NotAllowed(
+                    "pending message context is full".into(),
+                ));
+            }
             match &a.steering {
                 Some(s) => {
-                    s.push(format!("Message from {from}: {text}"));
+                    s.push_with_context(format!("Message from {from}: {text}"), context)
+                        .map_err(OrchError::NotAllowed)?;
                     true
                 }
                 None => {
                     a.record.inbox.push(Mail {
                         from: from.to_string(),
                         text: text.to_string(),
+                        context: context.to_string(),
                         task: task.map(str::to_string),
                         at_ms: now_ms(),
                     });

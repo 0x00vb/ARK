@@ -457,7 +457,7 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             Some(detail.clone()),
             if *passed { Tone::Muted } else { Tone::Warning },
         ),
-        HarnessEvent::Steered { text } => (
+        HarnessEvent::Steered { text, .. } => (
             E::Steered,
             "your message reached the model".into(),
             Some(clip(text, 100)),

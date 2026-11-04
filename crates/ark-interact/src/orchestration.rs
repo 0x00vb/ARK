@@ -235,13 +235,13 @@ pub fn schedule_calendar(
                 while next < to {
                     if !occupied.contains(&(record.id.clone(), next)) {
                         add(
-                        format!("{}-{next}", record.id),
-                        next,
-                        next + 60_000,
-                        "planned",
-                        &revision,
-                        "Scheduled start. Duration is not known. A run does not prove publication.",
-                    )?;
+                            format!("{}-{next}", record.id),
+                            next,
+                            next + 60_000,
+                            "planned",
+                            &revision,
+                            "Scheduled start. Duration is not known. A run does not prove publication.",
+                        )?;
                     }
                     if record.when.once {
                         break;
@@ -946,6 +946,11 @@ pub enum Control {
         agent: String,
         text: String,
     },
+    MessageWithContext {
+        agent: String,
+        text: String,
+        context: String,
+    },
     /// Stop a schedule (a run already started goes on).
     Unschedule {
         schedule: String,
@@ -1056,7 +1061,7 @@ pub async fn control(
             }
         }
         Control::Cancel { task } => {
-            o.cancel(&task)?;
+            o.cancel_and_wait(&task).await?;
             ControlOutcome::Done(format!("cancelled {task}"))
         }
         Control::Retry { task } => {
@@ -1080,6 +1085,14 @@ pub async fn control(
                 anyhow::bail!("a message needs text");
             }
             let delivered = o.message("user", &agent, &text)?;
+            ControlOutcome::Messaged { agent, delivered }
+        }
+        Control::MessageWithContext {
+            agent,
+            text,
+            context,
+        } => {
+            let delivered = o.message_with_context("user", &agent, &text, &context)?;
             ControlOutcome::Messaged { agent, delivered }
         }
         Control::Unschedule { schedule } => {

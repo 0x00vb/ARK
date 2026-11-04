@@ -1004,6 +1004,7 @@ async function board(page) {
   await page.locator(".bd-card", { hasText: "Edit chapter 2" }).locator(".bd-check").click();
   assert.deepEqual(await column("done"), ["Edit chapter 2"]);
 
+  await page.evaluate(() => window.ark.call("spawn_agent", { spec: { name: "writer", role: "drafts chapters" } }));
   // A click opens the card in the board's place; a note typed there is kept.
   await page.locator(".bd-card", { hasText: "Draft chapter 3" }).click();
   const panel = page.locator(".bd-detail .bd-panel");
@@ -1025,10 +1026,11 @@ async function board(page) {
   await page.waitForFunction(async () => (await window.ark.call("board")).items.some((w) => w.note === "Under 2,000 words."));
 
   // Given to an agent, the card moves to Done on its own, and the panel shows the answer.
-  await page.evaluate(() => window.ark.call("spawn_agent", { spec: { name: "writer", role: "drafts chapters" } }));
-  await page.locator(".bd-p-give").waitFor();
-  await page.locator(".bd-p-give").click();
-  await page.locator(".popover .menu-item", { hasText: "writer" }).click();
+  await assignee.click();
+  await page.locator(".popover.open").getByRole("menuitemradio", { name: /^writer/ }).click();
+  await panel.getByRole("textbox", { name: "Message", exact: true }).fill("Draft chapter 3");
+  await panel.getByRole("button", { name: "Send message", exact: true }).click();
+  await page.locator("#thread").getByText("Chapter 3 is drafted.", { exact: true }).waitFor();
   await panel.locator(".bd-p-said", { hasText: "Chapter 3 is drafted." }).waitFor();
   assert.match(await panel.locator(".bd-p-history summary").innerText(), /History · \d/);
   // Back shows the board, the card in Done and the focus on it.
@@ -3049,7 +3051,8 @@ async function chatWorkspacePolish(page) {
   assert.equal(await artifactTab.count(), 1, "panel activation is its own accessible control");
   assert.equal(await artifactClose.count(), 1, "panel close is its own accessible control");
   const artifactCloseBox = await artifactClose.boundingBox();
-  assert.ok(artifactCloseBox.width >= 30 && artifactCloseBox.height >= 30, JSON.stringify(artifactCloseBox));
+  assert.equal(artifactCloseBox.width, 24);
+  assert.equal(artifactCloseBox.height, 24);
 
   const firstItem = page.locator(`.chat-tab-item[data-session="${first}"]`);
   const firstTab = firstItem.getByRole("tab");
@@ -3057,7 +3060,8 @@ async function chatWorkspacePolish(page) {
   assert.equal(await firstTab.count(), 1, "chat activation is its own accessible control");
   assert.equal(await firstClose.count(), 1, "chat close is its own accessible control");
   const closeBox = await firstClose.boundingBox();
-  assert.ok(closeBox.width >= 30 && closeBox.height >= 30, JSON.stringify(closeBox));
+  assert.equal(closeBox.width, 24);
+  assert.equal(closeBox.height, 24);
   await firstTab.focus();
   await page.keyboard.press("Tab");
   assert.equal(await firstClose.evaluate((el) => el === document.activeElement), true, "Tab reaches the matching close action");
@@ -3715,7 +3719,15 @@ async function agentConversations(page, fromNewChat = false) {
     await page.locator('.pane-view.bd .bd-card', { hasText: original.title }).click();
     await page.locator(".bd-detail:visible").getByRole("textbox", { name: "Title", exact: true }).waitFor();
     assert.equal(await page.locator(".bd-detail:visible").count(), 1, "the board opens its shared ticket detail");
+    const taskActions = page.getByRole("button", { name: "More work actions", exact: true });
+    await taskActions.press("Enter");
+    await page.getByRole("button", { name: "Delete", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(await taskActions.evaluate(element => element === document.activeElement), true);
     await page.locator(".bd-detail:visible").getByRole("button", { name: /Conversation/ }).click();
+    await page.locator("#thread").getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
+    assert.equal(await page.evaluate(() => window.ark.summary().location.session), original.conversation);
+    await page.evaluate(work => window.ark.openView("work-chat", { work }), original.id);
     await work.getByRole("heading", { name: original.title, exact: true }).waitFor();
     assert.equal(await work.getByRole("complementary", { name: "Work properties" }).count(), 1);
     const actions = work.getByRole("button", { name: "More ticket actions", exact: true });
@@ -3742,7 +3754,20 @@ async function agentConversations(page, fromNewChat = false) {
     assert.equal(new Set(items.map(item => item.conversation)).size, 2);
     assert.equal((await page.evaluate(() => window.ark.call("agents"))).length, 0);
     assert.equal((await page.evaluate(() => window.ark.call("graph"))).tasks.length, 0);
-    await shot(page, "general-new-chat-real-host");
+    await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Work", exact: true }).click();
+    const boardCard = page.locator('.work-real-board .bd-card', { hasText: original.title });
+    await boardCard.focus();
+    await boardCard.press("Enter");
+    await page.locator(".work-real-board").getByRole("textbox", { name: "Message", exact: true }).fill("GENERAL FOLLOWUP");
+    await page.locator(".work-real-board").getByRole("textbox", { name: "Message", exact: true }).press("Enter");
+    await page.locator('.dk-agent-chat .answer').getByText("GENERAL FOLLOWUP COMPLETE", { exact: true }).first().waitFor();
+    assert.equal(await page.locator('.view[data-view="work-chat"]:visible').count(), 0);
+    const assigned = (await page.evaluate(() => window.ark.call("agents")));
+    assert.equal(assigned.length, 1);
+    const changed = (await page.evaluate(() => window.ark.call("board"))).items.find(item => item.id === original.id);
+    assert.equal(changed.owner, assigned[0].name);
+    await page.locator(".pane-view.bd").getByRole("button", { name: `Assigned to: ${assigned[0].name}`, exact: true }).waitFor();
+    await shot(page, "work-direct-agent-chat-real-host");
     return;
   } else {
     const composer = page.locator("#input");

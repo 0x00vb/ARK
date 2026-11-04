@@ -32,7 +32,7 @@ fi
 if [ -n "$page_tests" ]; then
   node --experimental-vm-modules --test crates/ark-ui/tests/web/browser-route.test.mjs crates/ark-ui/tests/web/avatar-initial.test.mjs crates/ark-ui/tests/web/transport-reconnect.test.mjs
   step "WebKit page tests"
-  node --test --test-concurrency=1 crates/ark-ui/tests/web/project-section.test.mjs crates/ark-ui/tests/web/upload-drafts.test.mjs crates/ark-ui/tests/web/work-state.test.mjs crates/ark-ui/tests/web/automations-library.test.mjs crates/ark-ui/tests/web/automation-inputs.test.mjs crates/ark-ui/tests/web/board-canvas.test.mjs crates/ark-ui/tests/web/calendar-data.test.mjs crates/ark-ui/tests/web/calendar.test.mjs
+  node --test --test-concurrency=1 crates/ark-ui/tests/web/computer-recovery.test.mjs crates/ark-ui/tests/web/project-section.test.mjs crates/ark-ui/tests/web/upload-drafts.test.mjs crates/ark-ui/tests/web/work-state.test.mjs crates/ark-ui/tests/web/automations-library.test.mjs crates/ark-ui/tests/web/automation-inputs.test.mjs crates/ark-ui/tests/web/context-menu.test.mjs crates/ark-ui/tests/web/controls.test.mjs crates/ark-ui/tests/web/board-canvas.test.mjs crates/ark-ui/tests/web/calendar-data.test.mjs crates/ark-ui/tests/web/calendar.test.mjs
   ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --test page --locked -- --test-threads 1
   ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --lib --locked desktop_notification
 fi

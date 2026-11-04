@@ -40,7 +40,7 @@ test('webhook input preview is inert and scheduled required inputs disable activ
     assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>['automation_run','automation_begin_start','automation_activate','work_admit'].includes(c.method))),false);
     await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.evaluate(()=>window.fixture.holdValidation=true);
-    await page.getByRole('textbox',{name:'Name',exact:true}).fill('Compact header focus');
+    await page.getByRole('textbox',{name:'Automation name',exact:true}).fill('Compact header focus');
     await page.waitForFunction(()=>typeof window.fixture.releaseValidation==='function');
     await page.getByLabel('More automation actions').click();
     await page.getByLabel('More automation actions').focus();

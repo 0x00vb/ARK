@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased local integration
+
+- Blank automation canvas clicks no longer create drafts. Use Add automation or the
+  explicit keyboard action. Studio's shared floating conversation starts at the right.
+
+- Simplify Work controls and open its conversation directly after sending. Create and assign an agent when needed, with recoverable submission retries.
+- Edit automation names in the header and start new drafts with a valid default name.
+
+- Combine Design Studio, contextual menus and compact controls with the native Computer backend.
+- Preserve current Work receipts, selection context, approval checks and cancellation fences.
+
 ## [0.32.5] - 2026-11-02
 
 - Keep keyboard movement and focus on unsaved automation cards.
@@ -152,6 +163,7 @@ What changed for people building on ARK, per release. Not a commit log.
 - Sections: `Added`, `Changed`, `Fixed`, `Breaking`. A `Breaking` entry says what an app must
   change.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
+
 - One line per change where possible. Link to a doc instead of explaining it here.
 
 ## [0.27.2] - 2026-10-29

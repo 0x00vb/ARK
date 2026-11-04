@@ -12,9 +12,10 @@
 // panel. A drag moves a card; an agent's move glides so the person sees what changed.
 
 import { h, icon, clear, clip } from "./dom.js";
+import { bindContextMenu } from "./context-menu.js";
 import { markdown } from "./md.js";
 import { registry } from "./ext.js";
-import { ticketShell, ticketProperty } from "./ticket.js";
+import { ticketShell, ticketProperty, ticketMenu } from "./ticket.js";
 
 const COLUMNS = [
   { state: "todo", label: "To do" },
@@ -34,7 +35,9 @@ export function boardColumn(state, label, count = h("span.bd-count")) {
 }
 
 export function boardCard(attrs, ...children) {
-  return h("div.bd-card", { tabindex: "0", role: "button", ...attrs }, ...children);
+  const card = h("div.bd-card", { tabindex: "0", role: "button", ...attrs }, ...children);
+  bindContextMenu(card, () => [{ label: "Open task", run: () => card.click() }]);
+  return card;
 }
 
 // ---- the shared state: the view and the panel draw from it ------------------------------------
@@ -821,12 +824,13 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
   const blocked = h("div.bd-p-blocked");
   const work = h("div.bd-p-work");
   const history = h("details.bd-p-history");
-  const del = h("button.btn.ghost.small.bd-p-delete", { type: "button" }, "Delete");
+  const del = h("button.menu-item.bd-p-delete", { type: "button" }, "Delete");
   const shell = ticketShell(el);
-  shell.head.append(title);
+  const more = h("button.icon-btn", { type: "button", "aria-label": "More work actions", "aria-haspopup": "menu", onclick: () => ticketMenu(ark, more, [del]) }, icon("more"));
+  shell.head.append(title, more);
   const chat = h("section.bd-p-chat");
   shell.content.append(blocked, note, work, chat, history);
-  shell.properties.append(segs, meta, del);
+  shell.properties.append(segs, meta);
   // The pane can change width: the text boxes follow.
   const resized = new ResizeObserver(() => { fitTitle(); fitNote(); });
   resized.observe(el);
@@ -836,10 +840,6 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
     if (w) ark.call("board_remove", { item: w.id }).then(gone).catch((error) => ark.toast(error.message));
   };
 
-  function menu(anchor, entries) {
-    ark.popover(anchor, entries.map((e) => h("button.menu-item", { type: "button", "aria-current": e.current ? "true" : null, onclick: () => { document.querySelector(".popover")?.close?.(); e.run(); } },
-      h("span", e.label), e.sub ? h("span.menu-sub", e.sub) : null)));
-  }
 
   function draw() {
     if (!alive) return;
@@ -855,12 +855,14 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
     if (editing !== "note") { note.value = w.note || ""; fitNote(); }
 
     clear(segs);
-    segs.append(ticketProperty(ark, { label: "Status", value: COLUMNS.find(column => column.state === w.state)?.label || w.state, mark: statusMark(w.state), entries: COLUMNS.map(column => ({ label: column.label, current: w.state === column.state, run: () => w.state !== column.state && change(id, { state: column.state }) })) }));
+    segs.append(ticketProperty(ark, { label: "Status", compact: true, value: COLUMNS.find(column => column.state === w.state)?.label || w.state, mark: statusMark(w.state), entries: COLUMNS.map(column => ({ label: column.label, current: w.state === column.state, run: () => w.state !== column.state && change(id, { state: column.state }) })) }));
 
     // Who has it, and handing it to an agent: the one action here that starts work.
     clear(meta);
     const busy = openTask(w);
-    meta.append(ticketProperty(ark, { label: "Assigned to", value: w.owner ? ownerName(w.owner) : "No owner", mark: avatar(w.owner) || h("span.bd-avatar.none"), disabled: !!busy, title: busy ? `${busy[1].owner} is working on it` : "Change owner", entries: [
+    const pendingDraft = ticketDrafts.get(`${ark.location?.runtime || ""}:${ark.location?.project || w.project}:${w.id}`);
+    const pendingSend = pendingDraft?.attempt || pendingDraft?.sending;
+    meta.append(ticketProperty(ark, { label: "Assigned to", compact: true, value: w.owner ? ownerName(w.owner) : "No owner", mark: avatar(w.owner) || h("span.bd-avatar.none"), disabled: !!busy || !!pendingSend, title: pendingSend ? "Retry the pending message before changing owner" : busy ? `${busy[1].owner} is working on it` : "Change owner", entries: [
       { label: "No owner", current: !w.owner, run: () => change(id, { owner: "" }) },
       { label: "You", current: w.owner === PERSON, run: () => change(id, { owner: PERSON }) },
       ...panel.agents.map(agent => ({ label: agent.name, sub: clip(agent.role, 40), current: w.owner === agent.name, run: () => change(id, { owner: agent.name }) })),
@@ -869,14 +871,6 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
       const [tid, t] = busy;
       meta.append(h("span.bd-p-busy", running(w) ? h("span.bd-live") : null, t.state === "running" ? "Working" : t.state === "waiting" ? "Waiting on its helpers" : "Queued"),
         h("button.btn.ghost.small", { type: "button", onclick: () => ark.call("cancel_task", { task: tid }).catch((e) => ark.toast(e.message)) }, "Stop"));
-    } else if (w.state !== "done" && panel.agents.length) {
-      const give = h("button.btn.small.bd-p-give", { type: "button" }, "Give to…");
-      give.onclick = () => menu(give, panel.agents.map((a) => ({
-        label: a.name,
-        sub: clip(a.role, 40),
-        run: () => ark.call("board_give", { item: id, agent: a.name }).catch((e) => ark.toast(e.message)),
-      })));
-      meta.append(give);
     }
 
     clear(blocked);
@@ -908,15 +902,21 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
 
     clear(chat);
     const detail = store.derived?.get(w.id);
-    const openChat = () => ark.openView("work-chat", { work: w.id });
+    const openChat = () => w.owner && w.owner !== PERSON ? ark.openAgentChat(w.owner, w.conversation) : ark.openSession(w.conversation);
     const draftKey = `${ark.location?.runtime || ""}:${ark.location?.project || w.project}:${w.id}`;
     const draft = ticketDrafts.get(draftKey) || { text: "", attempt: null, receipt: null, sending: false };
     ticketDrafts.set(draftKey, draft);
-    const message = h("textarea.bd-p-message", { rows: 1, "aria-label": "Message", placeholder: "Message…", oninput: event => { draft.text = event.target.value; } });
+    const message = h("textarea.bd-p-message", { rows: 1, "aria-label": "Message", placeholder: "Message…", oninput: event => { draft.text = event.target.value; fitMessage(); send.disabled = unavailable || !draft.text.trim(); } });
     message.value = draft.text;
     const send = h("button.btn.ghost", { type: "submit", "aria-label": "Send message", title: "Send message" }, icon("arrow-up"));
     const form = h("form.bd-p-chat-compose", message, send);
-    send.disabled = draft.sending || !draft.attempt && !!w.conversation && ["attention", "in_progress", "waiting"].includes(detail?.state);
+    const unavailable = draft.sending || !draft.attempt && !!w.conversation && ["attention", "in_progress", "waiting"].includes(detail?.state);
+    send.disabled = unavailable || !draft.text.trim();
+    message.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit(); }
+    });
+    const fitMessage = autosize(message);
+    fitMessage();
     if (draft.attempt) { message.readOnly = true; send.setAttribute("aria-label", "Retry sending"); send.title = "Retry sending"; }
     form.onsubmit = async event => {
       event.preventDefault();
@@ -924,19 +924,29 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
       if (!text || send.disabled) return;
       if (draft.attempt && text !== draft.attempt.task.objective) { shell.status.textContent = "Retry the pending message before changing it"; return; }
       send.disabled = true; draft.sending = true;
+      for (const control of meta.querySelectorAll("button")) control.disabled = true;
       try {
         if (!draft.attempt) {
           const selected = await ark.call("work_get", { work: w.id, receipt: null });
-          draft.attempt = { request_id: crypto.randomUUID(), receipt: selected.active_receipt || null, target: selected.item.target || (w.owner && w.owner !== PERSON ? { kind: "agent", name: w.owner } : { kind: "general", model: null }), task: { objective: text, item: w.id } };
+          const target = w.owner && w.owner !== PERSON ? { kind: "agent", name: w.owner } : null;
+          const compatible = target && selected.item.target?.kind === "agent" && selected.item.target.name === target.name;
+          const request = crypto.randomUUID();
+          draft.attempt = { request_id: request, receipt: compatible ? selected.active_receipt || null : null, target, task: { objective: text, item: w.id } };
+          if (!target) draft.creation = { request_id: request, spec: { name: `agent-${request.slice(0, 8)}`, role: w.title.slice(0, 500) } };
+        }
+        if (!draft.attempt.target) {
+          const agent = await ark.call("create_agent", draft.creation);
+          await ark.call("board_change", { item: w.id, change: { owner: agent.name } });
+          draft.attempt.target = { kind: "agent", name: agent.name };
         }
         draft.receipt ||= await ark.call("work_admit", draft.attempt);
-        await ark.call("work_execute", { receipt: draft.receipt.id });
+        const executed = await ark.call("work_execute", { receipt: draft.receipt.id });
         ticketDrafts.delete(draftKey);
-        if (alive) ark.openView("work-chat", { work: w.id, receipt: draft.receipt.id });
+        if (alive) await ark.openAgentChat(draft.attempt.target.name, executed.conversation || draft.receipt.conversation);
       } catch (error) { shell.status.textContent = error.message; }
       finally { draft.sending = false; if (alive) draw(); }
     };
-    if (w.conversation) chat.append(h("button.bd-p-chat-open", { type: "button", onclick: openChat }, icon("chat"), h("span", "Conversation"), detail ? h("span.bd-p-state", detail.status) : null));
+    if (w.conversation) chat.append(h("button.bd-p-chat-open", { type: "button", onclick: openChat }, icon("chat"), h("span", "Conversation")));
     chat.append(form);
     if (focusedMessage) { message.focus({ preventScroll: true }); message.setSelectionRange(...messageSelection); }
 

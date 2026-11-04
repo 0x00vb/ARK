@@ -12,6 +12,28 @@
 //! coming back finds it. Each turn's events, and each question it asks, carry its `session`, so a
 //! window shows the current chat's and lists the others as working (`working`).
 
+struct ActionRequestFence {
+    token: Arc<CancelToken>,
+    drained: bool,
+}
+
+impl Drop for ActionRequestFence {
+    fn drop(&mut self) {
+        if self.drained {
+            return;
+        }
+        self.token.cancel();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let token = self.token.clone();
+            runtime.spawn(async move {
+                if let Err(error) = token.wait_for_commit().await {
+                    tracing::error!(%error, "Could not drain an interrupted action request");
+                }
+            });
+        }
+    }
+}
+
 pub(crate) mod agent_conversations;
 mod client_creation;
 mod client_work;
@@ -1180,6 +1202,10 @@ impl Host {
                 Arc::downgrade(&host),
                 c.watch_activity(),
             ));
+            tokio::spawn(forward_computer_hazard(
+                Arc::downgrade(&host),
+                c.watch_message_status(),
+            ));
         }
         if let Some(p) = &host.processes {
             tokio::spawn(forward_processes(Arc::downgrade(&host), p.subscribe()));
@@ -1199,6 +1225,16 @@ impl Host {
                 let who = owner.rsplit('/').next().unwrap_or(&owner).to_string();
                 json!({ "owner": owner, "who": who, "session": null })
             }
+        }
+    }
+
+    fn computer_hazard(&self) -> Value {
+        match &self.computer {
+            Some(computer) => match computer.message_status() {
+                Ok(status) => json!(status),
+                Err(error) => json!({"error":error}),
+            },
+            None => Value::Null,
         }
     }
 
@@ -3031,6 +3067,44 @@ impl Host {
                     o.create_chat_agent(spec, &request).await?,
                 )?)
             }
+            O::CallDetail => {
+                let conv = self.chat_conv(&r.location.session, "", false).await?;
+                let index = match input.get("index") {
+                    None | Some(Value::Null) => None,
+                    Some(value) => Some(
+                        u32::try_from(
+                            value
+                                .as_u64()
+                                .ok_or_else(|| anyhow::anyhow!("invalid turn index"))?,
+                        )
+                        .map_err(|_| anyhow::anyhow!("invalid turn index"))?,
+                    ),
+                };
+                let k = usize::try_from(
+                    input["n"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("invalid call index"))?,
+                )
+                .map_err(|_| anyhow::anyhow!("invalid call index"))?;
+                let trace = self.trace_of(&conv, index).await?;
+                let call = trace
+                    .as_ref()
+                    .and_then(|t| t.call(k).cloned())
+                    .ok_or_else(|| anyhow::anyhow!("no call #{k}"))?;
+                let invocation = match &call.invocation {
+                    Some(id) => self.engine.store.get_invocation(&project.id, id)?,
+                    None => None,
+                };
+                let entries: Vec<_> = trace
+                    .map(|t| {
+                        t.entries
+                            .into_iter()
+                            .filter(|entry| entry.call == Some(k))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(json!({ "call": call, "invocation": invocation, "entries": entries }))
+            }
             O::SpawnAgent => {
                 let o = self.resource_orchestrator(&r).await?;
                 let spec: AgentSpec = serde_json::from_value(input["spec"].clone())?;
@@ -3771,9 +3845,25 @@ impl Host {
                     O::SuspendAgent => Control::Suspend { agent: s("agent") },
                     O::ResumeAgent => Control::Resume { agent: s("agent") },
                     O::TerminateAgent => Control::Terminate { agent: s("agent") },
-                    O::MessageAgent => Control::Message {
-                        agent: s("agent"),
-                        text: s("text"),
+                    O::MessageAgent => match input.get("context") {
+                        None => Control::Message {
+                            agent: s("agent"),
+                            text: s("text"),
+                        },
+                        Some(context) => {
+                            let context = context
+                                .as_str()
+                                .ok_or_else(|| anyhow::anyhow!("message context must be text"))?;
+                            anyhow::ensure!(
+                                context.len() <= ark_runtime::steer::MAX_STEERING_CONTEXT,
+                                "message context exceeds its size limit"
+                            );
+                            Control::MessageWithContext {
+                                agent: s("agent"),
+                                text: s("text"),
+                                context: context.into(),
+                            }
+                        }
                     },
                     _ => unreachable!(),
                 };
@@ -3851,7 +3941,8 @@ impl Host {
             )?),
             O::Tools => {
                 let mut actions =
-                    ark_sdk::offered_tools(&self.engine, &self.caps.per_agent).actions();
+                    ark_sdk::offered_tools_for(&self.engine, &project.id, &self.caps.per_agent)
+                        .actions();
                 actions.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(Value::Array(
                     actions
@@ -3945,19 +4036,32 @@ impl Host {
                     "height": shot.height,
                 }))
             }
-            O::RunAction => Ok(serde_json::to_value(
-                self.engine
-                    .run_action(
+            O::RunAction => {
+                let mut request = ActionRequestFence {
+                    token: Arc::new(CancelToken::new()),
+                    drained: false,
+                };
+                let result = self
+                    .engine
+                    .run_action_with_fence(
                         &project.id,
                         &s("action"),
                         input.get("input").cloned().unwrap_or(Value::Null),
                         input["approved"].as_bool().unwrap_or(false),
+                        Some(request.token.clone()),
                     )
-                    .await?,
-            )?),
+                    .await;
+                let drained = request.token.wait_for_commit().await;
+                request.drained = true;
+                drained?;
+                Ok(serde_json::to_value(result?)?)
+            }
             O::Focus => {
                 let conv = self.chat_conv(&r.location.session, "", true).await?;
-                let focus: Option<Focus> = serde_json::from_value(input["focus"].clone()).ok();
+                let value = input
+                    .get("focus")
+                    .ok_or_else(|| anyhow::anyhow!("focus is required"))?;
+                let focus: Option<Focus> = serde_json::from_value(value.clone())?;
                 if let Some(focus) = &focus {
                     crate::files::validate_focus(focus)?;
                 }
@@ -4277,6 +4381,7 @@ impl Host {
                     "approvals": pending,
                     "working": self.working(),
                     "computer": self.computer_user(),
+                    "computer_hazard": self.computer_hazard(),
                     // How the window names a file before opening it: one list, ark-files'.
                     "file_kinds": ark_sdk::prelude::ark_files::extensions()
                         .into_iter()
@@ -4304,6 +4409,27 @@ impl Host {
                 Some(c) => Ok(serde_json::to_value(
                     c.check_message_again().await.map_err(anyhow::Error::msg)?,
                 )?),
+                None => anyhow::bail!("this app does not use the computer"),
+            },
+            "computer_review" => match &self.computer {
+                Some(c) => Ok(serde_json::to_value(
+                    c.review_message_block().map_err(anyhow::Error::msg)?,
+                )?),
+                None => anyhow::bail!("this app does not use the computer"),
+            },
+            "computer_acknowledge" => match &self.computer {
+                Some(c) => {
+                    anyhow::ensure!(
+                        params["accepted_unverified"].as_bool() == Some(true),
+                        "review the message app before allowing new drafts"
+                    );
+                    let status = c
+                        .acknowledge_message_block(&s("token"))
+                        .map_err(anyhow::Error::msg)?;
+                    Ok(
+                        json!({"status":"acknowledged","verified":false,"retry_allowed":false,"app":status.app,"kind":status.kind}),
+                    )
+                }
                 None => anyhow::bail!("this app does not use the computer"),
             },
             "computer_context" => Ok(serde_json::to_value(self.computer_context())?),
@@ -4465,8 +4591,15 @@ impl Host {
                 }
             }
             "cancel" => {
-                if let Some(r) = self.conv_for(&params).running.lock().unwrap().as_ref() {
-                    r.ctl.cancel.cancel();
+                let token = self
+                    .conv_for(&params)
+                    .running
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|r| r.ctl.cancel.clone());
+                if let Some(token) = token {
+                    token.cancel_and_wait().await?;
                 }
                 Ok(json!({}))
             }
@@ -4922,9 +5055,12 @@ impl Host {
             "context" => Ok(serde_json::to_value(self.context().await?)?),
             // What ARK can use: one list with the terminal's `/connect`. Connecting answers the
             // sign-in page for the page to open; it finishes in the background.
-            "capabilities" => Ok(serde_json::to_value(
-                ark_interact::capabilities::list_parts(&self.caps),
-            )?),
+            "capabilities" => {
+                let project = ProjectId(self.cur().about.lock().unwrap().project.clone());
+                Ok(serde_json::to_value(
+                    ark_interact::capabilities::list_parts_for(&self.caps, Some(&project)),
+                )?)
+            }
             "capability_connect" => Ok(json!({
                 "url": ark_interact::capabilities::connect(
                     self.caps.connections.as_ref(),
@@ -5789,15 +5925,24 @@ impl Host {
                 let conv = self
                     .conv_of(&session)
                     .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
-                let running = conv.running.lock().unwrap();
-                let r = running
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
                 if method == "chat_steer" {
+                    let running = conv.running.lock().unwrap();
+                    let r = running
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
                     r.ctl.steer.push(s("text"));
                     Ok(json!({ "queued": true }))
                 } else {
-                    r.ctl.cancel.cancel();
+                    let token = conv
+                        .running
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("no turn is running"))?
+                        .ctl
+                        .cancel
+                        .clone();
+                    token.cancel_and_wait().await?;
                     Ok(json!({}))
                 }
             }
@@ -6145,13 +6290,25 @@ impl Host {
             Err(_) => (false, false, end.error_line(), String::new(), 0),
         };
         conv.note(&ix);
+        drop(ix);
+        let mut retry_delay = std::time::Duration::from_millis(250);
+        let mut notified = false;
+        while let Err(error) = ctl.cancel.wait_for_commit().await {
+            tracing::error!(%error, "could not finish the turn's pending changes");
+            if !notified {
+                self.emit(json!({ "kind": "turn_cleanup", "session": session, "message": "Could not finish this turn. Retrying." }));
+                notified = true;
+            }
+            tokio::time::sleep(retry_delay).await;
+            retry_delay = (retry_delay * 2).min(std::time::Duration::from_secs(5));
+        }
         // Not while the windows move to another chat: this decides whether it stays live.
         let one = self.switching.lock().await;
         let current = self.is_current(&conv);
         if current {
+            let ix = conv.ix.lock().await;
             self.refresh_with(&ix).await;
         }
-        drop(ix);
         *conv.running.lock().unwrap() = None;
         // A chat in the background, or held here for another runtime, ends with its turn; its
         // session is stored and opens again when called.
@@ -6303,6 +6460,17 @@ async fn forward_computer_activity(
             .map(ark_interact::labels::computer_activity_line)
             .unwrap_or_default();
         h.emit(json!({ "kind": "computer_action", "activity": activity, "line": line }));
+    }
+}
+
+async fn forward_computer_hazard(
+    host: std::sync::Weak<Host>,
+    mut rx: tokio::sync::watch::Receiver<Option<ark_sdk::prelude::ark_computer::HazardStatus>>,
+) {
+    while rx.changed().await.is_ok() {
+        let Some(host) = host.upgrade() else { break };
+        let hazard = rx.borrow().clone();
+        host.emit(json!({"kind":"computer_hazard","hazard":hazard}));
     }
 }
 

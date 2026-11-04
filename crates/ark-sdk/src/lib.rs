@@ -336,6 +336,19 @@ pub fn offered_tools(engine: &Engine, per_agent: &[Arc<dyn PerAgent>]) -> Regist
     tools
 }
 
+/// Every action offered for a particular project.
+pub fn offered_tools_for(
+    engine: &Engine,
+    project: &ProjectId,
+    per_agent: &[Arc<dyn PerAgent>],
+) -> Registry {
+    let mut tools = engine.tools_for(project);
+    for provider in per_agent {
+        tools.register(provider.listing());
+    }
+    tools
+}
+
 impl Ark {
     pub fn builder() -> ArkBuilder {
         ArkBuilder::default()
@@ -521,7 +534,7 @@ impl Ark {
             .as_ref()
             .map(|g| g.text())
             .unwrap_or_else(|| input.to_string());
-        let (engine, rules) = self.with_rules(&project, &goal_text)?;
+        let (engine, rules) = self.with_rules(&project, &execution_project, &goal_text)?;
         let (engine, catalog) = self.with_skills(engine, &project);
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(&opts.tools, &router, &owner);
@@ -577,8 +590,13 @@ impl Ark {
                 .ask(&engine, &profile, &execution_project, input, move |ev| {
                     // What the person said while it ran is part of the goal: kept now, so a
                     // crash keeps it.
-                    if let HarnessEvent::Steered { text } = &ev {
-                        if let Err(e) = stored.steered_now(store, text) {
+                    if let HarnessEvent::Steered { text, context } = &ev {
+                        let retained = ark_runtime::steer::SteeringInput {
+                            text: text.clone(),
+                            context: context.clone(),
+                        }
+                        .model_text();
+                        if let Err(e) = stored.steered_now(store, &retained) {
                             tracing::warn!("could not keep a message sent while the turn ran: {e}");
                         }
                     }
@@ -647,9 +665,9 @@ impl Ark {
 
     /// The engine a turn starts with: the app's tools and the MCP plugins connected now. A
     /// plugin added or removed later changes the next turn, not this one.
-    fn turn_engine(&self) -> Arc<Engine> {
+    fn turn_engine(&self, project: &ProjectId) -> Arc<Engine> {
         if self.engine.has_sources() {
-            Arc::new(self.engine.for_turn())
+            Arc::new(self.engine.for_project_turn(project))
         } else {
             self.engine.clone()
         }
@@ -660,9 +678,10 @@ impl Ark {
     fn with_rules(
         &self,
         project: &ProjectId,
+        execution_project: &ProjectId,
         input: &str,
     ) -> Result<(Arc<Engine>, Option<RuleSelection>), ArkError> {
-        let engine = self.turn_engine();
+        let engine = self.turn_engine(execution_project);
         let words: Vec<_> = input
             .split(|c: char| !c.is_alphanumeric())
             .filter(|word| !word.is_empty())
@@ -752,6 +771,10 @@ impl Ark {
     /// Every action a turn would be offered now ([`offered_tools`]).
     pub fn tools(&self) -> Registry {
         offered_tools(&self.engine, &self.per_agent)
+    }
+
+    pub fn tools_for(&self, project: &ProjectId) -> Registry {
+        offered_tools_for(&self.engine, project, &self.per_agent)
     }
 
     /// The accounts and capabilities this app can connect; `None` unless it turned them on.
@@ -905,7 +928,7 @@ impl Ark {
             .map(|g| g.text())
             .unwrap_or_else(|| task.to_string());
         let router = self.session_router(session).await?;
-        let (engine, rules) = self.with_rules(session.project(), &query)?;
+        let (engine, rules) = self.with_rules(session.project(), &execution_project, &query)?;
         let (engine, catalog) = self.with_skills(engine, session.project());
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(tools, &router, &owner);
@@ -943,7 +966,7 @@ impl Ark {
             .router
             .for_conversation(&format!("run/{}", uuid::Uuid::new_v4()))?;
         let tools = self.turn_tools(&[], &router, "ark");
-        let (engine, mut profile) = self.with_tools(self.turn_engine(), &tools);
+        let (engine, mut profile) = self.with_tools(self.turn_engine(project), &tools);
         self.owned(&mut profile, "ark", &router);
         Ok(self
             .harness_with(router)
@@ -1337,10 +1360,10 @@ impl ArkBuilder {
             sources.push(Arc::new(c.clone()));
         }
         for source in self.sources {
-            engine.add_source(source);
+            engine.try_add_source(source)?;
         }
         if let Some(p) = &processes {
-            engine.register(Arc::new(ark_proc::ProcessTool(p.clone())));
+            engine.try_register(Arc::new(ark_proc::ProcessTool(p.clone())))?;
             profile.distillers.push(ark_proc::distill());
             sources.push(Arc::new(ark_proc::Installs::new(p.clone())));
         }
@@ -1445,9 +1468,9 @@ mod tests {
             .build()
             .unwrap();
         let project = ark.create_project("memory", "").unwrap();
-        let base = ark.turn_engine();
+        let base = ark.turn_engine(&project.id);
         for input in ["", "write a report", "a remembered detail", "fix the code"] {
-            let (engine, _) = ark.with_rules(&project.id, input).unwrap();
+            let (engine, _) = ark.with_rules(&project.id, &project.id, input).unwrap();
             assert_eq!(
                 capability_index(&engine.registry),
                 capability_index(&base.registry)
@@ -1461,7 +1484,7 @@ mod tests {
             "learn  \n from this correction",
             "save this correction",
         ] {
-            let (engine, _) = ark.with_rules(&project.id, input).unwrap();
+            let (engine, _) = ark.with_rules(&project.id, &project.id, input).unwrap();
             assert!(engine.registry.descriptor(SUGGEST).is_some());
         }
         let session = SessionId::new();
@@ -1481,7 +1504,7 @@ mod tests {
             )
             .unwrap();
         assert!(ark
-            .with_rules(&project.id, "write a report")
+            .with_rules(&project.id, &project.id, "write a report")
             .unwrap()
             .0
             .registry
@@ -1496,7 +1519,7 @@ mod tests {
             )
             .unwrap();
         assert!(ark
-            .with_rules(&project.id, "write a report")
+            .with_rules(&project.id, &project.id, "write a report")
             .unwrap()
             .0
             .registry
@@ -1511,7 +1534,7 @@ mod tests {
             )
             .unwrap();
         assert!(ark
-            .with_rules(&project.id, "write a report")
+            .with_rules(&project.id, &project.id, "write a report")
             .unwrap()
             .0
             .registry

@@ -2117,3 +2117,170 @@ async fn webhook_ingress_limits_invalid_signatures_and_slow_bodies_without_block
     );
     assert_eq!(model.calls.lock().unwrap().len(), 0);
 }
+
+struct HeldCommit {
+    started: Arc<tokio::sync::Notify>,
+    release: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+#[async_trait::async_trait]
+impl Adapter for HeldCommit {
+    fn name(&self) -> &str {
+        "held"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "held.write",
+            "write",
+            RiskTier::Mutate,
+        )]
+    }
+    async fn run(&self, _: &str, _: Value, ctx: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+        let fence = ctx.commit_fence.clone().expect("turn fence");
+        let release = self.release.lock().unwrap().take().unwrap();
+        let started = self.started.clone();
+        tokio::task::spawn_blocking(move || {
+            fence.if_active(&mut || {
+                started.notify_one();
+                release.recv().unwrap();
+            })
+        })
+        .await
+        .unwrap();
+        Ok(ActionOutput::json(json!({})))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn overlapping_stops_and_new_turn_wait_for_a_held_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let (release, receive) = std::sync::mpsc::channel();
+    let provider: Arc<dyn ark_model::Provider> = mock("held.write");
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .tool(Arc::new(HeldCommit {
+            started: started.clone(),
+            release: std::sync::Mutex::new(Some(receive)),
+        }))
+        .profile(AgentProfile::builder().core_actions(["held.write"]).build())
+        .provider(provider)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let host = ArkUi::new(App::new("Test").ark(ark))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let mut events = host.subscribe();
+    host.call("send", json!({"text":"write"})).await.unwrap();
+    let ask = next(&mut events, "approval").await;
+    host.call("approve", json!({"id":ask["id"],"decision":"allow_once"}))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), started.notified())
+        .await
+        .unwrap();
+    let mut first = Box::pin(host.call("cancel", json!({})));
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(
+            std::future::Future::poll(first.as_mut(), cx).is_pending()
+        ))
+        .await
+    );
+    let mut second = Box::pin(host.call("cancel", json!({})));
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(
+            std::future::Future::poll(second.as_mut(), cx).is_pending()
+        ))
+        .await
+    );
+    assert!(host.call("send", json!({"text":"new turn"})).await.is_err());
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), first)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), second)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next(&mut events, "turn_finished").await["cancelled"], true);
+}
+
+struct FallibleLifecycle {
+    stop_calls: Arc<AtomicUsize>,
+}
+#[async_trait::async_trait]
+impl Adapter for FallibleLifecycle {
+    fn name(&self) -> &str {
+        "lifecycle"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "lifecycle.read",
+            "read",
+            RiskTier::Read,
+        )]
+    }
+    async fn run(&self, _: &str, _: Value, ctx: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+        let fence = ctx.commit_fence.clone().unwrap();
+        let calls = self.stop_calls.clone();
+        tokio::task::spawn_blocking(move || {
+            let binding = Arc::new(ark_tools::TurnLifecycle {
+                key: "fixture".into(),
+                initialize: Arc::new(|| Ok(())),
+                on_finish: Arc::new(|| Err("injected finish failure".into())),
+                on_stop: Arc::new(move || {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Err("injected stop failure".into())
+                    } else {
+                        Ok(())
+                    }
+                }),
+            });
+            assert!(fence.register_lifecycle(binding).unwrap());
+        })
+        .await
+        .unwrap();
+        Ok(ActionOutput::json(json!({})))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lifecycle_failure_reports_retry_and_the_chat_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .tool(Arc::new(FallibleLifecycle {
+            stop_calls: calls.clone(),
+        }))
+        .profile(
+            AgentProfile::builder()
+                .core_actions(["lifecycle.read"])
+                .build(),
+        )
+        .provider(mock("lifecycle.read"))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let host = ArkUi::new(App::new("Test").ark(ark))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let mut events = host.subscribe();
+    host.call("send", json!({"text":"read"})).await.unwrap();
+    let retry = next(&mut events, "turn_cleanup").await;
+    assert_eq!(retry["message"], "Could not finish this turn. Retrying.");
+    let ended = next(&mut events, "turn_finished").await;
+    assert_eq!(ended["ok"], false);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    host.call("send", json!({"text":"another turn"}))
+        .await
+        .unwrap();
+}

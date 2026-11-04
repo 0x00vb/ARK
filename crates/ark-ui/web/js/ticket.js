@@ -23,7 +23,7 @@ export function ticketMenu(api, anchor, choices) {
   return menu;
 }
 
-export function ticketProperty(api, { label, value, mark, entries, disabled = false, title }) {
+export function ticketProperty(api, { label, value, mark, entries, disabled = false, title, compact = false }) {
   const control = h(entries ? "button.ticket-property" : "div.ticket-property", {
     ...(entries ? { type: "button", disabled, "aria-haspopup": "menu", "aria-label": `${label}: ${value}` } : {}),
     title,
@@ -32,5 +32,5 @@ export function ticketProperty(api, { label, value, mark, entries, disabled = fa
     type: "button", role: "menuitemradio", "aria-checked": String(!!entry.current), "aria-current": entry.current ? "true" : null,
     onclick: () => entry.run(),
   }, h("span", entry.label), entry.sub ? h("span.menu-sub", entry.sub) : null)));
-  return h("div.ticket-property-row", h("span.ticket-property-label", label), control);
+  return h(`div.ticket-property-row${compact ? ".compact" : ""}`, compact ? null : h("span.ticket-property-label", label), control);
 }

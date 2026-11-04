@@ -1,4 +1,5 @@
 import { h, icon } from "./dom.js";
+import { bindContextMenu, controlActions } from "./context-menu.js";
 import { canvasScene, canvasTools } from "./canvas-tools.js";
 
 const drafts = new Map();
@@ -7,7 +8,7 @@ const keyFor = (api, params) => `${api.location?.runtime || ""}:${api.location?.
 const uid = () => `step-${crypto.randomUUID()}`;
 const initial = () => {
   const first = uid();
-  return { name: "", trigger: { kind: "manual" }, inputs: [], authority: { actions: [], max_calls: 256, max_mutations: 32 }, steps: [
+  return { name: "New automation", trigger: { kind: "manual" }, inputs: [], authority: { actions: [], max_calls: 256, max_mutations: 32 }, steps: [
     { id: first, name: "Work", action: { kind: "agent", target: { kind: "general", model: null }, prompt: "", inputs: [] } },
     { id: uid(), name: "Result", action: { kind: "result", inputs: [{ kind: "step", step: first, port: "text" }, { kind: "step", step: first, port: "files" }] } },
   ] };
@@ -23,7 +24,7 @@ export function editor(el, params, api) {
   drafts.set(key, state);
   el.classList.add("auto-editor");
   let canvasObserver;
-  let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], actions = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = state.zoom ?? 1;
+  let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = state.zoom ?? 1;
   const status = h("p.auto-status", { role: "status", "aria-live": "polite" });
   const header = h("header.auto-head");
   const validation = h("div.auto-validation", { "aria-live": "polite" });
@@ -46,7 +47,7 @@ export function editor(el, params, api) {
     return label(text, input);
   }
   function select(text, value, values, set) {
-    const input = h("select", { disabled: busy || loading || !!state.save || !!state.run, onchange: event => edit(() => set(event.target.value)) }, values.map(([id, name]) => h("option", { value: id }, name)));
+    const input = h("select", { "aria-label": text, disabled: busy || loading || !!state.save || !!state.run, onchange: event => edit(() => set(event.target.value)) }, values.map(([id, name]) => h("option", { value: id }, name)));
     input.value = value;
     return label(text, input);
   }
@@ -56,12 +57,13 @@ export function editor(el, params, api) {
   function updateHeader() {
     const focusedElement = document.activeElement;
     const focused = header.contains(focusedElement) ? focusedElement.dataset.action || focusedElement.getAttribute("aria-label") : null;
+    const nameSelection = focusedElement?.matches(".auto-name") ? [focusedElement.selectionStart, focusedElement.selectionEnd] : null;
     const menuOpen = !!header.querySelector(".auto-more[open]");
     const inputPreview = content.querySelector("[data-preview-inputs]");
     if (inputPreview) inputPreview.disabled = busy || loading || validating || !validationReady || changed() || issues.length > 0;
     const pending = state.run ? `Start pending · revision ${state.run.expected}` : state.save ? "Save pending" : changed() ? "Unsaved changes" : state.revision ? `Saved revision ${state.revision}` : "New automation";
     const active = state.head?.enabled ? state.webhookAvailability === "local" ? `Local events enabled · revision ${state.head.active_revision}` : `Active revision ${state.head.active_revision}` : state.head?.active_revision ? "Paused" : "";
-    header.replaceChildren(compact("Back", "arrow-left", () => api.openView("schedules")), h("h1.sv-title", state.draft.name || "New automation"), h("span.auto-revision", [pending, active].filter(Boolean).join(" · ")),
+    header.replaceChildren(compact("Back", "arrow-left", () => api.openView("schedules")), h("input.sv-title.auto-name", { value: state.draft.name, "aria-label": "Automation name", placeholder: "Automation name", maxlength: 240, disabled: busy || loading || !!state.save || !!state.run, oninput: event => edit(() => { state.draft.name = event.target.value; }, false) }), h("span.auto-revision", [pending, active].filter(Boolean).join(" · ")),
       compact("Undo", "undo", () => undo(false), { disabled: !state.undo.length || busy || loading || !!state.save || !!state.run }), compact("Redo", h("span.auto-flip", icon("undo")), () => undo(true), { disabled: !state.redo.length || busy || loading || !!state.save || !!state.run }),
       button(state.save ? "Retry saving" : "Save", () => void save(), { "data-action": "save", class: changed() ? "primary" : "", disabled: busy || loading || validating || !validationReady || !canSave || !!state.run || !changed() && !state.save }),
       button(state.run ? "Retry starting" : state.lastStart ? "Run again" : "Run now", () => void runDialog(), { "data-action": "run", class: changed() ? "" : "primary", disabled: busy || loading || !state.run && (validating || !validationReady || issues.length > 0) || !state.id || changed() || !!state.save }),
@@ -84,7 +86,8 @@ export function editor(el, params, api) {
       more.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); more.open = false; more.querySelector("summary").focus(); } });
       header.append(more);
     }
-    if (focused) [...header.querySelectorAll("button,summary")].find(control => (control.dataset.action || control.getAttribute("aria-label")) === focused)?.focus({ preventScroll: true });
+    if (focused) [...header.querySelectorAll("button,summary,input")].find(control => (control.dataset.action || control.getAttribute("aria-label")) === focused)?.focus({ preventScroll: true });
+    if (nameSelection) header.querySelector(".auto-name")?.setSelectionRange(...nameSelection);
   }
   function undo(redo) {
     const from = redo ? state.redo : state.undo, to = redo ? state.undo : state.redo;
@@ -205,7 +208,7 @@ export function editor(el, params, api) {
       const text = own.map(issue => `${issue.field}: ${issue.message}`).join("\n");
       if (box.textContent !== text) box.textContent = text;
     }
-    for (const issue of issues.filter(issue => issue.step && issue.step !== state.selected)) validation.append(button(`Review ${state.draft.steps.find(step => step.id === issue.step)?.name || "step"}: ${issue.message}`, () => { state.selected = issue.step; draw(); }));
+    for (const stepId of new Set(issues.filter(issue => issue.step && issue.step !== state.selected).map(issue => issue.step))) validation.append(button(`Set up ${state.draft.steps.find(step => step.id === stepId)?.name || "step"}`, () => { state.selected = stepId; draw(); }));
   }
   function queueValidation() {
     clearTimeout(validationTimer); const own = ++validationGeneration;
@@ -268,22 +271,6 @@ export function editor(el, params, api) {
     for (const rule of policies.rules) section.append(h("p", `${rule.ruleset} · revision ${rule.version}`));
     if (policies.after.length) section.append(h("p", `Waits for ${policies.after.length} existing work items`));
     return section;
-  }
-  function permissions() {
-    const section = h("details.auto-section", h("summary", "Permissions"), field("Maximum calls", state.draft.authority.max_calls, value => { state.draft.authority.max_calls = Number(value); }, "number", { min: 1, max: 1000 }), field("Maximum changes", state.draft.authority.max_mutations, value => { state.draft.authority.max_mutations = Number(value); }, "number", { min: 0, max: 1000 }));
-    for (const [index, allowed] of state.draft.authority.actions.entries()) {
-      const descriptor = actions.find(action => action.name === allowed.action);
-      const row = h("fieldset.auto-permission", h("legend", descriptor?.summary || allowed.action), field("Maximum per execution", allowed.per_run, value => { allowed.per_run = Number(value); }, "number", { min: 1, max: 1000 }), field("Maximum per hour", allowed.quota.count, value => { allowed.quota.count = Number(value); allowed.quota.window_ms = 3600000; }, "number", { min: 1, max: 1000 }));
-      if (descriptor?.auto_eligible && !descriptor.person_only && !descriptor.ask_each_time) row.append(check("Allow changes without asking", allowed.unattended, value => { allowed.unattended = value; }));
-      for (const [name, bound] of Object.entries(allowed.inputs)) {
-        row.append(select(name, bound.kind, [["free", "Any value"], ["literal", "Exact value"], ...(state.draft.inputs.some(input => input.port === "text") ? [["input", "Execution input"]] : [])], value => { allowed.inputs[name] = value === "literal" ? { kind: value, value: "" } : value === "input" ? { kind: value, name: state.draft.inputs.find(input => input.port === "text").name } : { kind: value }; }));
-        if (bound.kind === "literal") row.append(field("Exact value", typeof bound.value === "string" ? bound.value : JSON.stringify(bound.value), value => { const type = descriptor?.input_schema?.properties?.[name]?.type; bound.value = type === "number" || type === "integer" ? Number(value) : type === "boolean" ? value === "true" : value; }));
-        if (bound.kind === "input") row.append(select("Execution input", bound.name, state.draft.inputs.filter(input => input.port === "text").map(input => [input.name, input.name]), value => { bound.name = value; }));
-      }
-      row.append(button("Remove permission", () => edit(() => state.draft.authority.actions.splice(index, 1)))); section.append(row);
-    }
-    const picker = h("select", { "aria-label": "Add permission" }, h("option", { value: "" }, "Choose action"), actions.filter(action => !action.person_only && !state.draft.authority.actions.some(allowed => allowed.action === action.name)).map(action => h("option", { value: action.name }, action.summary)));
-    section.append(picker, button("Add permission", () => { const descriptor = actions.find(action => action.name === picker.value); if (descriptor) edit(() => state.draft.authority.actions.push({ action: descriptor.name, inputs: Object.fromEntries(Object.keys(descriptor.input_schema?.properties || {}).map(name => [name, { kind: "free" }])), unattended: false, per_run: 8, quota: { count: 60, window_ms: 3600000 } })); })); return section;
   }
   async function queueLayoutSave() {
     state.layoutDirty = true;
@@ -357,20 +344,37 @@ export function editor(el, params, api) {
       const node = coords(step, index);
       return node.x < position.x + 240 && node.x + 240 > position.x && node.y < position.y + 100 && node.y + 172 > position.y;
     }));
+    function selectNode(id) {
+      state.selected = id;
+      if (zoom < .8) { zoom = .8; state.zoom = zoom; }
+      draw();
+      content.querySelector(".auto-node[data-selected=true]")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+    }
     const start = h("section.auto-node.auto-start", { style: { left: `${startPosition.x}px`, top: `${startPosition.y}px` }, dataset: { selected: String(state.selected === "@start") } },
-      button("Start", () => { state.selected = "@start"; draw(); }, { class: "auto-node-handle", "aria-label": "Select Start", "aria-pressed": String(state.selected === "@start") }),
+      button("Start", () => { selectNode("@start"); }, { class: "auto-node-handle", "aria-label": "Select Start", "aria-pressed": String(state.selected === "@start") }),
       h("span.auto-kind", { manual: "Manual", schedule: "Schedule", webhook: "Webhook" }[state.draft.trigger.kind]));
+    const collapse = node => compact("Collapse card", "x", () => {
+      state.selected = null; draw();
+      const handle = node === "@start" ? content.querySelector(".auto-start .auto-node-handle") : [...content.querySelectorAll(".auto-node[data-step]")].find(card => card.dataset.step === node)?.querySelector(".auto-node-handle");
+      handle?.focus({ preventScroll: true });
+    });
+    if (state.selected === "@start") {
+      start.classList.add("auto-node-expanded");
+      start.append(collapse("@start"), h("div.auto-card-form", triggerForm(), externalInputs(), inheritedPolicies()));
+    }
+    bindContextMenu(start, () => [{ label: state.selected === "@start" ? "Collapse card" : "Edit start", run: () => start.querySelector(state.selected === "@start" ? '[aria-label="Collapse card"]' : ".auto-node-handle").click() }]);
     plane.append(start);
+    const nodeWidth = id => plane.querySelector(`.auto-node[data-step="${CSS.escape(id)}"]`)?.offsetWidth || 240;
     function edges() {
-      plane.style.width = `${Math.max(640, startPosition.x + 280, ...state.draft.steps.map((step,index) => coords(step,index).x + 280))}px`;
-      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + (plane.querySelector(`[data-step="${CSS.escape(step.id)}"]`)?.offsetHeight || 220) + 20))}px`;
+      plane.style.width = `${Math.max(640, startPosition.x + (start.offsetWidth || 240) + 40, ...state.draft.steps.map((step,index) => coords(step,index).x + nodeWidth(step.id) + 40))}px`;
+      plane.style.height = `${Math.max(400, startPosition.y + (start.offsetHeight || 100) + 20, ...state.draft.steps.map((step,index) => coords(step,index).y + (plane.querySelector(`[data-step="${CSS.escape(step.id)}"]`)?.offsetHeight || 220) + 20))}px`;
       sizeBounds();
       svg.replaceChildren();
       state.draft.steps.forEach((step, index) => {
         const before = index ? coords(state.draft.steps[index - 1], index - 1) : startPosition, after = coords(step, index);
         const path = document.createElementNS(svg.namespaceURI, "path");
         path.setAttribute("class", "auto-sequence-edge");
-        path.setAttribute("d", index ? `M ${before.x + 240} ${before.y + 26} C ${before.x + 280} ${before.y + 26}, ${after.x - 40} ${after.y + 26}, ${after.x} ${after.y + 26}` : `M ${before.x + 120} ${before.y + 84} C ${before.x + 120} ${before.y + 134}, ${after.x + 120} ${after.y - 50}, ${after.x + 120} ${after.y}`);
+        path.setAttribute("d", index ? `M ${before.x + nodeWidth(state.draft.steps[index - 1].id)} ${before.y + 26} C ${before.x + nodeWidth(state.draft.steps[index - 1].id) + 40} ${before.y + 26}, ${after.x - 40} ${after.y + 26}, ${after.x} ${after.y + 26}` : `M ${before.x + 120} ${before.y + start.offsetHeight} C ${before.x + 120} ${before.y + start.offsetHeight + 50}, ${after.x + 120} ${after.y - 50}, ${after.x + 120} ${after.y}`);
         svg.append(path);
         for (const input of step.action.inputs.filter(input => input.kind === "step")) {
           const sourceIndex = state.draft.steps.findIndex(source => source.id === input.step);
@@ -387,7 +391,7 @@ export function editor(el, params, api) {
     state.draft.steps.forEach((step, index) => {
       const position = coords(step, index);
       const node = h("section.auto-node", { style: { left: `${position.x}px`, top: `${position.y}px` }, dataset: { step: step.id, selected: String(state.selected === step.id) } });
-      const handle = button(`${index + 1}. ${step.name}`, () => { state.selected = step.id; draw(); }, { "aria-label": `Select ${step.name}`, "aria-pressed": String(state.selected === step.id), class: "auto-node-handle" });
+      const handle = button(`${index + 1}. ${step.name}`, () => { selectNode(step.id); }, { "aria-label": `Select ${step.name}`, "aria-pressed": String(state.selected === step.id), class: "auto-node-handle" });
       let drag;
       handle.addEventListener("pointerdown", event => {
         if (event.button !== 0) return;
@@ -455,10 +459,24 @@ export function editor(el, params, api) {
         control.addEventListener("pointercancel", () => { connecting = null; dragged = false; preview?.remove(); preview = null; });
         ports.append(control);
       }
-      node.append(handle, h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]), h("span.auto-node-summary", step.action.prompt || step.action.title || ""), ports); plane.append(node);
+      let cardForm = null;
+      if (state.selected === step.id) {
+        node.classList.add("auto-node-expanded");
+        const form = stepForm(step, index);
+        form.querySelector("header h2").remove();
+        node.append(collapse(step.id)); cardForm = h("div.auto-card-form", form);
+      }
+      bindContextMenu(node, () => [
+        { label: state.selected === step.id ? "Collapse card" : "Edit step", run: () => (state.selected === step.id ? node.querySelector('[aria-label="Collapse card"]') : handle).click() },
+        { label: "Move up", disabled: busy || loading || !!state.save || !!state.run || !index || index === 1 && state.legacyPolicies?.step === state.draft.steps[0].id, run: () => move(index, -1) },
+        { label: "Move down", disabled: busy || loading || !!state.save || !!state.run || state.legacyPolicies?.step === step.id || index === state.draft.steps.length - 1, run: () => move(index, 1) },
+        { label: "Remove step", disabled: busy || loading || !!state.save || !!state.run || state.legacyPolicies?.step === step.id || state.draft.steps.length === 1, run: () => edit(() => { state.draft.steps.splice(index, 1); state.selected = null; }) },
+      ]);
+      node.prepend(handle);
+      node.append(...(step.name.toLowerCase() === step.action.kind ? [] : [h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind])]), h("span.auto-node-summary", step.action.prompt || step.action.title || ""), ...(cardForm ? [cardForm] : []), ports); plane.append(node);
     });
     edges();
-    canvasObserver?.disconnect(); canvasObserver = new ResizeObserver(edges); canvasObserver.observe(viewport);
+    canvasObserver?.disconnect(); canvasObserver = new ResizeObserver(edges); canvasObserver.observe(viewport); for (const node of plane.querySelectorAll(".auto-node")) canvasObserver.observe(node);
     queueMicrotask(() => { if (alive && viewport.isConnected) edges(); });
     function zoomTo(value, fit = false) {
       const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
@@ -494,29 +512,12 @@ export function editor(el, params, api) {
     ]);
     const focused = content.contains(active) ? controlKey(active) : null;
     const selectedNode = content.querySelector(".auto-node[data-selected=true]");
+    const cardScroll = selectedNode && { id: selectedNode.dataset.step || "@start", top: selectedNode.scrollTop, left: selectedNode.scrollLeft };
     const returnFocus = selectedNode?.classList.contains("auto-start") ? ".auto-start .auto-node-handle" : selectedNode?.dataset.step ? `.auto-node[data-step="${CSS.escape(selectedNode.dataset.step)}"] .auto-node-handle` : null;
     const headerLabel = header.contains(active) ? active.dataset.action || active.getAttribute("aria-label") || active.textContent : null;
     const selection = active?.tagName === "TEXTAREA" || active?.tagName === "INPUT" && ["text", "search", "url"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
     updateHeader(); content.disabled = busy || loading || !!state.save || !!state.run; content.replaceChildren();
-    const inspector = h("aside.auto-inspector", { "aria-label": "Selected node" });
-    content.append(h("div.auto-workspace", canvas(), inspector));
-    const index = state.draft.steps.findIndex(step => step.id === state.selected);
-    const inspectorBody = h("div.auto-inspector-body");
-    if (state.selected === "@start") inspectorBody.append(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
-    else if (index >= 0) inspectorBody.append(stepForm(state.draft.steps[index], index));
-    else inspector.hidden = true;
-    if (!inspector.hidden) {
-      const controls = inspectorBody.querySelector(".auto-step-controls");
-      let more = null;
-      if (controls) {
-        for (const control of controls.querySelectorAll("button")) control.append(h("span", control.getAttribute("aria-label")));
-        more = h("details.auto-more.auto-step-menu", h("summary.btn", { "aria-label": "Step actions", title: "Step actions" }, icon("more")), controls);
-        more.addEventListener("click", event => { if (event.target.closest("button")) more.open = false; });
-        more.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); more.open = false; more.querySelector("summary").focus({ preventScroll: true }); } });
-        inspectorBody.querySelector(".auto-step > header").remove();
-      }
-      inspector.append(h("header.auto-inspector-head", h("h2", state.selected === "@start" ? "Start" : state.draft.steps[index].name), more, compact("Close inspector", "x", () => { state.selected = null; draw(); }, { class: "auto-inspector-close ghost" })), inspectorBody);
-    }
+    content.append(h("div.auto-workspace", canvas()));
     const addDisabled = state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run;
     const addChoices = h("div.auto-more-actions");
     const add = h("details.auto-add.auto-more", h("summary.btn", { "aria-label": "Add step", "aria-disabled": String(addDisabled), onclick: event => { if (addDisabled) event.preventDefault(); } }, icon("plus"), "Add node"), addChoices);
@@ -528,10 +529,6 @@ export function editor(el, params, api) {
       state.draft.steps.push(step); state.selected = step.id; if (state.insertPoint) { state.layout.positions[step.id] = state.insertPoint; state.insertPoint = null; state.layoutDirty = true; }
     }), { disabled: state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run }));
     content.querySelector(".auto-canvas-tools").append(add);
-    const inherited = inheritedPolicies();
-    const settings = permissions();
-    if (inherited) settings.append(inherited);
-    content.append(settings);
     drawValidation();
     const nextViewport = content.querySelector(".auto-canvas-viewport");
     if (nextViewport && state.pan) { nextViewport.scrollLeft = state.pan.left; nextViewport.scrollTop = state.pan.top; }
@@ -539,13 +536,17 @@ export function editor(el, params, api) {
       nextViewport.querySelector(".auto-node[data-selected=true]")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
       state.pan = { left: nextViewport.scrollLeft, top: nextViewport.scrollTop };
     }
+    const nextCard = content.querySelector(".auto-node[data-selected=true]");
+    if (cardScroll && nextCard && (nextCard.dataset.step || "@start") === cardScroll.id) {
+      nextCard.scrollTop = cardScroll.top; nextCard.scrollLeft = cardScroll.left;
+    }
     if (focused) {
       const controls = [...content.querySelectorAll("input,textarea,select,button,summary")];
       const control = controls.find(control => controlKey(control) === focused)
         || (returnFocus ? content.querySelector(returnFocus) : null);
       control?.focus({ preventScroll: true });
       if (selection && control?.setSelectionRange && (control.tagName === "TEXTAREA" || ["text", "search", "url"].includes(control.type))) control.setSelectionRange(...selection);
-    } else if (headerLabel) [...header.querySelectorAll("button,summary")].find(button => (button.dataset.action || button.getAttribute("aria-label") || button.textContent) === headerLabel)?.focus({ preventScroll: true });
+    } else if (headerLabel) [...header.querySelectorAll("button,summary,input")].find(button => (button.dataset.action || button.getAttribute("aria-label") || button.textContent) === headerLabel)?.focus({ preventScroll: true });
     el.scrollTop = pageScroll;
   }
   function dialog(title, render) {
@@ -714,14 +715,15 @@ export function editor(el, params, api) {
   const outsideActions = event => {
     for (const more of el.querySelectorAll(".auto-more[open]")) if (!more.contains(event.target)) more.open = false;
   };
+  const offContext = bindContextMenu(el, () => controlActions(header.querySelectorAll("button[data-action]:not([data-action=Back])")));
   document.addEventListener("pointerdown", outsideActions);
   el.addEventListener("keydown", keydown); el.append(header, status, validation, content, history); draw(); queuePreview();
   async function loadInitial() {
     loadError = false;
     try {
-      const [roster, files, offered, catalog] = await Promise.all([api.call("agents", {}), api.call("artifacts", {}), api.call("tools", {}), api.call("project_models", {})]);
+      const [roster, files, catalog] = await Promise.all([api.call("agents", {}), api.call("artifacts", {}), api.call("project_models", {})]);
       if (!alive) return;
-      agents = roster; artifacts = files; actions = offered; models = catalog;
+      agents = roster; artifacts = files; models = catalog;
       if (params.legacy_schedule && !state.legacyLoaded && state.saved === null && !state.id) {
         const data = await api.call("automation_get", { legacy_schedule: params.legacy_schedule });
         if (!alive) return;
@@ -739,7 +741,7 @@ export function editor(el, params, api) {
     } catch (error) { loadError = true; if (alive) updateHeader(); throw error; }
   }
   void loadInitial().catch(error => { if (alive) status.textContent = error.message; });
-  return { summary: () => ({ name: state.draft.name }), focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; canvasObserver?.disconnect(); off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); document.removeEventListener("pointerdown", outsideActions); } };
+  return { summary: () => ({ name: state.draft.name }), focus: () => header.querySelector(".auto-name")?.focus(), dispose() { offContext(); alive = false; canvasObserver?.disconnect(); off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); document.removeEventListener("pointerdown", outsideActions); } };
 }
 
 export function registerAutomationEditor(api) {

@@ -96,6 +96,7 @@ pub enum ResourceOperationKind {
     FileOpen,
     Workspace,
     State,
+    CallDetail,
     Graph,
     TaskTrace,
     Task,
@@ -234,6 +235,7 @@ impl ResourceOperationKind {
             | O::BrowserClose => kind == R::Browser,
             O::Workspace
             | O::State
+            | O::CallDetail
             | O::Graph
             | O::TaskTrace
             | O::Task

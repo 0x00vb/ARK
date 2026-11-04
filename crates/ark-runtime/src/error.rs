@@ -13,6 +13,9 @@ pub enum AgentError {
     #[error("project not found: {0}")]
     ProjectNotFound(String),
 
+    #[error("the tool view belongs to a different project")]
+    ProjectScopeMismatch,
+
     #[error("artifact not found: {0}")]
     ArtifactNotFound(String),
 

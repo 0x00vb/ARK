@@ -222,6 +222,8 @@ class TurnView {
   constructor(thread, input, index, note) {
     this.thread = thread;
     this.api = thread.api;
+    const location = this.api.location || this.api.summary?.()?.location;
+    this.location = location ? { ...location } : null;
     this.index = index;
     this.calls = 0;
     this.block = null;
@@ -384,6 +386,22 @@ class TurnView {
     if (row.dataset.status === "running") row.dataset.status = !ev && a.tone === "warning" ? "cut" : ok ? "ok" : "failed";
     if (a.label) this.detail(row, a.label, ok ? "muted" : "error");
     if (ev?.duration_ms != null) row.querySelector(".act-meta").textContent = secs(ev.duration_ms);
+    const renderer = ok && registry.toolRenderers.find(renderer => typeof renderer.renderInline === "function" && renderer.match(row.dataset.action, a));
+    if (renderer && !row.dataset.inlineResult) {
+      row.dataset.inlineResult = "loading";
+      const box = h("div.turn-result"); this.agent.append(box); this.keepWorkingLast();
+      const load = async () => {
+        try {
+          const scoped = this.location && this.api.at ? this.api.at({...this.location}) : this.api;
+          const detail = typeof this.thread.inspect === "function" ? await this.thread.inspect(this, row) : await scoped.call("call", {index: this.index, n: Number(row.dataset.n)});
+          if (!row.isConnected || !box.isConnected) return;
+          clear(box); await renderer.renderInline(box, detail, scoped); row.dataset.inlineResult = "ready";
+        } catch (error) {
+          if (box.isConnected) clear(box).append(h("span", error.message), h("button.link", {onclick: load}, "Retry"));
+        }
+      };
+      void load();
+    }
     // A picture the agent took of a window: what it saw, under its step. Click to enlarge.
     if (ok && ev?.invocation && /^computer\.(see|point)$/.test(row.dataset.action)) {
       this.api.call("picture", { invocation: ev.invocation }).then((p) => {
@@ -411,11 +429,12 @@ class TurnView {
     requestAnimationFrame(() => (row.dataset.expanded = "true"));
     const box = more.querySelector(".call");
     try {
+      const detailApi = this.location && this.api.at ? this.api.at({ ...this.location }) : this.api;
       const inspect = this.thread.inspect;
       const r = typeof inspect === "function"
         ? await inspect(this, row)
-        : await this.api.call("call", { index: this.index, n: Number(row.dataset.n) });
-      clear(box).append(callDetail(r, this.api, this.index));
+        : await detailApi.call("call", { index: this.index, n: Number(row.dataset.n) });
+      clear(box).append(callDetail(r, detailApi, this.index));
     } catch (e) {
       more.dataset.failed = "";
       clear(box).append(h("div.call-err", e.message));
@@ -688,7 +707,7 @@ export function callDetail(r, api, index) {
     if (custom) {
       const host = h("div.call-custom");
       out.append(host);
-      try { custom.render(host, { call: c, invocation: inv }, window.ark); } catch (e) { host.textContent = String(e); }
+      try { Promise.resolve(custom.render(host, { call: c, invocation: inv }, api)).catch(error => { if (host.isConnected) host.textContent = error.message; }); } catch (e) { host.textContent = String(e); }
     } else {
       const body = JSON.stringify(inv.output, null, 2) || "";
       const lines = body.split("\n");

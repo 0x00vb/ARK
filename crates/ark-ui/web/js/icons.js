@@ -1,4 +1,8 @@
 export const ICONS = {
+  "fit": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="10" height="10" rx="1"/></g>',
+  "type": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6V4h16v2M12 4v16m-4 0h8"/></g>',
+  "frame": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v18M17 3v18M3 7h18M3 17h18"/></g>',
+
   "square": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4Z"/></g>',
   "pencil": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m4 16 12-12 4 4L8 20H4Z M13 7l4 4"/></g>',
   "hand": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12V6a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v7-4a2 2 0 0 1 4 0v8c0 4-3 7-7 7h-1c-3 0-4-2-6-5l-2-3a2 2 0 0 1 3-2l1 1"/></g>',

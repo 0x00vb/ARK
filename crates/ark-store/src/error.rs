@@ -8,6 +8,21 @@ pub enum StoreError {
     #[error("memory: {0}")]
     Memory(String),
 
+    #[error("record exceeds its read limit")]
+    RecordTooLarge,
+
+    #[error("immutable record conflicts with existing data")]
+    ImmutableConflict,
+
+    #[error("record mutation clock is exhausted")]
+    RecordEpochExhausted,
+
+    #[error("project storage is busy; try again")]
+    ProjectBusy,
+
+    #[error("project location changed; reload and try again")]
+    ProjectLocationChanged,
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

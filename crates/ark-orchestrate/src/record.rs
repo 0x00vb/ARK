@@ -259,6 +259,8 @@ pub struct AgentRecord {
 pub struct Mail {
     pub from: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub context: String,
     #[serde(default)]
     pub task: Option<String>,
     pub at_ms: u64,

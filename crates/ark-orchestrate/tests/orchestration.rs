@@ -1097,6 +1097,45 @@ async fn messages_reach_a_running_task_or_wait_in_the_inbox() {
 }
 
 #[tokio::test]
+async fn message_context_survives_restart_and_keeps_visible_text_separate() {
+    let f = fixture();
+    let m = Script::new("m", vec![answer("noted")]);
+    let o = orch(&f, vec![("m", m.clone())], vec![]);
+    o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    let context = r#"{"resource":"document","revision":7,"selection":["title"]}"#;
+    assert!(!o
+        .message_with_context("user", "w", "Make it clearer", context)
+        .unwrap());
+    let inbox = o.agent("w").unwrap().inbox;
+    assert_eq!(inbox[0].text, "Make it clearer");
+    assert_eq!(inbox[0].context, context);
+    drop(o);
+    let o = orch(&f, vec![("m", m.clone())], vec![]);
+    assert_eq!(o.agent("w").unwrap().inbox[0].context, context);
+    o.run("w", TaskSpec::new("go")).await.unwrap();
+    assert!(m.texts()[0].contains(context));
+    assert!(o.agent("w").unwrap().inbox.is_empty());
+}
+
+#[tokio::test]
+async fn message_context_admission_counts_utf8_bytes_and_pending_inbox() {
+    let f = fixture();
+    let o = orch(&f, vec![], vec![]);
+    o.spawn(AgentSpec::new("w")).await.unwrap();
+    let chunk = "é".repeat(4096);
+    assert!(o
+        .message_with_context("user", "w", "too much", &(chunk.clone() + "é"))
+        .is_err());
+    for _ in 0..8 {
+        assert!(!o.message_with_context("user", "w", "look", &chunk).unwrap());
+    }
+    assert!(o.message_with_context("user", "w", "full", "x").is_err());
+    assert_eq!(o.agent("w").unwrap().inbox.len(), 8);
+    assert!(!o.message("user", "w", "ordinary message").unwrap());
+    assert_eq!(o.agent("w").unwrap().inbox.len(), 9);
+}
+
+#[tokio::test]
 async fn tool_permissions_are_per_agent() {
     struct Two;
     #[async_trait::async_trait]

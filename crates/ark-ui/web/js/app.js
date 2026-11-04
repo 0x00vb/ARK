@@ -1,6 +1,7 @@
 // Boot and glue. Connects to the host, installs `window.ark` for app scripts, then wires the
 // conversation, composer, sidebar and side pane to the host's event stream.
 
+import { contextMenu, controlActions, bindContextMenu } from "./context-menu.js";
 import { connect } from "./transport.js";
 import { h, icon, clear, $, hydrateIcons, tokens, ago } from "./dom.js";
 import { markdown } from "./md.js";
@@ -30,6 +31,7 @@ import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js
 import { os, label, relabel } from "./keys.js";
 import { Places } from "./places.js";
 import { registerComputers } from "./computers.js";
+import { reviewComputerMessage } from "./computer-recovery.js";
 import { MAX_VISIBLE_CHATS, chatLeaf, visibleChats, splitChat as splitLayoutChat, removeChat as removeLayoutChat, replaceChat, updateRatio, restoreLayout } from "./chat-layout.js";
 
 const transport = connect();
@@ -47,6 +49,7 @@ const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: 
 const secondaryChats = new Map();
 let activeSession = null;
 const resourceOnline = new Map();
+const focusWrites = new Map();
 const locationKey = (location) => `${location?.runtime || ""}:${location?.project || ""}:${location?.session || ""}`;
 let readyResolve;
 let isReady = false;
@@ -117,9 +120,9 @@ const api = {
   project: () => activeSummary()?.project,
   send: (text) => submit(text),
   // Put text in the composer, unsent, with the conversation in view.
-  compose: (text, { append = false } = {}) => {
+  compose: async (text, { append = false } = {}) => {
     const draft = append ? composer.input.value : "";
-    showConversation();
+    if (!await showConversation()) return;
     composer.set(draft ? `${draft}\n\n${text}` : text);
   },
   submit: (text) => submit(text),
@@ -160,7 +163,18 @@ const api = {
   openSession: (id) => {
     return openChatTab(id);
   },
+  openAgentChat(name, conversation) {
+    const current = currentLocation();
+    if (this.location && (this.location.runtime !== current.runtime || this.location.project !== current.project)) {
+      toast("Open the original project to continue.");
+      return false;
+    }
+    const view = [...registry.views.values()].find(view => view.agentConversation);
+    return view ? this.openView(view.id, { name }) : this.openSession(conversation);
+  },
   openView: (id, params) => showView(id, params),
+  contextMenu,
+  present: directive => present(directive),
   showConversation: () => showConversation(),
   currentView: () => state.view,
   switchProject: (name) => detachedWindow ? switchWindowProject(name) : change("switch_project", { name }),
@@ -204,11 +218,11 @@ const api = {
     const place = params && Object.hasOwn(params, "place") ? params.place : state.summary?.place?.name || "";
     const location = p.projectScoped ? { ...current, session: "" } : current;
     if (p.projectScoped) params = { ...(params || {}), project, place };
-    const ark = scopedApi(current);
+    const ark = scopedApi(location);
     const where = place || api.hereName() || "This computer";
     const title = p.projectScoped ? `${p.title} · ${project?.name || "Project"} · ${where}` : p.title;
     pane.openTab(resourceKey("panel", location, id), title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, {
-      wide: !!p.wide, fill: !!p.fill, api: ark, projectScoped: !!p.projectScoped, closesWithProject: !!p.closesWithProject, project: project?.id,
+      wide: !!p.wide, fill: !!p.fill, expandable: !!p.expandable, api: ark, projectScoped: !!p.projectScoped, closesWithProject: !!p.closesWithProject, project: project?.id,
     });
   },
   setPanelTitle: (id, title) => {
@@ -219,10 +233,11 @@ const api = {
   closePanel: (id) => {
     const p = registry.panels.get(id);
     const location = p?.projectScoped ? { ...currentLocation(), session: "" } : currentLocation();
-    pane.remove(resourceKey("panel", location, id));
+    return pane.remove(resourceKey("panel", location, id));
   },
   toast,
   popover,
+  contextMenu,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
   refreshNavigation: () => topbar?.render(),
   refreshModel: () => composer.setModel(state.summary?.model),
@@ -278,7 +293,7 @@ const RESOURCE_METHODS = {
   file_snapshot_cancel: ["file", "file_snapshot_cancel"], file_snapshot_chunk: ["file", "file_snapshot_chunk"],
   file_snapshot_close: ["file", "file_snapshot_close"], file_probe: ["file", "file_probe"],
   upload_parts: ["file", "upload_parts"], upload_add: ["file", "upload_add"], upload_cancel: ["file", "upload_cancel"], file_open: ["file", "file_open"],
-  workspace: ["project", "workspace"], state: ["project", "state"],
+  workspace: ["project", "workspace"], state: ["project", "state"], call: ["project", "call_detail"],
   graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], task_call: ["project", "task_call"], orch_events: ["project", "orch_events"],
   agents: ["project", "agents"], create_agent: ["project", "create_agent"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
   work_admit: ["project", "work_admit"], work_receipt: ["project", "work_receipt"], work_execute: ["project", "work_execute"],
@@ -347,6 +362,13 @@ function scopedApi(location) {
   // one). A resource tab snapshots its location, not the API object's early boot values.
   const scoped = Object.create(window.ark || api);
   scoped.location = { ...location };
+  const resourceLocation = location.session ? { ...location } : { ...activeSummary()?.location };
+  const authorizedLocation = () => {
+    if (resourceLocation.runtime !== location.runtime || resourceLocation.project !== location.project || !resourceLocation.session) {
+      throw new Error("Return to the original project to use this panel");
+    }
+    return resourceLocation;
+  };
   scoped.chatView = (el, options) => chatView(el, scoped, options);
   scoped.newChatView = el => renderNewChatView(el, location);
   scoped.openView = (id, params) => {
@@ -371,23 +393,32 @@ function scopedApi(location) {
       : kind === "artifact" || kind === "invocation" ? (params.id || "")
       : kind === "picture" ? (params.invocation || params.app || "")
       : kind === "file" && method !== "files" && !method.startsWith("upload_") && method !== "file_restore" ? (params.path || "") : "";
-    return api.resource(api.resourceRef(kind, id, location), operation, params);
+    return api.resource(api.resourceRef(kind, id, authorizedLocation()), operation, params);
   };
   if (api.on) scoped.on = (name, fn) => api.on(name, (message) => {
     if (["ark:term", "ark:proc", "ark:orch"].includes(name) && !message?.ref) return;
-    if (message?.ref && JSON.stringify(message.ref.location) !== JSON.stringify(location)) return;
-    if (message?.location && JSON.stringify(message.location) !== JSON.stringify(location)) return;
+    if (message?.ref && JSON.stringify(message.ref.location) !== JSON.stringify(resourceLocation)) return;
+    if (message?.location && JSON.stringify(message.location) !== JSON.stringify(resourceLocation)) return;
     fn(message);
   });
-  scoped.ext = (name, params = {}) => api.resource(api.resourceRef("extension", name, location), "extension", { name, params });
-  scoped.runAction = (action, input = {}, approved = false) => api.resource(api.resourceRef("project", "", location), "run_action", { action, input, approved });
+  scoped.present = directive => present(directive, scoped);
+  scoped.ext = (name, params = {}) => api.resource(api.resourceRef("extension", name, authorizedLocation()), "extension", { name, params });
+  scoped.runAction = (action, input = {}, approved = false) => api.resource(api.resourceRef("project", "", authorizedLocation()), "run_action", { action, input, approved });
   // A project panel has no chat of its own: its focus goes to the chat the window shows, when
   // that chat is in the panel's project.
   scoped.setFocus = (focus) => {
     const chat = activeSummary()?.location;
-    const at = location.session ? location : chat?.project === location.project ? chat : null;
+    const at = location.session ? location : chat?.project === location.project && chat?.runtime === location.runtime ? chat : null;
     if (!at?.session) return Promise.resolve();
-    return api.resource(api.resourceRef("project", "", at), "focus", { focus }).catch(() => {});
+    const target = { ...at };
+    const snapshot = structuredClone(focus);
+    const key = JSON.stringify([target.runtime, target.project, target.session]);
+    const prior = focusWrites.get(key) || Promise.resolve();
+    const next = prior.then(() => api.resource(api.resourceRef("project", "", target), "focus", { focus: snapshot }))
+      .catch(error => { console.error("Could not update focus:", error); });
+    focusWrites.set(key, next);
+    void next.then(() => { if (focusWrites.get(key) === next) focusWrites.delete(key); });
+    return next;
   };
   scoped.openFile = (path, params) => {
     path = String(path).replace(/^\.\//, "");
@@ -415,7 +446,7 @@ function scopedApi(location) {
       return api.openPanel(id, params);
     }
     pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, {
-      wide: !!panel.wide, fill: !!panel.fill, api: scoped, closesWithProject: !!panel.closesWithProject, project: location.project,
+      wide: !!panel.wide, fill: !!panel.fill, expandable: !!panel.expandable, api: scoped, closesWithProject: !!panel.closesWithProject, project: location.project,
     });
   };
   const panelLocation = id => registry.panels.get(id)?.projectScoped ? { ...location, session: "" } : location;
@@ -504,7 +535,7 @@ async function openChatTab(id) {
   if (!id) return focusChat(state.sessionId);
   if (visibleChats(chatLayout).includes(id)) {
     if (activeSession === id) {
-      showConversation(false);
+      if (!await showConversation(false)) return;
       return (id === state.sessionId ? composer : secondaryChats.get(id)?.composer)?.focus();
     }
     return focusChat(id);
@@ -526,7 +557,7 @@ async function openChatTab(id) {
     return;
   }
   saveDraft();
-  showConversation(false);
+  if (!await showConversation(false)) return;
   if (!chatTabs.ids.includes(id)) chatTabs.ids.push(id);
   saveTabs();
   if (!chatLayout || activeSession === state.sessionId || visibleChats(chatLayout).length === 1) {
@@ -604,6 +635,12 @@ function renderChatTabs() {
       },
     }, h("span.chat-tab-title", title));
     const item = h("div.chat-tab-item", { "data-session": id, "data-selected": String(selected), draggable: "true" }, tab, close);
+    bindContextMenu(item, () => [
+      { label: "Open chat", run: () => void openChatTab(id) },
+      { label: "Rename chat", disabled: id !== active || (id === state.sessionId ? state.running : !!secondaryChats.get(id)?.running), run: () => renameChatTabInline(item, id, title) },
+      { label: "Split right", disabled: id === active || visibleChats(chatLayout).length >= MAX_VISIBLE_CHATS, run: () => void splitInto(id, active, "right") },
+      { label: "Close chat", run: () => void closeChatTab(id) },
+    ]);
     item.addEventListener("dragstart", (event) => beginTabDrag(event, id, item));
     item.addEventListener("dragend", (event) => void endTabDrag(event, id));
     item.addEventListener("dragover", (event) => {
@@ -784,11 +821,12 @@ class SecondaryChat {
         if (!this.thread.live) this.thread.begin(message.input);
         this.setRunning(true);
         break;
+      case "turn_cleanup": toast(message.message); break;
       case "text": this.thread.event(message); break;
       case "event":
         this.thread.event(message);
         if (message.event?.type === "steered") this.composer.delivered(message.event.text);
-        else if (message.event?.type === "present") present(message.event.directive, this.api);
+        else if (message.event?.type === "present" && activeSession === this.session) present(message.event.directive, this.api);
         break;
       case "approval":
         state.approvals.set(message.id, { ...message, session: this.session });
@@ -827,8 +865,8 @@ class SecondaryChat {
   }
 }
 
-function focusChat(session = state.sessionId, focusComposer = true) {
-  showConversation(false);
+async function focusChat(session = state.sessionId, focusComposer = true) {
+  if (!await showConversation(false)) return;
   activeSession = session;
   if (detachedWindow && secondaryChats.has(session)) {
     const summary = secondaryChats.get(session).summary;
@@ -841,6 +879,7 @@ function focusChat(session = state.sessionId, focusComposer = true) {
   for (const surface of document.querySelectorAll(".chat-surface")) surface.dataset.active = String(surface.dataset.session === session);
   renderChatTabs();
   if (focusComposer) (secondaryChats.get(session)?.composer || (session === state.sessionId ? composer : null))?.focus();
+  pane?.syncConversation();
 }
 
 async function loadSecondary(id, suppliedRead) {
@@ -865,7 +904,11 @@ async function loadSecondary(id, suppliedRead) {
 }
 
 async function showWindowSession(id) {
+  const request = ++viewRequest;
+  if (!await leaveCurrentView() || request !== viewRequest) return null;
   const read = await transport.call("chat_read", { session: id, model: activeSummary()?.model, limit: 30 });
+  if (request !== viewRequest) return null;
+  pane?.restoreConversation();
   for (const chat of secondaryChats.values()) chat.dispose();
   secondaryChats.clear();
   state.summary = read.summary;
@@ -879,7 +922,7 @@ async function showWindowSession(id) {
   saveTabs();
   saveLayout();
   renderWorkspace();
-  focusChat(id, false);
+  await focusChat(id, false);
   pane.reset(read.summary.project?.id);
   sidebar.refresh(id);
   showTitle();
@@ -897,6 +940,7 @@ async function newWindowSession(project = activeSummary()?.project?.id) {
 }
 
 async function openWindowProject(project) {
+  if (project !== state.summary?.project?.id && !await leaveCurrentView()) return false;
   try {
     const sessions = await transport.call("sessions", { project });
     if (sessions?.length) return await showWindowSession(sessions[0].id);
@@ -922,6 +966,7 @@ async function switchWindowProject(name) {
 function removeSecondary(id) {
   const chat = secondaryChats.get(id);
   if (!chat) return;
+  pane?.restoreConversation();
   chat.dispose();
   secondaryChats.delete(id);
 }
@@ -997,6 +1042,7 @@ function renderWorkspace() {
   const divided = visibleChats(chatLayout).length > 1;
   workspace.dataset.split = String(divided);
   appEl.dataset.split = String(divided);
+  pane?.syncConversation();
 }
 
 /// A visible split may only contain live chat surfaces. Missing presentation state collapses
@@ -1101,6 +1147,7 @@ async function restoreVisibleChats(available) {
 }
 
 function applyPrimaryChange(before, after) {
+  pane?.restoreConversation();
   if (!before) {
     chatLayout = chatLeaf(after);
     activeSession = after;
@@ -1199,11 +1246,14 @@ function popover(anchor, children, { above = false, end = false, onClose } = {})
     el.style.right = `${Math.max(12, window.innerWidth - r.right)}px`;
     el.style.transformOrigin = "top right";
   } else el.style.left = `${Math.min(r.left, window.innerWidth - w - 12)}px`;
+  el.style.maxHeight = `${Math.max(0, window.innerHeight - 24)}px`;
+  el.style.overflowY = "auto";
+  const height = el.offsetHeight;
   if (above) {
-    el.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    el.style.bottom = `${Math.max(12, Math.min(window.innerHeight - r.top + 6, window.innerHeight - height - 12))}px`;
     el.classList.add("above");
     el.style.transformOrigin = end ? "bottom right" : "bottom left";
-  } else el.style.top = `${r.bottom + 6}px`;
+  } else el.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - height - 12))}px`;
   requestAnimationFrame(() => el.classList.add("open"));
   const onDown = (e) => { if (!el.contains(e.target) && e.target !== anchor) close(); };
   const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
@@ -1295,14 +1345,18 @@ async function runCommand(line) {
   thread.report(line, reply);
 }
 
-function createGeneralSession(project) {
-  showConversation();
+async function createGeneralSession(project) {
+  if (!await showConversation()) return;
   if (detachedWindow) return newWindowSession(project);
   return change("new_session", project ? { project } : undefined);
 }
 
 // Moving to another chat never waits: a chat that is working goes on in the background.
 async function change(method, params) {
+  if (["open_session", "new_session", "open_project", "switch_project", "add_project"].includes(method)) {
+    const request = ++viewRequest;
+    if (!await leaveCurrentView() || request !== viewRequest) return false;
+  }
   try {
     await transport.call(method, params);
     return true;
@@ -1336,6 +1390,7 @@ function applySummary(s) {
   const changed = s.session.id !== state.sessionId;
   const projectChanged = s.project?.id !== state.summary?.project?.id;
   const runtimeChanged = !!state.summary && s.location?.runtime !== state.summary?.location?.runtime;
+  if (projectChanged || runtimeChanged) { viewRequest++; pane?.setWorkspace(null); pane?.setExpanded(false); rememberedConversation = null; }
   if (state.summary && projectChanged) {
     if (visibleChats(chatLayout).length > 1) closeOtherPanes();
     chatTabs.ids = [];
@@ -1354,8 +1409,7 @@ function applySummary(s) {
   if (projectChanged || runtimeChanged) {
     for (const [id, entry] of views) {
       if (!registry.views.get(id)?.resourceScoped) continue;
-      entry.ctl?.dispose?.();
-      entry.el.remove();
+      retireResourceView(id, entry);
       views.delete(id);
     }
   }
@@ -1472,19 +1526,22 @@ function showComputer(user = state.computerUser, activity = state.computerActivi
   state.computerActivity = activity;
   const el = $("#computer-use");
   clear(el);
-  const hazard = ["hazardous", "submitted_unconfirmed"].includes(activity?.phase);
+  const hazard = state.computerHazard;
+  const message = hazard ? hazard.error || `Check your message in ${hazard.app}` : activity?.line;
   el.hidden = !user && !hazard;
   if (el.hidden) return;
   const who = user ? h("button.computer-who", { type: "button", title: user.session ? "Open the chat" : "" },
     // On a runtime elsewhere it is not the person's own computer.
-    h("span.working-dot"), activity?.line || `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`)
-    : h("span.computer-who", { role: "status", "aria-live": "polite" }, activity?.line || "Computer needs attention");
+    h("span.working-dot"), message || `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`)
+    : h("span.computer-who", { role: "status", "aria-live": "polite" }, message || "Computer needs attention");
   if (user?.session) who.onclick = () => api.openSession(user.session);
   const stop = h("button.computer-stop", { type: "button", title: "Take the computer back" }, "Stop");
   stop.onclick = () => transport.call("computer_stop").catch((e) => toast(e.message));
   const check = hazard ? h("button.computer-stop", { type: "button", "aria-label": "Check the message app again" }, "Check again") : null;
-  if (check) check.onclick = () => transport.call("computer_check").then(() => { state.computerActivity = null; showComputer(); }).catch((e) => toast(e.message));
-  el.append(...[who, check, user ? stop : null].filter(Boolean));
+  if (check) check.onclick = () => transport.call("computer_check").catch((e) => toast(e.message));
+  const review = hazard ? h("button.computer-stop", { type: "button" }, "Review…") : null;
+  if (review) review.onclick = () => reviewComputerMessage((method, params) => transport.call(method, params), () => {}, review).catch(e => toast(e.message));
+  el.append(...[who, check, review, user ? stop : null].filter(Boolean));
 }
 
 /// Another chat's turn: it works in the background. Its question waits in the tray; the
@@ -1537,6 +1594,9 @@ function onEvent(msg) {
       }
       setRunning(true);
       break;
+    case "turn_cleanup":
+      toast(msg.message);
+      break;
     case "text":
       thread.event(msg);
       break;
@@ -1545,7 +1605,7 @@ function onEvent(msg) {
       const ev = msg.event;
       if (ev.type === "context" && !["plan", "critic"].includes(ev.report.role)) setRing(ev.report.total, ev.report.budget);
       else if (ev.type === "steered") composer.delivered(ev.text);
-      else if (ev.type === "present") present(ev.directive);
+      else if (ev.type === "present" && (!activeSession || activeSession === state.sessionId)) present(ev.directive);
       break;
     }
     case "approval":
@@ -1573,6 +1633,10 @@ function onEvent(msg) {
     case "computer_action":
       if (msg.activity) msg.activity.line = msg.line;
       showComputer(state.computerUser, msg.activity);
+      break;
+    case "computer_hazard":
+      state.computerHazard = msg.hazard;
+      showComputer();
       break;
     case "post":
       thread.post(msg.post);
@@ -1664,9 +1728,15 @@ function openArtifactTab(id, viewerId, params, location = currentLocation()) {
 }
 
 function present(d, target = api) {
+  if (document.hidden || !document.hasFocus()) return;
+  const entry = state.view && views.get(state.view);
+  const view = state.view && registry.views.get(state.view);
+  if (entry && !view?.workspace && !entry.ctl?.conversation?.()) return;
+  if (view?.workspace && entry.ctl?.acceptsPresentation && !entry.ctl.acceptsPresentation(d)) return;
   const by = presenterFor(d.view);
   // A file opens in a tab of its own, unless the app shows files itself.
   if (d.view === "file" && d.path && (!by?.panel || by.panel.builtin)) return target.openFile(d.path, d);
+  if (by?.view) return target.openView(by.view.id, d);
   if (by?.panel) return target.openPanel(by.panel.id, d);
   if (by?.viewer && d.artifact) return target.openArtifact(d.artifact, by.viewer.id, d);
   if (d.artifact) return target.openArtifact(d.artifact, undefined, d);
@@ -1678,9 +1748,33 @@ function present(d, target = api) {
 
 /// Show an app's view in place of the conversation. A view is built once; showing it again
 /// passes new params to `update`, or calls `refresh`.
-function showView(id, params) {
+let rememberedConversation = null, viewRequest = 0;
+const retainedResourceViews = new Map();
+const retainedViewKey = (id, location) => JSON.stringify([id, location.runtime, location.project]);
+function retireResourceView(id, entry) {
+  const key = retainedViewKey(id, entry.location);
+  entry.el.hidden = true; entry.el.inert = true;
+  retainedResourceViews.set(key, entry);
+  entry.retiring = Promise.resolve().then(() => entry.ctl?.beforeRemove?.() ?? true).then(allowed => {
+    if (allowed !== true) return false;
+    entry.ctl?.dispose?.(); entry.el.remove(); entry.retired = true;
+    if (retainedResourceViews.get(key) === entry) retainedResourceViews.delete(key);
+    return true;
+  }).catch(error => { toast(`Unfinished work in the previous project: ${error.message}. Return to that project to continue.`); return false; });
+  return entry.retiring;
+}
+async function showView(id, params) {
   const v = id === SETTINGS ? settingsView : registry.views.get(id);
   if (!v) return toast(`No view named ${id}`);
+  const request = ++viewRequest;
+  const previous = state.view && views.get(state.view);
+  if (previous && state.view !== id && previous.ctl?.beforeRemove) {
+    try { if (await previous.ctl.beforeRemove() !== true || request !== viewRequest) return; }
+    catch (error) { toast(error.message); return; }
+  }
+  if (v.workspace && !registry.views.get(state.view)?.workspace) rememberedConversation = previous?.ctl?.conversation?.() || null;
+  if (!v.workspace) rememberedConversation = null;
+  pane?.restoreConversation();
   // A project view owns the full main column. End the chat layout before showing it so the
   // top selector always remains a visible route back to Chat.
   if (visibleChats(chatLayout).length > 1) closeOtherPanes();
@@ -1688,10 +1782,20 @@ function showView(id, params) {
   const location = { ...currentLocation() };
   let entry = views.get(id);
   if (entry && v.resourceScoped && (entry.location.runtime !== location.runtime || entry.location.project !== location.project)) {
-    entry.ctl?.dispose?.();
-    entry.el.remove();
+    retireResourceView(id, entry);
     views.delete(id);
     entry = null;
+  }
+  let restored = false;
+  if (!entry && v.resourceScoped) {
+    const key = retainedViewKey(id, location), retained = retainedResourceViews.get(key);
+    if (retained) {
+      await retained.retiring;
+      if (request !== viewRequest) return false;
+      if (!retained.retired) {
+        retainedResourceViews.delete(key); entry = retained; entry.el.inert = false; views.set(id, entry); restored = true;
+      }
+    }
   }
   if (!entry) {
     const el = h("div.view", { "data-view": id });
@@ -1705,9 +1809,9 @@ function showView(id, params) {
       el.append(h("div.insp-empty", String(e)));
       entry.ctl = {};
     }
-  } else if (params !== undefined && entry.ctl.update) {
+  } else if (!restored && params !== undefined && entry.ctl.update) {
     entry.ctl.update(params);
-  } else {
+  } else if (!restored) {
     entry.ctl.refresh?.();
   }
   if (state.view && state.view !== id) views.get(state.view)?.ctl?.hide?.();
@@ -1723,14 +1827,27 @@ function showView(id, params) {
   destinations?.mark(id === "schedules" ? "schedules" : null);
   reportFocus();
   entry.ctl.focusInput?.();
+  if (pane?.isOpen) pane.reportFocus();
+  pane?.syncConversation();
 }
 
-function showConversation(focusComposer = true) {
+async function leaveCurrentView() {
+  const entry = state.view && views.get(state.view);
+  if (!entry?.ctl?.beforeRemove) return true;
+  try { return await entry.ctl.beforeRemove() === true; }
+  catch (error) { toast(error.message); return false; }
+}
+
+async function showConversation(focusComposer = true) {
+  const request = ++viewRequest;
+  if (state.view && views.get(state.view)?.ctl?.beforeRemove && (!await leaveCurrentView() || request !== viewRequest)) return false;
   state.homeView = null;
   if (!state.view) {
     destinations?.mark("home");
-    return;
+    pane?.syncConversation();
+    return true;
   }
+  pane?.restoreConversation();
   views.get(state.view)?.ctl?.hide?.();
   state.view = null;
   delete appEl.dataset.view;
@@ -1741,6 +1858,8 @@ function showConversation(focusComposer = true) {
   destinations?.mark("home");
   reportFocus();
   if (focusComposer) composer.focus();
+  pane?.syncConversation();
+  return true;
 }
 
 /// Home is the current project's workspace. It remembers whether the person last used Chat or
@@ -1766,10 +1885,10 @@ function destinationTarget(destination) {
 
 /// A keyboard jump is instant and moves focus to the destination. A pointer jump leaves focus on
 /// its button and gives the new surface one quiet, compositor-only arrival.
-function openDestination(destination, { keyboard = false } = {}) {
+async function openDestination(destination, { keyboard = false } = {}) {
   if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
-  if (destination === "schedules") showView("schedules");
-  else showConversation(false);
+  if (destination === "schedules") await showView("schedules");
+  else if (!await showConversation(false)) return;
   const target = destinationTarget(destination);
   if (keyboard) {
     target?.focus({ preventScroll: true });
@@ -1802,10 +1921,14 @@ function showTitle() {
   // A chat that runs on another computer says where.
   const place = !v && state.summary?.place;
   if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));
+  const workspace = state.view && registry.views.get(state.view)?.workspace && views.get(state.view);
+  pane?.setWorkspace(workspace ? workspace.el : null, workspace ? () => workspace.ctl?.focus?.() || null : null);
+  pane?.syncConversation();
 }
 
 /// What the person looks at: the view's focus, else the side pane's.
 function reportFocus() {
+  if (pane?.workspace || pane?.expanded || (pane?.isOpen && document.activeElement?.closest("#pane"))) return pane.reportFocus();
   const entry = state.view && views.get(state.view);
   if (entry) {
     let focus = null;
@@ -2036,7 +2159,18 @@ function appLike() {
     const k = e.key.toLowerCase();
     if (e.key === "F5" || ((e.metaKey || e.ctrlKey) && (k === "r" || k === "p"))) e.preventDefault();
   }, true);
+  const contextual = e => {
+    if (e.defaultPrevented) return;
+    const file = e.target.closest(".file-item");
+    const turn = e.target.closest(".turn .user,.turn .agent");
+    const viewer = e.target.closest(".fv");
+    const scope = file || viewer;
+    const actions = scope ? controlActions(scope.querySelectorAll(file ? "button" : ".fv-tools button:not([hidden]),.wb-bar button:not([hidden])")) : turn ? [{ label: "Copy message", run: () => navigator.clipboard.writeText(turn.innerText).catch(error => toast(error.message)) }] : [];
+    if (actions.length) contextMenu(e, scope?.querySelector("button") || turn, actions);
+  };
+  document.addEventListener("keydown", e => { if (e.key === "ContextMenu" || e.shiftKey && e.key === "F10") contextual(e); });
   document.addEventListener("contextmenu", (e) => {
+    contextual(e);
     const onText = e.target.closest("input, textarea, [contenteditable], a, .xterm");
     if (!onText && !String(window.getSelection() || "")) e.preventDefault();
   });
@@ -2136,7 +2270,7 @@ function toggleSidebar() {
 /// the sidebar folds into a drawer. The person's own open/closed choice is kept for wider sizes.
 function fit() {
   const w = innerWidth;
-  const compact = w <= 760 || (w <= 1050 && appEl.dataset.pane === "open");
+  const compact = w <= 760 || (w <= 1050 && appEl.dataset.pane === "open" && !pane?.expanded);
   appEl.dataset.compact = String(compact);
   const styles = getComputedStyle(appEl);
   const px = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
@@ -2144,7 +2278,7 @@ function fit() {
   const room = Math.max(320, w - chrome - px("--chat-min"));
   appEl.style.setProperty("--pw-room", `${room}px`);
   let paneWidth = 0;
-  if (appEl.dataset.pane === "open") {
+  if (appEl.dataset.pane === "open" && !pane?.expanded) {
     if (w <= 760) paneWidth = w;
     else {
       const preferred = appEl.hasAttribute("data-sized") ? px("--pw-user") : appEl.dataset.wide === "true" ? 760 : 470;
@@ -2264,6 +2398,7 @@ async function bootOnce(again) {
   state.working = hello.working || [];
   sidebar.setWorking(state.working);
   sidebar.setOnline(state.online && connectionEpoch === state.connectionEpoch);
+  state.computerHazard = hello.computer_hazard || null;
   showComputer(hello.computer);
   // Questions are placed again below: the current chat's in the thread, others' in the tray.
   for (const el of document.querySelectorAll("#asks .approval[data-chat]")) el.remove();
@@ -2332,7 +2467,23 @@ async function start() {
   destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);
   topbar = new Topbar(api, destinations);
-  pane = new Pane(appEl, api);
+  pane = new Pane(appEl, api, { conversation: () => {
+    const entry = state.view && views.get(state.view);
+    const liveConversation = entry?.ctl?.conversation?.();
+    const location = currentLocation();
+    if (rememberedConversation && (rememberedConversation.location?.runtime !== location.runtime || rememberedConversation.location?.project !== location.project || !rememberedConversation.surface?.isConnected)) rememberedConversation = null;
+    const supplied = liveConversation || (registry.views.get(state.view)?.workspace ? rememberedConversation : null);
+    const surface = supplied?.surface || secondaryChats.get(activeSession)?.elements.surface || primarySurface;
+    return {
+      surface, title: supplied?.title || activeSummary()?.session?.title || "Chat",
+      location: supplied?.location || activeSummary()?.location, focus: supplied?.focus, attention: supplied?.attention || document.getElementById("asks"),
+      mount: root => acceptDrops(api, captureDraft, root, {
+        accepts: () => !state.view || !!views.get(state.view)?.ctl?.captureUploadOrigin,
+        captureOrigin: () => state.view ? views.get(state.view)?.ctl?.captureUploadOrigin?.()
+          : { uploadApi: api.at(currentLocation()), appendDraft: captureDraft(currentLocation()) },
+      }),
+    };
+  } });
   fit();
   addEventListener("resize", fit);
   new MutationObserver(fit).observe(appEl, { attributes: true, attributeFilter: ["data-pane"] });

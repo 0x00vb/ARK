@@ -1,4 +1,5 @@
 import { h, icon } from "./dom.js";
+import { bindContextMenu } from "./context-menu.js";
 import { canvasScene, canvasTools } from "./canvas-tools.js";
 import { registerAutomationEditor, editor } from "./automation-editor.js";
 
@@ -48,7 +49,7 @@ function library(el, _params, api) {
       }
       return result;
     } };
-    const controller = editor(element, { ...params, selected: "@start" }, bound);
+    const controller = editor(element, params, bound);
     inline = { element, controller, draft: pendingDraft };
     controller.focus();
   }
@@ -101,6 +102,7 @@ function library(el, _params, api) {
     for (const [index, item] of [...list.children].entries()) {
       const card = item.querySelector("button");
       const id = card.dataset.automation;
+      bindContextMenu(card, () => [{ label: "Edit automation", run: () => card.click() }]);
       const position = scene.data.positions[id] || { x: 64 + index % 3 * 360, y: 64 + Math.floor(index / 3) * 280 };
       Object.assign(item.style, { left: `${position.x}px`, top: `${position.y}px` });
       let drag = null, moved = false;

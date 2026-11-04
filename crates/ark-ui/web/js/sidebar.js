@@ -4,6 +4,7 @@
 // which projects the person folded or unfolded.
 
 import { h, icon, clear, ago, clip, touch, $, chatAvatar } from "./dom.js";
+import { bindContextMenu } from "./context-menu.js";
 import { registry } from "./ext.js";
 import { SETTINGS } from "./settings.js";
 import { uploadFolder } from "./drop.js";
@@ -90,6 +91,7 @@ export class Sidebar {
     const row = group.querySelector(".project-row");
     group.dataset.instant = String(!animate);
     row.setAttribute("aria-expanded", String(open));
+    row.querySelector(".project-name")?.setAttribute("aria-expanded", String(open));
     row.querySelector(".project-chev").setAttribute("aria-label", open ? "Fold" : "Unfold");
     row.querySelector(".session-attention, .working-dot")?.remove();
     const badge = this.projectBadge(p, open, this.projectChats.get(group) || []);
@@ -107,7 +109,7 @@ export class Sidebar {
       if (!group.isConnected || this.disclosures.get(group) !== state || !this.unfolded(p)) return;
       this.mountProject(group, p, sessions);
     }
-    if (!open && [...group.children].slice(1).some(el => el.contains(document.activeElement))) row.focus({ preventScroll: true });
+    if (!open && [...group.children].slice(1).some(el => el.contains(document.activeElement))) row.querySelector(".project-name")?.focus({ preventScroll: true });
     for (const child of [...group.children].slice(1)) {
       child.inert = !open;
       child.setAttribute("aria-hidden", String(!open));
@@ -247,7 +249,7 @@ export class Sidebar {
     const focusedProject = active?.closest(".project")?.dataset.id;
     const focusedSection = active?.closest(".project-section")?.dataset.id;
     const focusedKey = active?.dataset.focusKey;
-    const focusedControl = [".project-row", ".project-chev", ".project-more", ".project-new-chat"].find((selector) => active?.matches(selector));
+    const focusedControl = [".project-name", ".project-chev", ".project-more", ".project-new-chat"].find((selector) => active?.matches(selector));
     const sections = this.projectSections;
     this.projectSections = [];
     for (const { controller } of sections) {
@@ -267,21 +269,26 @@ export class Sidebar {
   project(p, sessions) {
     const open = this.unfolded(p);
     const row = h("div.project-row", {
-      role: "treeitem", tabindex: "0", "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
+      "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
       title: p.workspace || "No folder yet",
     },
       h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !this.unfolded(p), e.detail !== 0); } }, icon("chevron-right")),
-      h("span.project-name", p.name),
+      h("button.project-name", { type: "button", "aria-expanded": String(open), "aria-current": p.current ? "true" : null }, p.name),
       this.projectBadge(p, open, sessions || []),
       h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")),
       h("button.icon-btn.small.project-new-chat", { type: "button", title: `New chat in ${p.name}`, "aria-label": `New chat in ${p.name}`, onclick: (e) => { e.stopPropagation(); this.newChat(p); } }, icon("plus")));
     // The current project folds; another one opens where it left off.
     const pick = (animate) => (p.current ? this.fold(p, !this.unfolded(p), animate) : this.openProject(p));
     row.addEventListener("click", (e) => pick(e.detail !== 0));
-    row.addEventListener("keydown", (e) => e.key === "Enter" && e.target === row && pick(false));
     row.addEventListener("dblclick", (e) => { e.preventDefault(); this.renameProject(row, p); });
     const group = h("div.project", { role: "group", "data-id": p.id }, row);
     this.projectChats.set(group, sessions || []);
+    const projectRow = group.querySelector(".project-row");
+    bindContextMenu(projectRow, () => [
+      { label: "New chat", run: () => this.newChat(p) },
+      { label: "Rename project", run: () => this.renameProject(projectRow, p) },
+      { label: "Remove from sidebar", run: () => this.hide(p) },
+    ]);
     return group;
   }
 
@@ -303,7 +310,7 @@ export class Sidebar {
     const title = s.title || "Untitled";
     const waiting = this.attention.some((item) => item.session === s.id);
     const row = h("div.session", {
-      role: "treeitem", tabindex: "0", "data-id": s.id, "aria-current": s.id === this.currentId ? "true" : null,
+      role: "button", tabindex: "0", "data-id": s.id, "aria-current": s.id === this.currentId ? "true" : null,
     },
       chatAvatar(s.participants),
       h("span.session-title", clip(title, 60)),
@@ -317,8 +324,12 @@ export class Sidebar {
     if (s.participants?.length) row.setAttribute("aria-description", `Assigned agents: ${s.participants.join(", ")}`);
     row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
     row.addEventListener("click", () => this.api.openSession(s.id));
-    row.addEventListener("keydown", (e) => e.key === "Enter" && this.api.openSession(s.id));
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.api.openSession(s.id); } });
     row.addEventListener("dblclick", () => this.inline(row, ".session-title", s.title || "", "Chat title", (title) => this.api.call("rename_session", { id: s.id, title })));
+    bindContextMenu(row, () => [
+      { label: "Open chat", run: () => this.api.openSession(s.id) },
+      { label: "Rename chat", run: () => this.inline(row, ".session-title", s.title || "", "Chat title", title => this.api.call("rename_session", { id: s.id, title })) },
+    ]);
     return row;
   }
 

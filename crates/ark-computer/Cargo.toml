@@ -20,6 +20,9 @@ tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+agent-desktop-core = { git = "https://github.com/vercel-labs/agent-desktop.git", rev = "a47ed664e0db00d1d4df364eb3fe8a5599882f3c" }
+agent-desktop-macos = { git = "https://github.com/vercel-labs/agent-desktop.git", rev = "a47ed664e0db00d1d4df364eb3fe8a5599882f3c" }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 ark-core.workspace = true

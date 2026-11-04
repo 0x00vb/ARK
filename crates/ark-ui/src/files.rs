@@ -162,6 +162,10 @@ pub(crate) fn version(root: &Path, rel: &str) -> anyhow::Result<Value> {
 
 /// The extension's selection is model input, not an unbounded document transport.
 pub(crate) fn validate_focus(focus: &ark_sdk::prelude::ark_core::Focus) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        serde_json::to_vec(focus)?.len() <= 16 * 1024,
+        "focus exceeds 16 KiB"
+    );
     if !matches!(
         focus.surface.as_ref().map(|s| s.kind_tag.as_str()),
         Some("map" | "model")
@@ -251,6 +255,19 @@ mod tests {
         ] {
             assert!(validate_focus(&focus(selection)).is_err());
         }
+    }
+
+    #[test]
+    fn all_surfaces_refuse_unbounded_focus() {
+        let make = |length| -> ark_sdk::prelude::ark_core::Focus {
+            serde_json::from_value(json!({
+                "surface": { "kind_tag": "custom" }, "selection": { "value": "x".repeat(length) }
+            }))
+            .unwrap()
+        };
+        let overhead = serde_json::to_vec(&make(0)).unwrap().len();
+        assert!(validate_focus(&make(16 * 1024 - overhead)).is_ok());
+        assert!(validate_focus(&make(16 * 1024 - overhead + 1)).is_err());
     }
 
     #[test]

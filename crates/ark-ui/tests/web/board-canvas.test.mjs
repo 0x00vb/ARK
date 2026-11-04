@@ -27,11 +27,13 @@ test('work board opens scoped tickets without changing execution states; canvas 
       const views = new Map(), calls = [], opened = [], listeners = new Set();
       let saved, workState = "in_progress";
       const draft = { name: 'Drawing', trigger: { kind: 'manual' }, inputs: [], authority: { actions: [], max_calls: 8, max_mutations: 0 }, steps: ['Source', 'Target', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Late source', 'Finish'].map(name => ({ id: name.toLowerCase().replaceAll(' ', '-'), name, action: { kind: 'result', inputs: [] } })) };
-      const api = { location: { runtime: 'local', project: 'project-a' }, view: view => views.set(view.id, view), on: (_event, listener) => { listeners.add(listener); return () => listeners.delete(listener); }, openView: (...args) => opened.push(args), reportFocus() {}, async call(method, input) {
+      const api = { location: { runtime: 'local', project: 'project-a' }, view: view => views.set(view.id, view), on: (_event, listener) => { listeners.add(listener); return () => listeners.delete(listener); }, openAgentChat: name => opened.push(['agent', name]), openSession: id => opened.push(['session', id]), openView: (...args) => opened.push(args), reportFocus() {}, async call(method, input) {
         calls.push({ method, input: structuredClone(input) });
-        if (method === 'board') return { boards: [{ id: 'board-a', goal: 'Release' }], items: [{ id: 'owned-ticket', board: 'board-a', title: 'Review the proposal', state: 'doing', owner: 'Editor', conversation: window.fixture?.manual ? null : 'chat-a', tasks: [] }], tasks: {}, agents: [] };
+        if (method === 'board') return { boards: [{ id: 'board-a', goal: 'Release' }], items: [{ id: 'owned-ticket', board: 'board-a', title: 'Review the proposal', state: 'doing', owner: window.fixture?.unassigned ? '' : window.fixture?.reassigned ? 'Writer' : 'Editor', conversation: window.fixture?.manual ? null : 'chat-a', tasks: [] }], tasks: {}, agents: [] };
+        if (method === 'create_agent') { if (!/^[a-zA-Z0-9_.-]+$/.test(input.spec.name)) throw Error('Invalid agent name'); if (calls.filter(call => call.method === method).length === 1) throw Error('Creation response lost'); return { name: input.spec.name }; }
+        if (method === 'board_change') { if (!input.change?.owner) throw Error('missing owner change'); return {}; }
         if (method === 'work_get') return window.fixture.manual ? { active_receipt: null, item: { target: null } } : { active_receipt: 'source-receipt', item: { target: { kind: 'agent', name: 'Editor' } } };
-        if (method === 'work_admit') { workState = 'in_progress'; if (calls.filter(call => call.method === method).length === 1) throw Error('Admission response lost'); return { id: 'continued-receipt' }; }
+        if (method === 'work_admit') { workState = 'in_progress'; if (calls.filter(call => call.method === method).length === 1) throw Error('Admission response lost'); return { id: 'continued-receipt', conversation: 'agent-chat' }; }
         if (method === 'work_execute') { if (calls.filter(call => call.method === method).length === 1) throw Error('Execution response lost'); return {}; }
         if (method === 'work_list') { if (window.fixture?.defer) await new Promise(resolve => window.fixture.release = resolve); return { items: [{ id: 'owned-ticket', state: workState, status: workState, title: 'Review the proposal', target: { kind: 'agent', name: 'Editor' }, origin: 'manual' }], next: null }; }
         if (['agents', 'artifacts', 'tools', 'project_models'].includes(method)) return [];
@@ -55,11 +57,19 @@ test('work board opens scoped tickets without changing execution states; canvas 
     await page.evaluate(() => { const f = window.fixture; f.setWorkState('completed'); f.defer = true; for (const listener of f.listeners) listener(); });
     await page.waitForFunction(() => !!window.fixture.release);
     await page.evaluate(() => { const f = window.fixture; f.defer = false; f.release(); delete f.release; });
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Continue this ticket');
     await page.waitForFunction(() => document.querySelector('.bd-p-chat-compose button')?.disabled === false, null, { timeout: 3000 });
-    assert.match(await page.locator('.bd-p-chat-open').innerText(), /completed/);
+    assert.equal(await page.locator('.ticket-property-label').count(), 0);
+    const circles = await page.evaluate(() => {
+      const circle = document.querySelector('.ticket-properties .bd-mark circle');
+      return { status: (2 * circle.r.baseVal.value + 1.5) * circle.getScreenCTM().a, avatar: document.querySelector('.ticket-properties .bd-avatar').getBoundingClientRect().width };
+    });
+    assert.ok(Math.abs(circles.status - circles.avatar) < 1, JSON.stringify(circles));
+
+    assert.equal(await page.locator('.bd-p-chat-open').innerText(), 'Conversation');
 
     await page.getByRole('button', { name: /Conversation/ }).click();
-    assert.deepEqual(await page.evaluate(() => window.fixture.opened), [['work-chat', { work: 'owned-ticket' }]]);
+    assert.deepEqual(await page.evaluate(() => window.fixture.opened), [['agent', 'Editor']]);
     assert.equal(await page.evaluate(() => window.fixture.calls.some(call => call.method === 'board_change')), false);
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Continue this ticket');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -70,7 +80,7 @@ test('work board opens scoped tickets without changing execution states; canvas 
     await page.getByRole('button', { name: 'Retry sending', exact: true }).click();
     await page.getByText('Execution response lost', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Retry sending', exact: true }).click();
-    await page.waitForFunction(() => window.fixture.opened.some(entry => entry[1].receipt === 'continued-receipt'));
+    await page.waitForFunction(() => window.fixture.opened.some(entry => entry[0] === 'agent' && entry[1] === 'Editor'));
     const submissions = await page.evaluate(() => window.fixture.calls.filter(call => call.method === 'work_admit'));
     assert.equal(submissions.length, 2);
     assert.deepEqual(submissions[0].input, submissions[1].input);
@@ -86,6 +96,26 @@ test('work board opens scoped tickets without changing execution states; canvas 
     assert.deepEqual(manual.target, { kind: 'agent', name: 'Editor' });
     assert.equal(manual.receipt, null);
     assert.equal(manual.task.item, 'owned-ticket');
+    await page.evaluate(() => { const f = window.fixture; f.controller.dispose(); f.manual = false; f.reassigned = true; f.setWorkState('completed'); const stage = document.querySelector('#stage'); stage.replaceChildren(); f.controller = f.views.get('work').render(stage, {}, f.api); });
+    await card.press('Enter');
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Ask the new owner');
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await page.waitForFunction(() => window.fixture.calls.filter(call => call.method === 'work_execute').length === 4);
+    const reassigned = await page.evaluate(() => window.fixture.calls.filter(call => call.method === 'work_admit').at(-1).input);
+    assert.deepEqual(reassigned.target, { kind: 'agent', name: 'Writer' });
+    assert.equal(reassigned.receipt, null);
+    await page.evaluate(() => { const f = window.fixture; f.controller.dispose(); f.manual = true; f.unassigned = true; const stage = document.querySelector('#stage'); stage.replaceChildren(); f.controller = f.views.get('work').render(stage, {}, f.api); });
+    await card.press('Enter');
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create someone for this work');
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await page.getByText('Creation response lost', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Retry sending', exact: true }).click();
+    await page.waitForFunction(() => window.fixture.calls.filter(call => call.method === 'work_execute').length === 5);
+    const creations = await page.evaluate(() => window.fixture.calls.filter(call => call.method === 'create_agent'));
+    assert.deepEqual(creations[0].input, creations[1].input);
+    const assignment = await page.evaluate(() => window.fixture.calls.filter(call => call.method === 'board_change').at(-1).input);
+    assert.equal(assignment.change.owner, creations[0].input.spec.name);
+
 
 
     assert.equal(await page.locator('html').evaluate(el => el.scrollWidth <= innerWidth), true);
@@ -98,10 +128,11 @@ test('work board opens scoped tickets without changing execution states; canvas 
     await page.getByText('Connect to the next step', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Connect text from Source', exact: true }).press('Enter');
     await page.getByRole('button', { name: 'Connect input to Target', exact: true }).press('Enter');
-    await page.getByLabel('Step actions', { exact: true }).click();
-    await page.getByLabel('Step actions', { exact: true }).press('Escape');
-    assert.equal(await page.locator('.auto-step-menu[open]').count(), 0);
-    assert.equal(await page.getByLabel('Step actions', { exact: true }).evaluate(el => el === document.activeElement), true);
+    await page.getByRole('button', { name: 'Select Target', exact: true }).press('Shift+F10');
+    await page.getByRole('menu').waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('menu').count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Select Target', exact: true }).evaluate(el => el === document.activeElement), true);
     await page.getByText('Connected', { exact: true }).waitFor();
     await page.locator('.auto-canvas-viewport').evaluate(el => { el.scrollLeft = 2100; });
     await page.getByRole('button', { name: 'Select Finish', exact: true }).click();
@@ -127,7 +158,7 @@ test('work board opens scoped tickets without changing execution states; canvas 
     await page.evaluate(() => window.fixture.controller.update({ automation: 'drawing' }));
     assert.equal(await page.locator('.auto-canvas-plane').evaluate(el => Number(el.style.transform.match(/scale\(([^)]+)\)/)[1])), zoomed);
     await page.setViewportSize({ width: 1278, height: 844 });
-    await page.getByRole('button', { name: 'Close inspector', exact: true }).click();
+    await page.getByRole('button', { name: 'Collapse card', exact: true }).click();
     await page.getByRole('button', { name: 'Fit', exact: true }).click();
     await page.getByRole('button', { name: 'Select Finish', exact: true }).click();
     assert.equal(await page.locator('.auto-canvas-viewport').evaluate(view => {

@@ -19,6 +19,7 @@ type Ctl = (String, String, Option<String>);
 
 #[derive(Default)]
 struct Inner {
+    recovery_windows: Vec<RecoveryWindow>,
     /// Each app and its window's controls.
     apps: Vec<(String, Vec<Ctl>)>,
     front: Option<String>,
@@ -29,6 +30,7 @@ struct Inner {
     apps_release: Option<Arc<Barrier>>,
     /// Fields refuse text set directly (it must be typed).
     no_set_text: bool,
+    press_error: bool,
     /// Opening an app does not bring it to the front.
     stuck_front: bool,
     person_typed: Option<Instant>,
@@ -36,6 +38,14 @@ struct Inner {
     focus: Option<(String, usize)>,
     sends_on_return: bool,
     return_fails: bool,
+    input_window_mismatch: bool,
+}
+
+#[derive(Clone)]
+struct RecoveryWindow {
+    identifier: String,
+    values: Vec<(String, String)>,
+    known: bool,
 }
 
 /// A fake [`Screen`].
@@ -52,6 +62,40 @@ impl Default for FakeScreen {
 }
 
 impl FakeScreen {
+    pub fn mismatch_input_window(&self) {
+        self.inner.lock().unwrap().input_window_mismatch = true;
+    }
+    pub fn recovery_window(&self, identifier: &str, values: &[(&str, &str)]) {
+        self.inner
+            .lock()
+            .unwrap()
+            .recovery_windows
+            .push(RecoveryWindow {
+                identifier: identifier.into(),
+                values: values
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                known: true,
+            });
+    }
+
+    pub fn unknown_recovery_window(&self, identifier: &str) {
+        self.inner
+            .lock()
+            .unwrap()
+            .recovery_windows
+            .push(RecoveryWindow {
+                identifier: identifier.into(),
+                values: Vec::new(),
+                known: false,
+            });
+    }
+    /// Refuse a native press without promising whether the app received it.
+    pub fn presses_fail(self) -> Self {
+        self.inner.lock().unwrap().press_error = true;
+        self
+    }
     pub fn new() -> Self {
         FakeScreen {
             inner: Arc::new(Mutex::new(Inner {
@@ -179,6 +223,11 @@ struct FakeControl {
 
 impl Control for FakeControl {
     fn press(&self) -> Result<(), String> {
+        if self.screen.inner.lock().unwrap().press_error {
+            self.screen
+                .record("press returned uncertain delivery".into());
+            return Err("the native press may have been delivered; do not retry".into());
+        }
         let name = {
             let mut i = self.screen.inner.lock().unwrap();
             let (_, controls) = i.apps.iter().find(|(a, _)| *a == self.app).ok_or("gone")?;
@@ -221,6 +270,33 @@ impl Control for FakeControl {
 }
 
 impl Screen for FakeScreen {
+    fn recovery_looks(
+        &self,
+        app: &str,
+        _original_window: &str,
+        _conversation: &str,
+        _composer: &str,
+    ) -> Result<Vec<Look>, String> {
+        let windows = self.inner.lock().unwrap().recovery_windows.clone();
+        let mut looks = vec![self.look(app)?];
+        for window in windows {
+            let mut look = self.look(app)?;
+            look.window_identifier = Some(window.identifier);
+            if !window.known {
+                look.elements.clear();
+                look.controls.clear();
+            }
+            for (name, value) in window.values {
+                for element in &mut look.elements {
+                    if element.name == name {
+                        element.value = Some(value.clone());
+                    }
+                }
+            }
+            looks.push(look);
+        }
+        Ok(looks)
+    }
     fn access(&self) -> Access {
         if self.inner.lock().unwrap().allowed {
             Access::Allowed
@@ -341,6 +417,15 @@ impl Screen for FakeScreen {
         drop(i);
         self.record(format!("open {app}"));
         Ok(())
+    }
+    fn keys_in_window(&self, keys: &str, window: &str) -> Result<(), String> {
+        let inner = self.inner.lock().unwrap();
+        let expected = inner.front.as_ref().map(|app| format!("fake-{app}-window"));
+        if inner.input_window_mismatch || expected.as_deref() != Some(window) {
+            return Err("The approved input window differs from the proved message window [delivery=NotDelivered]".into());
+        }
+        drop(inner);
+        self.keys(keys)
     }
     fn keys(&self, keys: &str) -> Result<(), String> {
         if keys == "return" && self.inner.lock().unwrap().return_fails {

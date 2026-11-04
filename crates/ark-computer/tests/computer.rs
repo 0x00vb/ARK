@@ -41,6 +41,62 @@ fn notes() -> FakeScreen {
         .app("Mail", &[("button", "Send")])
 }
 
+#[tokio::test]
+async fn an_uncertain_native_click_is_not_retried_with_the_pointer() {
+    let screen = notes().presses_fail();
+    let svc = service(&screen);
+    let computer = svc.for_owner("test");
+    run(&computer, LOOK, json!({"app":"Notes"})).await.unwrap();
+    let error = run(
+        &computer,
+        CLICK,
+        json!({"app":"Notes","ref":2,"name":"Save"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("may have been delivered"), "{error}");
+    assert_eq!(
+        screen
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| line.contains("press returned uncertain"))
+            .count(),
+        1
+    );
+    assert!(!screen
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line.contains("pointer")));
+}
+
+#[tokio::test]
+async fn replacing_a_field_replaces_existing_text_and_empty_text_clears_it() {
+    let screen = notes();
+    let svc = service(&screen);
+    let computer = svc.for_owner("test");
+    run(&computer, LOOK, json!({"app":"Notes"})).await.unwrap();
+    for text in ["existing text", "different\nmultiline text", ""] {
+        let look = run(
+            &computer,
+            TYPE,
+            json!({"app":"Notes","ref":1,"name":"Title","text":text}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(look["elements"][0]["value"], text);
+    }
+    assert!(!screen
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line.contains("keys return")));
+}
+
 struct TestMessages;
 
 impl MessageEvidence for TestMessages {
@@ -51,6 +107,9 @@ impl MessageEvidence for TestMessages {
         text: Option<&str>,
         _bound: Option<(&str, &str)>,
     ) -> std::result::Result<Option<MessageContext>, String> {
+        if look.elements.len() < 2 {
+            return Ok(None);
+        }
         let conversation = &look.elements[0];
         let composer = &look.elements[1];
         if recipient.is_some_and(|r| r != conversation.name) {
@@ -107,6 +166,62 @@ async fn draft(c: &Computer, text: &str) -> Result<serde_json::Value, String> {
         }),
     )
     .await
+}
+
+#[tokio::test]
+async fn recovery_requires_every_possible_composer_to_be_known_and_empty() {
+    for unknown in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let screen = FakeScreen::new().app(
+            "WhatsApp",
+            &[("button", "Notas"), ("text area", "Compose message")],
+        );
+        let svc = message_service(&screen, dir.path().join("hazard.json"));
+        let computer = svc.for_owner("chat");
+        draft(&computer, "staged").await.unwrap();
+        screen.look("WhatsApp").unwrap().controls[1]
+            .set_text("")
+            .unwrap();
+        if unknown {
+            screen.unknown_recovery_window("second");
+        } else {
+            screen.recovery_window("second", &[("Compose message", "another draft")]);
+        }
+        assert!(svc.check_message_again().await.is_err());
+        assert!(svc.message_hazard().is_some());
+    }
+}
+
+#[tokio::test]
+async fn recovery_of_a_legacy_window_record_checks_stable_composer_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hazard.json");
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let svc = message_service(&screen, path.clone());
+    let computer = svc.for_owner("chat");
+    draft(&computer, "staged").await.unwrap();
+    screen.look("WhatsApp").unwrap().controls[1]
+        .set_text("")
+        .unwrap();
+    drop(computer);
+    drop(svc);
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    saved["hazard"]["window_identifier"] = json!("legacy-window-identifier");
+    std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    screen.recovery_window("new-window", &[("Compose message", "")]);
+    let reopened = message_service(&screen, path);
+    reopened.check_message_again().await.unwrap();
+    assert!(reopened.message_hazard().is_none());
+    assert!(!screen
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line == "keys return"));
 }
 
 #[tokio::test]
@@ -304,6 +419,646 @@ async fn send_posts_no_return_when_another_app_keeps_the_front() {
         .iter()
         .any(|line| line == "keys return"));
     assert_eq!(svc.message_hazard().unwrap().kind, HazardKind::DraftPresent);
+}
+
+#[tokio::test]
+async fn send_never_posts_return_to_a_different_same_app_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new().app(
+        "Messages",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let svc = message_service(&screen, dir.path().join("hazard.json"));
+    let computer = svc.for_owner("chat");
+    run(&computer, LOOK, json!({"app":"Messages"}))
+        .await
+        .unwrap();
+    run(&computer, DRAFT, json!({"app":"Messages","recipient":"Notas","conversation_ref":1,"conversation_name":"Notas","composer_ref":2,"composer_name":"Compose message","text":"bound draft"})).await.unwrap();
+    screen.mismatch_input_window();
+    let result = run(
+        &computer,
+        SEND,
+        json!({"app":"Messages","recipient":"Notas","text":"bound draft"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["status"], "submitted_unconfirmed");
+    assert!(!screen
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line == "keys return"));
+    assert!(svc.message_hazard().is_some());
+}
+
+#[tokio::test]
+async fn human_acknowledgement_is_bound_to_the_current_block_and_never_confirms_or_retries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hazard.json");
+    let screen = FakeScreen::new()
+        .app(
+            "WhatsApp",
+            &[("button", "Notas"), ("text area", "Compose message")],
+        )
+        .return_fails();
+    let svc = message_service(&screen, path.clone());
+    let computer = svc.for_owner("chat");
+    draft(&computer, "private draft").await.unwrap();
+    let previous = svc.review_message_block().unwrap();
+    assert!(svc.acknowledge_message_block("wrong token").is_err());
+    let replaced = svc.review_message_block().unwrap();
+    assert_ne!(previous.token, replaced.token);
+    assert!(svc.acknowledge_message_block(&previous.token).is_err());
+    let sent = run(
+        &computer,
+        SEND,
+        json!({"app":"WhatsApp","recipient":"Notas","text":"private draft"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(sent["status"], "submitted_unconfirmed");
+    assert!(svc.acknowledge_message_block(&previous.token).is_err());
+    assert!(svc.acknowledge_message_block(&replaced.token).is_err());
+    let stopped = svc.review_message_block().unwrap();
+    svc.take_back();
+    assert!(svc.acknowledge_message_block(&stopped.token).is_err());
+    let review = svc.review_message_block().unwrap();
+    let encoded = serde_json::to_string(&review).unwrap();
+    assert!(!encoded.contains("Notas") && !encoded.contains("private draft"));
+    assert_eq!(review.kind, HazardKind::SubmittedUnconfirmed);
+    let before = screen.log.lock().unwrap().clone();
+    let status = svc.acknowledge_message_block(&review.token).unwrap();
+    assert_eq!(status.kind, HazardKind::SubmittedUnconfirmed);
+    assert!(svc.message_hazard().is_none());
+    assert_eq!(*screen.log.lock().unwrap(), before);
+    assert!(run(
+        &computer,
+        SEND,
+        json!({"app":"WhatsApp","recipient":"Notas","text":"private draft"})
+    )
+    .await
+    .is_err());
+    assert!(computer
+        .actions()
+        .iter()
+        .all(|action| !action.name.contains("acknowledge")));
+    assert!(message_service(&screen, path).message_hazard().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn acknowledgement_during_send_proof_preserves_uncertainty_and_the_next_draft() {
+    struct PausedProof {
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        once: std::sync::atomic::AtomicBool,
+    }
+    impl MessageEvidence for PausedProof {
+        fn context(
+            &self,
+            look: &Look,
+            recipient: Option<&str>,
+            text: Option<&str>,
+            bound: Option<(&str, &str)>,
+        ) -> std::result::Result<Option<MessageContext>, String> {
+            let context = TestMessages.context(look, recipient, text, bound)?;
+            if context.as_ref().is_some_and(|context| {
+                context.composer_value.is_empty() && !context.outgoing.is_empty()
+            }) && !self.once.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.entered.send(()).map_err(|error| error.to_string())?;
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(context)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new()
+        .app(
+            "WhatsApp",
+            &[("button", "Notas"), ("text area", "Compose message")],
+        )
+        .sends_on_return();
+    let (entered, waiting) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::sync_channel(1);
+    let svc = service(&screen)
+        .messages(Arc::new(PausedProof {
+            entered,
+            release: std::sync::Mutex::new(released),
+            once: std::sync::atomic::AtomicBool::new(false),
+        }))
+        .message_safety(dir.path().join("hazard.json"), Arc::new(TestKey));
+    svc.set_on(true).unwrap();
+    let old = Arc::new(svc.for_owner("old"));
+    draft(&old, "first draft").await.unwrap();
+    let sender = old.clone();
+    let send = tokio::spawn(async move {
+        run(
+            &sender,
+            SEND,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"first draft"}),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking(move || waiting.recv_timeout(Duration::from_secs(5)))
+        .await
+        .unwrap()
+        .unwrap();
+    let review = svc.review_message_block().unwrap();
+    let acknowledged = svc.acknowledge_message_block(&review.token);
+    if acknowledged.is_err() {
+        release.send(()).unwrap();
+    }
+    acknowledged.unwrap();
+    let next = svc.for_owner("next");
+    let staged = draft(&next, "second draft").await;
+    release.send(()).unwrap();
+    staged.unwrap();
+    let result = send.await.unwrap().unwrap();
+    assert_eq!(result["status"], "submitted_unconfirmed");
+    assert_eq!(result["effect"]["retry_allowed"], false);
+    assert_eq!(svc.message_hazard().unwrap().kind, HazardKind::DraftPresent);
+    run(
+        &next,
+        CANCEL,
+        json!({"app":"WhatsApp","recipient":"Notas","text":"second draft"}),
+    )
+    .await
+    .unwrap();
+    assert!(svc.message_hazard().is_none());
+    assert_eq!(
+        screen
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| *line == "keys return")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn saved_message_status_survives_activity_changes_and_service_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hazard.json");
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let svc = message_service(&screen, path.clone());
+    let mut status = svc.watch_message_status();
+    let computer = svc.for_owner("chat");
+    draft(&computer, "staged").await.unwrap();
+    status.changed().await.unwrap();
+    assert_eq!(
+        status.borrow().as_ref().unwrap().kind,
+        HazardKind::DraftPresent
+    );
+    run(&computer, LOOK, json!({"app":"WhatsApp"}))
+        .await
+        .unwrap();
+    svc.take_back();
+    assert_eq!(
+        status.borrow().as_ref().unwrap().kind,
+        HazardKind::DraftPresent
+    );
+    drop(computer);
+    drop(svc);
+    let reopened = message_service(&screen, path);
+    assert_eq!(
+        reopened.message_status().unwrap().unwrap().kind,
+        HazardKind::DraftPresent
+    );
+}
+
+#[tokio::test]
+async fn successful_recovery_revokes_the_old_owner_and_pending_field_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let svc = message_service(&screen, dir.path().join("hazard.json"));
+    let computer = svc.for_owner("chat");
+    draft(&computer, "staged").await.unwrap();
+    screen.look("WhatsApp").unwrap().controls[1]
+        .set_text("")
+        .unwrap();
+    let pending = run(
+        &computer,
+        TYPE,
+        json!({"app":"WhatsApp","ref":2,"name":"Compose message","text":"late input"}),
+    );
+    svc.check_message_again().await.unwrap();
+    assert!(svc.message_hazard().is_none());
+    assert!(svc.holder().is_none());
+    assert!(pending
+        .await
+        .unwrap_err()
+        .contains("took the computer back"));
+    assert_eq!(
+        screen.look("WhatsApp").unwrap().elements[1]
+            .value
+            .as_deref(),
+        Some("")
+    );
+}
+
+#[tokio::test]
+async fn computer_status_and_recovery_never_load_the_safety_key_before_enablement() {
+    struct Key(Arc<std::sync::atomic::AtomicUsize>);
+    impl SafetyKey for Key {
+        fn load_or_create(&self) -> std::result::Result<[u8; 32], String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok([19; 32])
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let path = dir.path().join("hazard.json");
+    let svc = service(&FakeScreen::new())
+        .messages(Arc::new(TestMessages))
+        .message_safety(path.clone(), Arc::new(Key(calls.clone())))
+        .switched(dir.path().join("computer.json"));
+    assert!(!svc.is_on());
+    assert!(svc.message_status().unwrap().is_none());
+    assert!(svc.review_message_block().is_err());
+    assert!(svc.acknowledge_message_block("old review").is_err());
+    assert!(svc.check_message_again().await.is_err());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(!path.exists());
+    svc.set_on(true).unwrap();
+    assert!(svc.message_status().unwrap().is_none());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn simultaneous_send_requests_claim_the_draft_only_once() {
+    struct Pause {
+        log: ark_computer::fake::Log,
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        once: std::sync::atomic::AtomicBool,
+    }
+    impl MessageEvidence for Pause {
+        fn context(
+            &self,
+            look: &Look,
+            recipient: Option<&str>,
+            text: Option<&str>,
+            bound: Option<(&str, &str)>,
+        ) -> std::result::Result<Option<MessageContext>, String> {
+            let context = TestMessages.context(look, recipient, text, bound)?;
+            if self
+                .log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line == "keys return")
+                && !self.once.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.entered.send(()).map_err(|error| error.to_string())?;
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(context)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hazard.json");
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let (entered, waiting) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::sync_channel(1);
+    let svc = service(&screen)
+        .messages(Arc::new(Pause {
+            log: screen.log.clone(),
+            entered,
+            release: std::sync::Mutex::new(released),
+            once: std::sync::atomic::AtomicBool::new(false),
+        }))
+        .message_safety(path.clone(), Arc::new(TestKey));
+    svc.set_on(true).unwrap();
+    let computer = Arc::new(svc.for_owner("chat"));
+    draft(&computer, "send once").await.unwrap();
+    let first = computer.clone();
+    let send = tokio::spawn(async move {
+        run(
+            &first,
+            SEND,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"send once"}),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking(move || waiting.recv_timeout(Duration::from_secs(5)))
+        .await
+        .unwrap()
+        .unwrap();
+    let before: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let second = run(
+        &computer,
+        SEND,
+        json!({"app":"WhatsApp","recipient":"Notas","text":"send once"}),
+    )
+    .await;
+    release.send(()).unwrap();
+    assert!(second.unwrap_err().contains("already submitted"));
+    let first = send.await.unwrap().unwrap();
+    assert_eq!(first["status"], "submitted_unconfirmed");
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(before["hazard"]["effect_id"], after["hazard"]["effect_id"]);
+    assert_eq!(after["hazard"]["effect_id"], first["effect_id"]);
+    assert_eq!(
+        screen
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| *line == "keys return")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn a_delayed_cancel_cannot_erase_a_newer_draft() {
+    struct Pause {
+        armed: Arc<std::sync::atomic::AtomicBool>,
+        count: std::sync::atomic::AtomicUsize,
+        entered: std::sync::mpsc::SyncSender<usize>,
+        releases: [std::sync::Mutex<std::sync::mpsc::Receiver<()>>; 2],
+    }
+    impl MessageEvidence for Pause {
+        fn context(
+            &self,
+            look: &Look,
+            recipient: Option<&str>,
+            text: Option<&str>,
+            bound: Option<(&str, &str)>,
+        ) -> std::result::Result<Option<MessageContext>, String> {
+            let context = TestMessages.context(look, recipient, text, bound)?;
+            if self.armed.load(std::sync::atomic::Ordering::SeqCst)
+                && text == Some("old draft")
+                && context
+                    .as_ref()
+                    .is_some_and(|context| context.composer_value == "old draft")
+            {
+                let index = self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if index < 2 {
+                    self.entered
+                        .send(index)
+                        .map_err(|error| error.to_string())?;
+                    self.releases[index]
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            Ok(context)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let (entered, waiting) = std::sync::mpsc::sync_channel(2);
+    let (release0, receive0) = std::sync::mpsc::sync_channel(1);
+    let (release1, receive1) = std::sync::mpsc::sync_channel(1);
+    let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let svc = service(&screen)
+        .messages(Arc::new(Pause {
+            armed: armed.clone(),
+            count: std::sync::atomic::AtomicUsize::new(0),
+            entered,
+            releases: [
+                std::sync::Mutex::new(receive0),
+                std::sync::Mutex::new(receive1),
+            ],
+        }))
+        .message_safety(dir.path().join("hazard.json"), Arc::new(TestKey));
+    svc.set_on(true).unwrap();
+    let computer = Arc::new(svc.for_owner("chat"));
+    draft(&computer, "old draft").await.unwrap();
+    armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let one = computer.clone();
+    let two = computer.clone();
+    let mut first = tokio::spawn(async move {
+        run(
+            &one,
+            CANCEL,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"old draft"}),
+        )
+        .await
+    });
+    let mut second = tokio::spawn(async move {
+        run(
+            &two,
+            CANCEL,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"old draft"}),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking(move || {
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+    })
+    .await
+    .unwrap();
+    release0.send(()).unwrap();
+    let first_finished = tokio::select! { result = &mut first => { result.unwrap().unwrap(); true }, result = &mut second => { result.unwrap().unwrap(); false } };
+    let staged = draft(&computer, "new draft").await;
+    release1.send(()).unwrap();
+    staged.unwrap();
+    let stale = if first_finished {
+        second.await
+    } else {
+        first.await
+    }
+    .unwrap()
+    .unwrap_err();
+    assert!(stale.contains("draft changed"), "{stale}");
+    assert_eq!(
+        screen.look("WhatsApp").unwrap().elements[1]
+            .value
+            .as_deref(),
+        Some("new draft")
+    );
+    assert!(svc.message_hazard().is_some());
+    run(
+        &computer,
+        CANCEL,
+        json!({"app":"WhatsApp","recipient":"Notas","text":"new draft"}),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn cancel_completion_cannot_clear_a_submission_that_claimed_the_draft() {
+    struct Pause {
+        log: ark_computer::fake::Log,
+        armed: Arc<std::sync::atomic::AtomicBool>,
+        entered: std::sync::mpsc::SyncSender<usize>,
+        releases: [std::sync::Mutex<std::sync::mpsc::Receiver<()>>; 2],
+        seen: [std::sync::atomic::AtomicBool; 2],
+    }
+    impl MessageEvidence for Pause {
+        fn context(
+            &self,
+            look: &Look,
+            recipient: Option<&str>,
+            text: Option<&str>,
+            bound: Option<(&str, &str)>,
+        ) -> std::result::Result<Option<MessageContext>, String> {
+            let context = TestMessages.context(look, recipient, text, bound)?;
+            let sent = self
+                .log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line == "keys return");
+            let index = if context
+                .as_ref()
+                .is_some_and(|context| context.composer_value.is_empty())
+                && !sent
+            {
+                Some(0)
+            } else if sent {
+                Some(1)
+            } else {
+                None
+            };
+            if self.armed.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(index) = index.filter(|index| {
+                    !self.seen[*index].swap(true, std::sync::atomic::Ordering::SeqCst)
+                }) {
+                    self.entered
+                        .send(index)
+                        .map_err(|error| error.to_string())?;
+                    self.releases[index]
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            Ok(context)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new().app(
+        "WhatsApp",
+        &[("button", "Notas"), ("text area", "Compose message")],
+    );
+    let (entered, waiting) = std::sync::mpsc::sync_channel(2);
+    let (release0, receive0) = std::sync::mpsc::sync_channel(1);
+    let (release1, receive1) = std::sync::mpsc::sync_channel(1);
+    let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let svc = service(&screen)
+        .messages(Arc::new(Pause {
+            log: screen.log.clone(),
+            armed: armed.clone(),
+            entered,
+            releases: [
+                std::sync::Mutex::new(receive0),
+                std::sync::Mutex::new(receive1),
+            ],
+            seen: [
+                std::sync::atomic::AtomicBool::new(false),
+                std::sync::atomic::AtomicBool::new(false),
+            ],
+        }))
+        .message_safety(dir.path().join("hazard.json"), Arc::new(TestKey));
+    svc.set_on(true).unwrap();
+    let computer = Arc::new(svc.for_owner("chat"));
+    draft(&computer, "same draft").await.unwrap();
+    armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let canceler = computer.clone();
+    let cancel = tokio::spawn(async move {
+        run(
+            &canceler,
+            CANCEL,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"same draft"}),
+        )
+        .await
+    });
+    let waiting = tokio::task::spawn_blocking(move || {
+        assert_eq!(waiting.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        waiting
+    })
+    .await
+    .unwrap();
+    screen.look("WhatsApp").unwrap().controls[1]
+        .set_text("same draft")
+        .unwrap();
+    let sender = computer.clone();
+    let send = tokio::spawn(async move {
+        run(
+            &sender,
+            SEND,
+            json!({"app":"WhatsApp","recipient":"Notas","text":"same draft"}),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking(move || {
+        assert_eq!(waiting.recv_timeout(Duration::from_secs(5)).unwrap(), 1)
+    })
+    .await
+    .unwrap();
+    release0.send(()).unwrap();
+    let cancelled = cancel.await.unwrap();
+    let hazard = svc.message_hazard();
+    release1.send(()).unwrap();
+    assert!(cancelled.unwrap_err().contains("already submitted"));
+    assert_eq!(hazard.unwrap().kind, HazardKind::SubmittedUnconfirmed);
+    let sent = send.await.unwrap().unwrap();
+    assert_eq!(sent["status"], "submitted_unconfirmed");
+    assert!(svc.message_hazard().is_some());
+}
+
+#[tokio::test]
+async fn public_look_is_bounded_and_keeps_a_late_focused_field_addressable() {
+    let names: Vec<_> = (0..220).map(|i| format!("Item {i}")).collect();
+    let mut controls: Vec<_> = names.iter().map(|name| ("button", name.as_str())).collect();
+    controls.push(("text field", "Late composer"));
+    let screen = FakeScreen::new().app("Lumen", &controls);
+    screen
+        .look("Lumen")
+        .unwrap()
+        .controls
+        .last()
+        .unwrap()
+        .press()
+        .unwrap();
+    let svc = service(&screen);
+    let computer = svc.for_owner("chat");
+    let look = run(&computer, LOOK, json!({"app":"Lumen"})).await.unwrap();
+    assert_eq!(look["elements"].as_array().unwrap().len(), 150);
+    assert_eq!(look["truncated"], true);
+    assert!(look["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|element| element["ref"] == 221));
+    run(
+        &computer,
+        TYPE,
+        json!({"app":"Lumen","ref":221,"name":"Late composer","text":"complete value"}),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

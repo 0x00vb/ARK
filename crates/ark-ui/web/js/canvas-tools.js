@@ -1,4 +1,5 @@
 import { h, icon } from "./dom.js";
+import { bindContextMenu, controlActions } from "./context-menu.js";
 
 const scenes = new Map();
 const point = value => value && Number.isFinite(value.x) && Number.isFinite(value.y) && value.x >= 0 && value.y >= 0 && value.x <= 10000 && value.y <= 10000;
@@ -22,7 +23,7 @@ export function canvasScene(key, report) {
 }
 
 export function canvasTools({ viewport, plane, scene, toolbar, scale = () => 1, create }) {
-  let mode = "select", gesture = null, ignoreClick = false, press = null;
+  let mode = "select", gesture = null;
   const tools = h("div.canvas-mode-tools", { role: "group", "aria-label": "Canvas tools" });
   const modes = [["select", "Select", "cursor"], ["pan", "Pan", "hand"], ["draw", "Draw", "pencil"], ["shape", "Rectangle", "square"]];
   function choose(next) {
@@ -52,14 +53,11 @@ export function canvasTools({ viewport, plane, scene, toolbar, scale = () => 1, 
   };
   const empty = target => !target.closest("button,input,textarea,select,summary,.auto-node,.auto-gallery-item");
   viewport.addEventListener("pointerdown", event => {
-    ignoreClick = false;
-    press = { x: event.clientX, y: event.clientY };
     if (event.button !== 0 || !event.isPrimary || !empty(event.target) || mode === "select") return;
     gesture = { id: event.pointerId, client: { x: event.clientX, y: event.clientY }, pan: { x: viewport.scrollLeft, y: viewport.scrollTop }, mark: { kind: mode, points: [position(event)] }, moved: false };
     viewport.setPointerCapture(event.pointerId); event.preventDefault();
   });
   viewport.addEventListener("pointermove", event => {
-    if (press && Math.abs(event.clientX - press.x) + Math.abs(event.clientY - press.y) > 4) ignoreClick = true;
     if (!gesture || gesture.id !== event.pointerId) return;
     const dx = event.clientX - gesture.client.x, dy = event.clientY - gesture.client.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) gesture.moved = true;
@@ -73,7 +71,6 @@ export function canvasTools({ viewport, plane, scene, toolbar, scale = () => 1, 
   });
   function finish(event, cancelled) {
     if (!gesture || gesture.id !== event.pointerId) return;
-    ignoreClick = true;
     if (!cancelled && gesture.moved && mode !== "pan") {
       scene.data.marks.push(gesture.mark); scene.data.marks = scene.data.marks.slice(-200); scene.save();
     }
@@ -82,15 +79,12 @@ export function canvasTools({ viewport, plane, scene, toolbar, scale = () => 1, 
   }
   viewport.addEventListener("pointerup", event => finish(event, false));
   viewport.addEventListener("pointercancel", event => finish(event, true));
-  viewport.addEventListener("click", event => {
-    if (ignoreClick) { ignoreClick = false; return; }
-    if (mode === "select" && empty(event.target)) create?.(position(event));
-  });
   viewport.addEventListener("keydown", event => {
     if (event.target !== viewport) return;
     if (event.key === "Escape") { choose("select"); gesture = null; paint(); }
     if (event.key === "Enter") { event.preventDefault(); create?.({ x: (viewport.scrollLeft + 80) / scale(), y: (viewport.scrollTop + 80) / scale() }); }
   });
+  bindContextMenu(viewport, () => controlActions(toolbar.querySelectorAll("button")));
   choose("select");
   return { paint, choose };
 }

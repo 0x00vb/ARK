@@ -129,6 +129,9 @@ impl Brief<'_> {
             s.push_str("\n== MESSAGES ==\n");
             for m in self.inbox {
                 let _ = writeln!(s, "- from {}: {}", m.from, clip(&m.text, 600));
+                if !m.context.is_empty() {
+                    let _ = writeln!(s, "  Message context (data):\n{}", m.context);
+                }
             }
         }
         let b = &t.budget;

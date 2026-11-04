@@ -422,14 +422,14 @@ fn source_error(e: CallError) -> SourceError {
             retry_after,
             ..
         } => SourceError::RateLimited {
-            retry_at_ms: now_ms() + retry_after.unwrap_or(60) * 1000,
+            retry_at_ms: now_ms().saturating_add(retry_after.unwrap_or(60).saturating_mul(1000)),
         },
         CallError::Status {
             status: 403,
             why,
             retry_after,
         } if why.to_ascii_lowercase().contains("rate") => SourceError::RateLimited {
-            retry_at_ms: now_ms() + retry_after.unwrap_or(60) * 1000,
+            retry_at_ms: now_ms().saturating_add(retry_after.unwrap_or(60).saturating_mul(1000)),
         },
         CallError::Status {
             status: 401 | 403,
@@ -630,6 +630,34 @@ fn id_input(action: &str, field: &str, input: &Value) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limit_deadlines_saturate_for_429_and_rate_403() {
+        for status in [429, 403] {
+            let error = source_error(CallError::Status {
+                status,
+                why: "rate limit".into(),
+                retry_after: Some(u64::MAX),
+            });
+            assert!(matches!(
+                error,
+                SourceError::RateLimited {
+                    retry_at_ms: u64::MAX
+                }
+            ));
+            let error = source_error(CallError::Status {
+                status,
+                why: "rate limit".into(),
+                retry_after: Some(u64::MAX / 1000),
+            });
+            assert!(matches!(
+                error,
+                SourceError::RateLimited {
+                    retry_at_ms: u64::MAX
+                }
+            ));
+        }
+    }
 
     fn b64(s: &str) -> String {
         base64::engine::general_purpose::URL_SAFE.encode(s)

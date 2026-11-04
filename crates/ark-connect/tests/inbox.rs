@@ -21,13 +21,17 @@ type Route = Arc<dyn Fn(&str, &str, &str) -> Option<(u16, Value)> + Send + Sync>
 
 /// Gmail and Google's token endpoint on loopback, recording each request.
 async fn server(route: Route) -> (String, Seen) {
+    server_with_retry_after(route, None).await
+}
+
+async fn server_with_retry_after(route: Route, retry_after: Option<String>) -> (String, Seen) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let seen: Seen = Arc::default();
     let log = seen.clone();
     tokio::spawn(async move {
         while let Ok((mut sock, _)) = listener.accept().await {
-            let (log, route) = (log.clone(), route.clone());
+            let (log, route, retry_after) = (log.clone(), route.clone(), retry_after.clone());
             tokio::spawn(async move {
                 let mut buf = Vec::new();
                 let mut chunk = [0u8; 8192];
@@ -63,8 +67,12 @@ async fn server(route: Route) -> (String, Seen) {
                     return;
                 };
                 let reply = reply.to_string();
+                let retry_after = retry_after
+                    .filter(|_| status >= 400)
+                    .map(|value| format!("retry-after: {value}\r\n"))
+                    .unwrap_or_default();
                 let out = format!(
-                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{retry_after}connection: close\r\n\r\n{reply}",
                     reply.len()
                 );
                 let _ = sock.write_all(out.as_bytes()).await;
@@ -329,6 +337,43 @@ async fn a_lost_sign_in_is_disconnected_and_too_many_requests_is_rate_limited() 
         panic!("429 is a rate limit")
     };
     assert!(retry_at_ms >= now + 59_000, "waits a minute when not told");
+}
+
+#[tokio::test]
+async fn a_rate_limited_feed_respects_a_retry_after_http_date() {
+    let started = time::OffsetDateTime::now_utc();
+    let retry_at = (started + time::Duration::minutes(5))
+        .replace_nanosecond(0)
+        .unwrap();
+    let header = retry_at
+        .format(time::macros::format_description!(
+            "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT"
+        ))
+        .unwrap();
+    let expected_ms = u64::try_from(retry_at.unix_timestamp()).unwrap() * 1000;
+    let route: Route = Arc::new(|_, path, _| {
+        token(path).or(Some((429, json!({ "error": { "message": "slow down" } }))))
+    });
+    let (base, seen) = server_with_retry_after(route, Some(header)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let f = feed(&connected(dir.path(), &base, &[READ, SEND]));
+    let result = f.poll(Some("1"), 10).await;
+    let elapsed_ms =
+        u64::try_from((time::OffsetDateTime::now_utc() - started).whole_milliseconds()).unwrap();
+    let Err(SourceError::RateLimited { retry_at_ms }) = result else {
+        panic!("429 must produce a feed rate limit, got {result:?}")
+    };
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|(_, path, _)| path.starts_with("/users/me/history?")),
+        "the feed must call Gmail history"
+    );
+    assert!(
+        (expected_ms..=expected_ms + elapsed_ms + 1000).contains(&retry_at_ms),
+        "feed deadline {retry_at_ms} must respect HTTP date {expected_ms} within elapsed {elapsed_ms} ms and one second of rounding"
+    );
 }
 
 fn thread_routes(send: Option<(u16, Value)>) -> Route {

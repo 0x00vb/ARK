@@ -10,6 +10,61 @@ pub const CURRENT_MINOR: u16 = 5;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
 
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRegistrationRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+    #[schemars(length(min = 1, max = 200))]
+    pub runtime_route_id: String,
+    #[schemars(length(min = 20, max = 40))]
+    pub expires_at: String,
+    #[schemars(length(min = 43, max = 43))]
+    pub send_capability: String,
+}
+
+impl std::fmt::Debug for NativePushRegistrationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativePushRegistrationRequest")
+            .field("send_capability", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRegistrationResponse {
+    pub registration_id: String,
+    pub runtime_route_id: String,
+    pub expires_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRemoveRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushPresenceRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+    pub in_foreground: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePushResolution {
+    pub attention_id: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+}
+
 macro_rules! wire {
     ($(#[$meta:meta])* $vis:vis struct $name:ident { $($(#[$field_meta:meta])* $field:ident: $ty:ty),* $(,)? }) => {
         $(#[$meta])*
@@ -378,6 +433,11 @@ wire!(
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 pub struct ProtocolSchema {
+    native_push_registration_request: NativePushRegistrationRequest,
+    native_push_registration_response: NativePushRegistrationResponse,
+    native_push_remove_request: NativePushRemoveRequest,
+    native_push_presence_request: NativePushPresenceRequest,
+    native_push_resolution: NativePushResolution,
     bootstrap: Bootstrap,
     pair_request: PairRequest,
     account_pair_request: AccountPairRequest,

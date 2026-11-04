@@ -1,5 +1,9 @@
 # Current state
 
+## Private native notification relay (2026-10-24)
+
+This isolated extension passed nine focused cases and independent source review after sharing the existing connection secret-store instance. The parent authorized integration into `../ark-mobile-provider-login`, retaining model and provider changes. That merged candidate uses protocol 1.8 and passes nine push cases, six protocol cases, both model/provider HTTP regressions and the bounded Linux release build. Evidence: `../board/evidence/mobile-native-push-20261024/critical-result.json`. Physical APNs proof, private activation and consumer installation remain with the parent. This tree is retained as source rollback. No public deployment or release is implied.
+
 ## Combined release verification (2026-10-23)
 
 The combined candidate passed full page-enabled CI: formatting, generated protocol, version

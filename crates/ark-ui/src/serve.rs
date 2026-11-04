@@ -886,6 +886,11 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 .into_iter()
                 .map(str::to_string)
                 .chain(account_pairing.as_ref().map(|_| "account.pair".to_string()))
+                .chain(
+                    (surface == ListenerSurface::ClientOnly
+                        && host.notifier.native.enabled(route_id.as_deref()))
+                    .then(|| "push.native".to_string()),
+                )
                 .collect(),
                 limits: ark_protocol::Limits {
                     page_size: 50,
@@ -1465,6 +1470,167 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     .await
                 }
                 Err(crate::host::ClientMutationError::Store(error)) => Err(error),
+            }
+        }
+        ("PUT", "/client/v1/push") => {
+            if !client_authed || surface != ListenerSurface::ClientOnly {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushRegistrationRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not enable notifications.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            let result = host.notifier.native.register(
+                &client_device_id(client_credential),
+                route_id.as_deref().unwrap_or(""),
+                input,
+            );
+            match result {
+                Ok(result) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&result)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not enable notifications.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("DELETE", "/client/v1/push") => {
+            if !client_authed || surface != ListenerSurface::ClientOnly {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushRemoveRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not remove notifications.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            match host
+                .notifier
+                .native
+                .remove(&client_device_id(client_credential), &input.registration_id)
+            {
+                Ok(()) => respond(&mut sock, "204 No Content", "application/json", b"").await,
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not remove notifications.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/push/presence") => {
+            if !client_authed || surface != ListenerSurface::ClientOnly {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushPresenceRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not update notification state.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            match host
+                .notifier
+                .native
+                .present(&client_device_id(client_credential), &input)
+            {
+                Ok(()) => respond(&mut sock, "204 No Content", "application/json", b"").await,
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not update notification state.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("GET", path) if path.starts_with("/client/v1/push/resolve/") => {
+            if !client_authed || surface != ListenerSurface::ClientOnly {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let id = path.trim_start_matches("/client/v1/push/resolve/");
+            match host.native_push_resolution(&client_device_id(client_credential), id) {
+                Ok(result) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&result)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "This notification is no longer available.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
             }
         }
         ("DELETE", "/client/v1/session") => {

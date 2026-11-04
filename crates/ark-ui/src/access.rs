@@ -668,6 +668,15 @@ impl Tokens {
         self.info(token).filter(|info| info.scope == scope)
     }
 
+    pub(crate) fn external_client_hash_live(&self, digest: &str) -> bool {
+        let Ok(file) = self.read() else { return false };
+        file.client_tokens.iter().any(|entry| {
+            same(&entry.sha256, digest)
+                && entry.info.scope == CredentialScope::ExternalClient
+                && entry.info.live(now_ms())
+        })
+    }
+
     /// Read, change and write the file under its lock; expired sessions and links go first.
     fn update<T>(&self, f: impl FnOnce(&mut File) -> anyhow::Result<T>) -> anyhow::Result<T> {
         if let Some(dir) = self.path.parent() {

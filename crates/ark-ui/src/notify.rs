@@ -36,6 +36,7 @@ const MAX_AGE_MS: u64 = 24 * 3600 * 1000;
 const REMOVED: &str = "push_removed";
 
 pub(crate) struct Notifier {
+    pub(crate) native: crate::native_push::NativePush,
     engine: Arc<Engine>,
     keys: OnceLock<Option<Keys>>,
     client: OnceLock<reqwest::Client>,
@@ -57,8 +58,12 @@ type Out = Arc<
 >;
 
 impl Notifier {
-    pub(crate) fn new(engine: Arc<Engine>) -> Notifier {
+    pub(crate) fn new(
+        engine: Arc<Engine>,
+        secrets: Option<Arc<dyn ark_sdk::prelude::ark_connect::Secrets>>,
+    ) -> Notifier {
         Notifier {
+            native: crate::native_push::NativePush::new(engine.clone(), secrets),
             engine,
             keys: OnceLock::new(),
             client: OnceLock::new(),
@@ -234,7 +239,9 @@ impl Notifier {
     /// at a time.
     pub(crate) fn soon(self: &Arc<Self>, notices: Arc<dyn Fn() -> Vec<Notice> + Send + Sync>) {
         self.again.store(true, Ordering::SeqCst);
-        if self.devices().is_empty() || self.scheduled.swap(true, Ordering::SeqCst) {
+        if (self.devices().is_empty() && !self.native.has_devices())
+            || self.scheduled.swap(true, Ordering::SeqCst)
+        {
             return;
         }
         let me = self.clone();
@@ -258,6 +265,17 @@ impl Notifier {
     /// Send what is due; true when something still waits for some device (not due yet, its
     /// page in view, its push service busy).
     async fn look(&self, notices: &[Notice]) -> bool {
+        let native_pending = match self
+            .native
+            .look(notices, self.tokens.get(), wait().as_millis() as u64)
+            .await
+        {
+            Ok(pending) => pending,
+            Err(_) => {
+                tracing::warn!("native notification delivery storage unavailable");
+                false
+            }
+        };
         let live = self
             .tokens
             .get()
@@ -307,7 +325,7 @@ impl Notifier {
                 }
             }
         }
-        pending
+        pending || native_pending
     }
 
     async fn send(&self, d: Device, m: Message) -> Sent {

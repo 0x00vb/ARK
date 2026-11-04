@@ -126,6 +126,11 @@ impl Connections {
         &self.inner.api_keys
     }
 
+    /// Runtime services share the same storage instance and mutation lock as connections.
+    pub fn secret_store(&self) -> Arc<dyn Secrets> {
+        self.inner.secrets.clone()
+    }
+
     /// Send `service`'s requests to `base` instead (tests, a proxy). Before the first clone.
     pub fn with_base(mut self, service: &str, base: &str) -> Self {
         if let Some(inner) = Arc::get_mut(&mut self.inner) {

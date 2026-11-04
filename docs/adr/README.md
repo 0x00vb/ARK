@@ -7,6 +7,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 
 | # | Decision | Status |
 |---|---|---|
+| [0082](0082-external-clients-can-opt-into-a-private-notification-relay.md) | External clients can opt into a private notification relay | Accepted for private pilot |
 | [0001](0001-no-domain-in-core.md) | The runtime names no domain, tool or file format | Accepted |
 | [0002](0002-bounded-context.md) | Working state is the memory, not the transcript | Accepted |
 | [0003](0003-deterministic-before-inference.md) | Code decides what code can decide; a model call needs a benchmark | Accepted |

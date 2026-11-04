@@ -953,7 +953,10 @@ impl Host {
             processes: ix.ark().processes().cloned(),
             browser: ix.ark().browser_service().cloned(),
             workers: ix.ark().workers().cloned(),
-            notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
+            notifier: Arc::new(crate::notify::Notifier::new(
+                ix.ark().shared_engine(),
+                ix.ark().connections().map(|c| c.secret_store()),
+            )),
             links: ix.links().clone(),
             held: Mutex::new(None),
             held_live: Mutex::new(HashMap::new()),
@@ -1624,6 +1627,40 @@ impl Host {
         self.notifier.soon(Arc::new(move || {
             me.upgrade().map(|h| h.notices()).unwrap_or_default()
         }));
+    }
+
+    pub(crate) fn native_push_resolution(
+        &self,
+        owner: &str,
+        id: &str,
+    ) -> anyhow::Result<ark_protocol::NativePushResolution> {
+        let found = self.notifier.native.resolve(owner, id)?;
+        let mut response = ark_protocol::NativePushResolution {
+            attention_id: id.into(),
+            state: "resolved".into(),
+            chat_id: None,
+            item_id: None,
+        };
+        if let Some((notice, chat)) = found {
+            if let Some(chat) = chat {
+                if self.engine.store.get_session(&chat)?.is_some() {
+                    response.chat_id = Some(chat);
+                }
+            }
+            if self.notices().iter().any(|n| n.id == notice) {
+                response.state = "current".into();
+                response.item_id = Some(notice.clone());
+                if response.chat_id.is_none() {
+                    response.chat_id = ark_interact::attention::list(&self.engine, &self.labels)
+                        .into_iter()
+                        .find(|item| item.id == notice)
+                        .and_then(|item| item.chat);
+                }
+            } else if response.chat_id.is_some() {
+                response.state = "chat".into();
+            }
+        }
+        Ok(response)
     }
 
     /// The project an agent's task works in (`{id, name}`), so its question can say where it
@@ -4817,6 +4854,17 @@ impl Host {
         };
         for id in open {
             self.emit(json!({ "kind": "approval_closed", "id": id }));
+        }
+        if !cancelled {
+            if self
+                .notifier
+                .native
+                .completed(&session, end.index, ok)
+                .is_err()
+            {
+                tracing::warn!("could not retain native completion notification");
+            }
+            self.notify_soon();
         }
         self.emit(json!({
             "kind": "turn_finished",

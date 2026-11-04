@@ -11,6 +11,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Client-only listeners can opt into a fixed, content-free notification relay for authenticated devices. Credentials, expiry and opaque tap resolution stay scoped to that device (ADR 0082).
+
 - `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report
   its exact route id without granting those clients browser or generic RPC access.
 

@@ -39,6 +39,7 @@ mod file_snapshots;
 mod files;
 mod frame;
 pub mod host;
+mod native_push;
 mod notify;
 #[cfg(feature = "desktop-updater")]
 pub mod page_updates;

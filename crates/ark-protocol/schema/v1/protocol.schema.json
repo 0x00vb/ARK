@@ -157,6 +157,15 @@
         "id": {
           "type": "string"
         },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "preview": {
           "type": "string"
         },

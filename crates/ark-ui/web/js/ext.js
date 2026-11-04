@@ -1,3 +1,4 @@
+import { setAgentIdentity } from "./dom.js";
 // The extension points an app's scripts use, available as `window.ark`:
 //
 //   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
@@ -48,10 +49,13 @@
 //   ark.sidebar({ id, render(el, api) })
 //                      a row at the top of the projects list, for what the list as a whole
 //                      depends on (an app with runtimes in several places says which here)
+//   ark.agentIdentity(name => styleKey)
+//                      one stable style key per assigned participant, shared by single and group chats.
 //   ark.projectSection({ id, label, render(el, { project }, api) })
 //                      rows inside the current unfolded project, before its chats. `label`
 //                      names the group for accessibility. Render is synchronous, with `el`
 //                      attached; return `{ dispose() }` to release this mount before removal.
+//                      A focusable child can set data-focus-key to retain focus across remounts.
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The
@@ -152,6 +156,10 @@ function need(obj, keys, what) {
 export function installApi(api) {
   const ark = {
     ...api,
+    agentIdentity(resolve) {
+      setAgentIdentity(resolve);
+      api._changed(true);
+    },
     panel(p) {
       need(p, ["id", "title", "render"], "panel");
       registry.panels.set(p.id, p);

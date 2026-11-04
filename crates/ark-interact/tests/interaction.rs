@@ -1435,3 +1435,187 @@ async fn an_install_that_names_an_app_is_asked_as_an_install() {
     assert!(asked[0].starts_with("Install Node.js"), "{asked:?}");
     assert!(procs.list().is_empty(), "nothing installed");
 }
+
+#[test]
+fn malformed_participant_history_does_not_hide_valid_chats() {
+    let root = tempfile::tempdir().unwrap();
+    let interaction = open(root.path());
+    let summary = interaction.summary();
+    interaction
+        .engine()
+        .store
+        .put_record(
+            "orch_task",
+            "broken",
+            &summary.project.id,
+            &serde_json::json!({"id":"broken"}),
+        )
+        .unwrap();
+    let chats =
+        ark_interact::interaction::list_sessions(interaction.engine(), None, &summary.session.id)
+            .unwrap();
+    assert!(chats
+        .iter()
+        .any(|chat| chat.id == summary.session.id && chat.participants.is_none()));
+}
+
+#[tokio::test]
+async fn project_memory_commands_review_replace_forget_and_survive_new_chats() {
+    use ark_core::{Invocation, MemorySource, MemoryState};
+    use ark_runtime::memory::MemoryReview;
+    let dir = tempfile::tempdir().unwrap();
+    let mut ix = open(dir.path());
+    let empty = ix.execute("/memory").await.report.plain_text();
+    assert!(empty.contains("No project memories yet"));
+    let response = ix
+        .execute("/memory remember report format | Use XLSX for reports.")
+        .await
+        .report
+        .plain_text();
+    assert!(response.contains("Remembered") && response.contains("Use XLSX"));
+    let project = ix.project().id.clone();
+    let first = ix
+        .engine()
+        .store
+        .project_memories(&project)
+        .unwrap()
+        .remove(0);
+    ix.execute("/new").await;
+    let preview = ix.context_for_task("make a report").await.unwrap();
+    assert!(preview.report.memory > 0);
+    assert!(ix
+        .execute("/context make a report")
+        .await
+        .report
+        .plain_text()
+        .contains("Project memory"));
+    let invocation = Invocation::new("memory.suggest", RiskTier::Mutate, serde_json::json!({}));
+    ix.engine()
+        .store
+        .put_invocation(&project, &invocation)
+        .unwrap();
+    let pending = ix
+        .engine()
+        .store
+        .record_memory(
+            &project,
+            "report format",
+            "Use CSV for reports.",
+            MemorySource::Agent {
+                invocation: invocation.id,
+            },
+            Some(first.id.clone()),
+        )
+        .unwrap();
+    let review = ix
+        .execute(&format!("/memory show {}", pending.id))
+        .await
+        .report;
+    assert!(review.blocks.iter().any(|b| matches!(b, ark_interact::report::Block::Actions { actions } if actions.iter().any(|a| a.label == "Accept"))));
+    assert!(review.blocks.iter().any(|b| matches!(b, ark_interact::report::Block::Actions { actions } if actions.iter().any(|a| a.label == "Reject"))));
+    ix.execute(&format!("/memory accept {}", pending.id)).await;
+    assert!(matches!(
+        ix.engine()
+            .store
+            .project_memory(&project, first.id.as_str())
+            .unwrap()
+            .state,
+        MemoryState::Superseded { .. }
+    ));
+    ix.execute(&format!(
+        "/memory replace {} | Use TSV for reports.",
+        pending.id
+    ))
+    .await;
+    let current = ix
+        .engine()
+        .store
+        .project_memories(&project)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.state == MemoryState::Active)
+        .unwrap();
+    ix.execute("/project other").await;
+    let foreign = ix
+        .execute(&format!("/memory forget {}", current.id))
+        .await
+        .report
+        .plain_text();
+    assert!(foreign.contains("memory not found in this project"));
+    ix.execute(&format!("/project {project}")).await;
+    assert_eq!(ix.project().id, project);
+    let reviewer = ix.session().id().clone();
+    ix.engine()
+        .store
+        .review_memory(
+            &project,
+            current.id.as_str(),
+            MemoryReview::Forget,
+            &reviewer,
+        )
+        .unwrap();
+    assert_eq!(
+        ix.context_for_task("make a report")
+            .await
+            .unwrap()
+            .report
+            .memory,
+        0
+    );
+    let id = current.id.clone();
+    drop(ix);
+    let ix = open(dir.path());
+    let forgotten = ix
+        .engine()
+        .store
+        .project_memory(&project, id.as_str())
+        .unwrap();
+    assert_eq!(forgotten.state, MemoryState::Forgotten);
+    assert!(forgotten.body.is_empty());
+}
+
+#[tokio::test]
+async fn a_fresh_chat_receives_the_current_correction_and_preview_matches_the_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = Arc::new(MockProvider::new("m", vec![]).with_fallback(|r| {
+        Completion {
+            content: if r.messages[0].content.contains("Use TSV for reports.") {
+                "Use TSV for reports."
+            } else {
+                "Unknown: no report format is known."
+            }
+            .into(),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        }
+    }));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Memory demo")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    ix.execute("/memory remember report format | Use TSV for reports.")
+        .await;
+    ix.execute("/new").await;
+    let preview = ix.context_for_task("write a report").await.unwrap().report;
+    let outcome = ix
+        .run_turn("write a report", &TurnControl::new(), |_, _| {})
+        .await
+        .result
+        .unwrap();
+    assert_eq!(outcome.answer, "Use TSV for reports.");
+    let actual = ix.context_view().await.unwrap().report;
+    assert_eq!(preview.memory, actual.memory);
+    assert_eq!(preview.tool_schemas, actual.tool_schemas);
+    assert!(model.recorded()[0].messages[0]
+        .content
+        .contains("== PROJECT MEMORY =="));
+}

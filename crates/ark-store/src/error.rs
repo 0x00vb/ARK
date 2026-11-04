@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("memory: {0}")]
+    Memory(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

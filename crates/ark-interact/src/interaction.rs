@@ -348,13 +348,41 @@ pub fn list_sessions(
         .into_iter()
         .map(|p| (p.id.as_str().to_string(), p.name))
         .collect();
-    Ok(Session::list(engine, scope)?
+    let mut sessions: Vec<_> = Session::list(engine, scope)?
         .iter()
         .map(|r| {
             let pname = names.get(r.project.as_str()).cloned().unwrap_or_default();
             SessionSummary::of(r, &pname, r.id.as_str() == current)
         })
-        .collect())
+        .collect();
+    enrich_participants(engine, &mut sessions);
+    Ok(sessions)
+}
+
+fn enrich_participants(engine: &Engine, sessions: &mut [SessionSummary]) {
+    let mut projects: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
+    for session in sessions.iter() {
+        projects
+            .entry(session.project.clone())
+            .or_default()
+            .insert(session.id.clone());
+    }
+    for (project, chats) in projects {
+        let participants = match ark_orchestrate::chat_participants(&engine.store, &project, &chats)
+        {
+            Ok(participants) => participants,
+            Err(error) => {
+                tracing::warn!(%error, "could not read chat participants");
+                continue;
+            }
+        };
+        for session in sessions
+            .iter_mut()
+            .filter(|session| session.project == project)
+        {
+            session.participants = Some(participants.get(&session.id).cloned().unwrap_or_default());
+        }
+    }
 }
 
 /// [`Interaction::project_sessions`] without the interaction.
@@ -367,10 +395,12 @@ pub fn project_sessions(
         .into_iter()
         .find(|p| p.id.as_str() == id)
         .ok_or_else(|| anyhow::anyhow!("no project with id `{id}`"))?;
-    Ok(Session::list(engine, Some(&p.id))?
+    let mut sessions: Vec<_> = Session::list(engine, Some(&p.id))?
         .iter()
         .map(|r| SessionSummary::of(r, &p.name, r.id.as_str() == current))
-        .collect())
+        .collect();
+    enrich_participants(engine, &mut sessions);
+    Ok(sessions)
 }
 
 /// [`Interaction::transcript`] of any stored session, without its interaction: a window reads a
@@ -1539,6 +1569,20 @@ impl Interaction {
             None => (preview, ContextSource::Preview, None),
         };
         Ok(ContextView::build(&report, source, next, &self.kept_out()?))
+    }
+
+    /// Preview the actual selection for a concrete next message.
+    pub async fn context_for_task(&self, task: &str) -> anyhow::Result<ContextView> {
+        let report = self
+            .ark
+            .context_preview_task(&self.session, self.present, &self.turn_tools(), task)
+            .await?;
+        Ok(ContextView::build(
+            &report,
+            ContextSource::Preview,
+            None,
+            &self.kept_out()?,
+        ))
     }
 
     /// The measurements behind the "kept out of the request" list.

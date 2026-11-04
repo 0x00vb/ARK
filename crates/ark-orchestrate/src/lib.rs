@@ -40,6 +40,7 @@ mod event;
 mod graph;
 pub mod models;
 mod orchestrator;
+mod participants;
 mod record;
 pub mod schedule;
 mod spec;
@@ -53,6 +54,7 @@ pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger}
 pub use orchestrator::{
     NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, RESTARTED, WAITING_PERSON,
 };
+pub use participants::chat_participants;
 pub use record::{
     AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,
     ToolCallRecord, Usage,

@@ -31,6 +31,7 @@ pub mod context;
 pub mod error;
 pub mod ids;
 pub mod invocation;
+pub mod memory;
 pub mod project;
 pub mod research;
 pub mod rules;
@@ -43,6 +44,7 @@ pub use context::WorkspaceContext;
 pub use error::{CoreError, Result};
 pub use ids::{ArtifactId, InvocationId, NoteId, ProjectId, SessionId};
 pub use invocation::{ExternalEffect, ExternalEffectState, Invocation, InvocationStatus};
+pub use memory::{MemorySource, MemoryState, ProjectMemory};
 pub use project::{Author, Note, NoteKind, Project};
 pub use research::{
     Claim, ClaimType, EdgeRel, EvidenceCard, GraphEdge, GraphNode, Interesting, InvestigationGraph,

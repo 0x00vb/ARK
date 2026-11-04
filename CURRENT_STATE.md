@@ -1,5 +1,51 @@
 # Current state
 
+## Combined source integration candidate (2026-10-20)
+
+`codex/integrate-project-memory` combines the current uncommitted participant and
+UX source from main with the frozen reviewed project-memory candidate. Both original
+workstreams are preserved. The memory full CI result applies only to its frozen
+candidate; this combined source has not run compiler, full repository or native gates.
+Independent integration review remains pending. No main mutation, commit, ADR acceptance
+or release is implied. Evidence: `../board/evidence/team-integration-2026-10-20/`.
+
+## Work clarity pass (2026-10-20)
+
+In `codex/ux-clarity`: the sidebar names Working and Needs you, shows pending decisions
+on folded projects, and preserves keyboard focus during background updates. File cards have
+44px targets and explicit accessible open actions, including after Restore. Reconnect and
+detached-window state use the current approval snapshot. Real WebKit regression tests cover
+these paths. Consumer native integration and the final repository gate remain separate.
+Board `ark-ui-clarity-20261020`. No release or Desktop repin.
+
+## Project memory in development (2026-10-20)
+
+Isolated `codex/project-memory` in `../ark-project-memory`. The existing records table holds
+project-scoped reviewed corrections. Shared commands remember, accept, reject, replace and
+forget; agent suggestions remain pending behind existing mutation approval. Replacement is
+transactional. Harness reasoning and final-answer requests refresh bounded active memory,
+including after provider retry delays. `/context next message` previews selection.
+
+Independent plan/design/source QA approved functional behavior. Aggregate efficacy remains
+unproven. Store tests pass 9/9, runtime
+memory tests 7/7, shared interaction tests 18/18 and proof-grader checks 2/2. The SDK test
+covers explicit first use, project opt-in, empty-project index parity and real session requests.
+Full `scripts/ci.sh` passes, including workspace/doc tests, release build and all 22 simulated
+workloads with exact committed-baseline parity. Actual terminal and page dogfood passed.
+The SDK offers suggestions for an explicit request or when active/pending records exist. Safe cleanup recovered 8.490 GiB from eight unused ignored Next
+build directories; source status was unchanged and active output was preserved.
+
+Eight real Claude Haiku file tasks completed. Baseline: 4/4 correct, 24 calls, 79.3 seconds.
+Memory: 3/4 correct, 24 calls, 82.6 seconds. Both document tasks saved correct reports in
+four calls versus five. The replacement coding task recalled the right rule but exhausted its
+step budget before saving. Scope, retired-memory exclusion and current-instruction override
+checks passed. This proves a narrow document benefit, not overall reliability improvement.
+The failed coding attempt needs a separate execution-budget investigation before claiming
+broader workflow improvement. Evidence: workspace `board/evidence/project-memory-2026-10-20/`,
+including `full-ci-verified.log` and `verification-summary.json`. No commit, main
+integration, release or consumer repin. Board `ark-project-memory-20261020`.
+
+
 ## Mobile continuity listener
 
 In development on `codex/mobile-client-listener`: a stoppable client-only listener attaches to
@@ -201,3 +247,50 @@ runs and the complete 43-scenario page gate.
   `../WORKSPACE.md`, Sessions).
 - `.playwright-mcp/` is scratch output from browser dogfooding. It is untracked; delete it when
   done.
+
+## October 20 local UX integration follow-up
+
+The reviewed clarity source is now applied in this local tree, including the new work-state WebKit test and CI entry. Shared-page tests repeated at29/29. iOS incremental source is integrated with prior edits preserved. Desktop currently previews this page through explicit source overrides on its installed0.23.6 runtime; this is not a freshly linked Desktop release. Full Core/Desktop/native gates remain pending disk admission. No commit, dependency pin, tag, push or release. Evidence: `../board/evidence/ux-clarity-2026-10-20/README.md`.
+
+
+## Desktop icon harmony trial, 20 October 2026
+
+Static Phosphor regular icons now align with iPhone. Chat, Agents, Board, new chat and attachments use explicit action symbols. Primary header/sidebar/composer controls use actual40px targets. Shared WebKit30/30 passed. A separate locally signed ARK UX Trial runs the successful currentCore0.25 cached binary with explicit current source overrides; installed ARK stays intact. Final embedded rebuild and full compiler gates still need disk admission. Native screenshot and launch command: ../board/evidence/ux-clarity-2026-10-20/. Push delivery remains incomplete.
+
+
+## Slim shell and agent conversations, 20 October2026
+
+Owner feedback applied: fixed rail50px, header44px, glyphs17px with40px primary click targets. Fixed chrome and project drawer have subtly different semantic tones. Composer model follows upload and dictation in visual/DOM order; mode is right aligned, the sole local destination stays hidden, remote choice stays visible. Project new chat uses plain plus. Desktop current-project agent faces open existing per-agent conversations, with runtime/project stale guards, focus preservation and disposal. Native row opened the correct orchestrator conversation. Desktop page tests71/71 pass; shared page verification recorded in slim-core-final.log. Group avatars remain open because chat participant metadata is absent. Full compiler/final embedded release and APNs delivery stay open. Evidence: ../board/evidence/ux-clarity-2026-10-20/.
+
+
+## Participant tracking and compact controls, 20 October 2026
+
+The participant source now derives assigned agent names from durable task report_to and parent links. This corrects the earlier assumption that no chat association existed. A read-only check found three existing chats with recorded groups. Protocol 1.5 adds optional participants; unknown remains distinct from known empty. Desktop and iPhone render a neutral identity, one face, or a capped group stack with an overflow count. Source review approved after preserving base chats on malformed task records and populating addressed reads for remote forwarding.
+
+Desktop pointer chrome is now 44px rail, 36px header, 15px navigation glyphs and 32px controls. Project drawer width is 236px; coarse input retains larger targets. The header tone continues above the project drawer. Native glyphs are 20/18/16pt with 44pt toolbar targets.
+
+Web checks: Desktop 71/71; shared page 35/35 plus focused 13/13 including touch targets. Rust formatting passes. New Rust projection/integration tests, authoritative Rust schema generation, Swift protocol tests and native simulator/device checks have NOT run: guarded commands refused current disk space. Schema-to-Swift output reproduced the existing generator output before the additive field, but does not replace the Rust generation gate. The running Desktop trial loads current UI sources with its previous native binary, so it does not yet expose real participant metadata. The installed phone remains the prior verified build.
+
+Push remains incomplete. Stored Apple keys were rejected; a valid APNs key path and ID were requested. Full trusted relay, runtime/native registration and live delivery still remain. A writable external build volume was requested; no build output was deleted. The vstack task remains in build, with guarded compiler gates configured.
+
+
+## Stable avatar identity integration, 20 October 2026
+
+Seven bundled faces now use the same frozen UTF-8 identity-v1 rule across Desktop contacts,
+canvas, individual/group chat marks and iPhone chat/group/attention marks. Working status no
+longer swaps the face. Exact-byte participant deduplication preserves distinct Unicode names.
+New192px exports remove the candidate-scale edge artifacts at compact sizes. This is a one-time
+transition from the old four-face hash; future catalog changes require an identity migration.
+
+Desktop full page suite73/73 and shared suite37/37 pass; final late-resolver14/14 pass.
+Production Swift identity code compiles under the guarded small phase and executes9cross-platform
+vectors plus Unicode group deduplication. The new source faces are visible in the existing Desktop
+trial via source overrides. This does not update its older native participant projection.
+Full Rust/native simulator/device build and install remain blocked by phase disk admission.
+Push remains unavailable: trusted relay/native registration and valid APNs credentials are still
+required. No release, deployment or claim of complete mobile integration.
+
+The later guarded checks also pass: durable projection4Rusttests, protocol4tests, generator
+nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
+and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
+interaction/host integration and complete application builds remain pending storage.

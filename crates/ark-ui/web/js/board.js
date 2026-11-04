@@ -133,8 +133,8 @@ export function registerBoard(ark) {
     store.items = first.items || [];
     store.tasks = first.tasks || {};
     store.agents = first.agents || [];
-    ark.panel({ id: "board-item", title: "Item", icon: "layers", render: (el, params, scoped) => itemPanel(el, params, scoped || ark) });
-    ark.view({ id: "board", title: "Board", icon: "layers", nav: true, render: (el) => boardView(el) });
+    ark.panel({ id: "board-item", title: "Item", icon: "board", render: (el, params, scoped) => itemPanel(el, params, scoped || ark) });
+    ark.view({ id: "board", title: "Board", icon: "board", nav: true, render: (el) => boardView(el) });
   })();
 }
 

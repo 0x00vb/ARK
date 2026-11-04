@@ -27,6 +27,16 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Measurement (`ark-bench`) | 16 generic workloads (one orchestrated team), simulated and live, a naive baseline loop, faults, record and replay; regression gate in `scripts/ci.sh` |
 | Release | `scripts/ci.sh`, `scripts/verify-release.sh`, immutable tags, two remotes |
 
+## Project memory in development
+
+`codex/project-memory` adds reviewed project corrections, bounded recall and atomic stale
+replacement using the existing store. ADR 0079 and `docs/MEMORY.md` define the proposed
+boundary. Focused tests pass. Real paired tasks show fewer calls on two document tasks,
+but a failed coding task prevents an overall improvement claim. Full CI, exact simulated
+baseline parity and actual shared-command dogfood pass. Empty ordinary projects add no
+memory capability-index cost. This is not on main or released. Agent child projects do not
+inherit memory in this slice.
+
 ## Known limitations
 
 | Limitation | Where it shows |

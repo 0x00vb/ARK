@@ -123,7 +123,9 @@ fn swift_type(schema: &Value) -> anyhow::Result<String> {
             .filter_map(Value::as_str)
             .find(|value| *value != "null")
         {
-            return swift_type(&serde_json::json!({ "type": value }));
+            let mut non_null = schema.clone();
+            non_null["type"] = Value::String(value.to_owned());
+            return swift_type(&non_null);
         }
     }
     match schema["type"].as_str() {
@@ -140,5 +142,26 @@ fn swift_type(schema: &Value) -> anyhow::Result<String> {
             }
         }
         _ => Ok("JSONValue".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::swift_type;
+    use serde_json::json;
+
+    #[test]
+    fn nullable_collections_keep_their_element_types() {
+        assert_eq!(
+            swift_type(&json!({"type": ["array", "null"], "items": {"type": "string"}})).unwrap(),
+            "[String]"
+        );
+        assert_eq!(
+            swift_type(
+                &json!({"type": ["object", "null"], "additionalProperties": {"type": "integer"}})
+            )
+            .unwrap(),
+            "[String: Int]"
+        );
     }
 }

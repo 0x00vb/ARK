@@ -19,6 +19,7 @@ macro_rules! meta {
     };
 }
 
+mod memory;
 mod session;
 mod views;
 
@@ -28,6 +29,7 @@ pub const SESSION_GROUP: &str = "Session";
 pub(crate) fn all() -> Vec<Arc<dyn Command>> {
     vec![
         Arc::new(session::Help),
+        Arc::new(memory::Memory),
         Arc::new(session::New),
         Arc::new(session::Resume),
         Arc::new(session::Sessions),

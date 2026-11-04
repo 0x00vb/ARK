@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_MAJOR: u16 = 1;
-pub const CURRENT_MINOR: u16 = 4;
+pub const CURRENT_MINOR: u16 = 5;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
 
@@ -181,6 +181,8 @@ wire!(
 );
 wire!(
     pub struct ChatSummary {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        participants: Option<Vec<String>>,
         id: String,
         title: String,
         project: String,
@@ -404,6 +406,20 @@ pub struct ProtocolSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn participant_identity_is_additive_and_preserves_unknown() {
+        let legacy = serde_json::json!({"id":"chat", "title":"Research", "project":"P", "computer":"Mac", "updatedAt":"now", "preview":"", "unread":false});
+        let unknown: ChatSummary = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(unknown.participants, None);
+        let mut group = legacy;
+        group["participants"] = serde_json::json!(["Editor", "Writer"]);
+        let known: ChatSummary = serde_json::from_value(group).unwrap();
+        assert_eq!(
+            known.participants,
+            Some(vec!["Editor".into(), "Writer".into()])
+        );
+    }
 
     #[test]
     fn bootstrap_fixture_is_stable() {

@@ -394,3 +394,6 @@ every other core job without help. Nobody may cause an unintended mutation.
 - Arbitrary self-hosted Universal Links
 - Android native app
 - Interactive Terminal artifacts, until the generic artifact path owns their presentation
+
+
+Protocol1.5 adds optional `ChatSummary.participants`, the sorted names of agents assigned work for the chat through durable reporting and delegation links. Missing/null means unknown; an empty list is known empty. It does not prove an agent contributed a message or grant authority. Clients may show up to three faces with an overflow count, and expose all assigned names to accessibility. Legacy runtimes retain the neutral identity. The minimum supported minor version stays unchanged.

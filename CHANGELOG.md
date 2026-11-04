@@ -9,8 +9,33 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+- Keep assigned agent faces consistent across individual and group views with a frozen identity rule and seven bundled avatars.
+
+
+- Add recorded participant identities and group avatars, and reduce navigation icon size and padding.
+
+
+- Slim fixed navigation, reduce its icons, group composer controls and expose agent conversations in the project sidebar.
+
+
+- Align the shared icon family with iPhone and give primary controls distinct40px targets.
+
+
+- Sidebar shows Working and Needs you, preserves keyboard focus on background updates, and
+  keeps pending decisions visible through detached-window reconnects. File cards have larger
+  targets and accessible open actions that remain correct after Restore.
+
+### Breaking
+
+- `ContextReport` adds the serde-defaulted `memory` count. Downstream Rust struct literals
+  without `..Default::default()` must initialize it. Stored reports remain readable.
+
 ### Added
 
+- Project memory stores reviewed corrections in the existing project store. Shared `/memory`
+  commands review, replace and forget lessons; active memory is recalled under the context
+  budget. Agents may suggest pending corrections through the approval gate ([Memory](docs/MEMORY.md)).
+- `/context next message` previews task-specific recall without calling a model.
 - Client protocol v1.4 adds account-bound runtime pairing and an optional stable route id.
   `ClientListener` exposes only typed phone routes against the same live `Host`; scoped phone
   credentials cannot authenticate the page, generic RPC, browser carrier or screen controls.

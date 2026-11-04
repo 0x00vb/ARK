@@ -407,6 +407,7 @@ fn chat_item(item: &Value) -> Value {
         "computer": "This computer",
         "updatedAt": item["updated_at"].as_str().unwrap_or("1970-01-01T00:00:00Z"),
         "preview": "",
+        "participants": item["participants"].as_array(),
         "unread": false,
     })
 }

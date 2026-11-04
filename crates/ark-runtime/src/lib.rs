@@ -30,6 +30,7 @@ pub mod folder;
 pub mod harness;
 pub mod knowledge;
 pub mod ledger;
+pub mod memory;
 pub mod metrics;
 pub mod notebook;
 pub mod per_agent;

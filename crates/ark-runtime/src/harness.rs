@@ -283,6 +283,7 @@ pub struct Harness {
 /// The pieces of the first user message, kept separate so the context report can attribute
 /// tokens to each.
 struct FirstTurn {
+    memory: Option<String>,
     workspace: Option<String>,
     conversation: Option<String>,
     rules: Option<String>,
@@ -307,6 +308,9 @@ impl FirstTurn {
         }
         if let Some(r) = &self.rules {
             let _ = write!(s, "== RULES ==\n{r}\n\n");
+        }
+        if let Some(memory) = &self.memory {
+            s.push_str(memory);
         }
         if let Some(k) = &self.skills {
             let _ = write!(s, "== SKILLS ==\n{k}\n\n");
@@ -522,6 +526,13 @@ impl Harness {
         self.router.describe()
     }
 
+    fn goal_query(&self, question: &str) -> String {
+        match &self.goal {
+            Some(g) => format!("{}\n{question}", g.text()),
+            None => question.to_string(),
+        }
+    }
+
     fn rules_text(&self) -> Option<String> {
         self.rules
             .as_ref()
@@ -550,10 +561,7 @@ impl Harness {
             .unwrap_or_default();
         // A turn that continues an unfinished one works on that one's goal, not on its own
         // words ("continue"), for everything chosen from the task (ADR 0050).
-        let goal_text = match &self.goal {
-            Some(g) => format!("{}\n{question}", g.text()),
-            None => question.to_string(),
-        };
+        let goal_text = self.goal_query(question);
         state.goal = self
             .goal
             .as_ref()
@@ -618,7 +626,8 @@ impl Harness {
             }
         }
 
-        let first = FirstTurn {
+        let mut first = FirstTurn {
+            memory: crate::memory::recall(&engine.store, project, &goal_text, budget)?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
@@ -630,7 +639,6 @@ impl Harness {
             task: self.task_text(question, budget),
         };
         let first_text = first.render();
-        let first_tokens = estimate_tokens(&first_text) + 4;
         // The first message is the task frame: pinned, so no number of steps drops the task
         // (ADR 0050).
         let mut ws = WorkingSet::new(budget);
@@ -727,6 +735,10 @@ impl Harness {
             let progress_before =
                 metrics.cards_created - repeated_failures + fresh_meta + loaded.len() as u32;
 
+            first.memory = crate::memory::recall(&engine.store, project, &goal_text, budget)?;
+            let refreshed = first.render();
+            let first_tokens = estimate_tokens(&refreshed) + 4;
+            ws.pin(Message::user(refreshed));
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
             let tail = state_message_with(&state_digest, &steered);
             let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
@@ -765,6 +777,13 @@ impl Harness {
                     &mut metrics,
                     &mut on_event,
                     Some(&mut unusable),
+                    Some(&crate::memory::Snapshot {
+                        store: &engine.store,
+                        project,
+                        task: &goal_text,
+                        budget,
+                        selected: &first.memory,
+                    }),
                 )
                 .await;
             let Some(mut completion) = (match called {
@@ -793,6 +812,7 @@ impl Harness {
                     retrieved.push(0);
                     continue;
                 }
+                Err(AgentError::MemoryChanged) => continue,
                 Err(e) => return Err(e),
             }) else {
                 cancelled = true;
@@ -1224,7 +1244,14 @@ impl Harness {
 
         // The loop ended without the model's own answer: the work may not be done.
         let ran_out = !answered;
-        if answer.is_empty() {
+        for refresh in 0..3 {
+            if !answer.is_empty() {
+                break;
+            }
+            first.memory = crate::memory::recall(&engine.store, project, &goal_text, budget)?;
+            let refreshed = first.render();
+            let first_tokens = estimate_tokens(&refreshed) + 4;
+            ws.pin(Message::user(refreshed));
             match self
                 .force_answer(
                     profile,
@@ -1234,14 +1261,24 @@ impl Harness {
                     &state,
                     &mut metrics,
                     &mut on_event,
+                    &crate::memory::Snapshot {
+                        store: &engine.store,
+                        project,
+                        task: &goal_text,
+                        budget,
+                        selected: &first.memory,
+                    },
                 )
-                .await?
+                .await
             {
-                Some(a) => {
+                Err(AgentError::MemoryChanged) if refresh < 2 => continue,
+                Err(e) => return Err(e),
+                Ok(Some(a)) => {
                     answer = a;
                     streamed = !answer.is_empty();
+                    break;
                 }
-                None => {
+                Ok(None) => {
                     metrics.finish();
                     let stopped = self.stopped_event();
                     let interrupted = matches!(stopped, HarnessEvent::Interrupted);
@@ -1354,6 +1391,7 @@ impl Harness {
         project: &ProjectId,
         task: &str,
     ) -> Result<ContextReport, AgentError> {
+        let query = self.goal_query(task);
         let state = engine
             .store
             .get_research_state(project)?
@@ -1363,13 +1401,14 @@ impl Harness {
         let wsctx = self.build_workspace_context(engine, project)?;
         let mut loaded = core_loaded(engine, profile);
         for name in
-            catalog::matching_actions(&engine.registry, &self.with_focus(task), self.preload)
+            catalog::matching_actions(&engine.registry, &self.with_focus(&query), self.preload)
         {
             if !loaded.contains(&name) {
                 loaded.push(name);
             }
         }
         let first = FirstTurn {
+            memory: crate::memory::recall(&engine.store, project, &query, self.request_budget())?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
@@ -1441,12 +1480,13 @@ impl Harness {
             .unwrap_or(0);
         let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
         let k = first.skills.as_deref().map(estimate_tokens).unwrap_or(0);
+        let memory = first.memory.as_deref().map(estimate_tokens).unwrap_or(0);
         let (workspace, conversation, rules, skills, task) = (
             w,
             c,
             r,
             k,
-            first_tokens.saturating_sub(w + c + r + k + ready),
+            first_tokens.saturating_sub(w + c + r + k + ready + memory),
         );
         let first_kept = first_tokens;
         let ledger = ws.ledger_tokens();
@@ -1484,6 +1524,7 @@ impl Harness {
             workspace,
             rules,
             skills,
+            memory,
             task,
             tool_rounds,
             retrieved,
@@ -1702,6 +1743,7 @@ impl Harness {
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
         repair: Option<&mut String>,
+        memory: Option<&crate::memory::Snapshot<'_>>,
     ) -> Result<Option<Completion>, AgentError> {
         let provider = self.router.provider(role).clone();
         let mut repair = repair;
@@ -1710,6 +1752,9 @@ impl Harness {
         // When this call first failed: an unreachable model is waited for that long.
         let mut failing_since: Option<std::time::Instant> = None;
         loop {
+            if let Some(memory) = memory {
+                memory.check()?;
+            }
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let sink = move |t: &str| {
                 let _ = tx.send(t.to_string());
@@ -2154,6 +2199,7 @@ impl Harness {
                 metrics,
                 on_event,
                 None,
+                None,
             )
             .await
             .ok()??;
@@ -2219,6 +2265,7 @@ impl Harness {
         state: &ResearchState,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
+        memory: &crate::memory::Snapshot<'_>,
     ) -> Result<Option<String>, AgentError> {
         // Same system prompt and rounds as the reasoning steps, so the cached prefix carries
         // over; only the state and the instruction to stop differ.
@@ -2260,6 +2307,7 @@ impl Harness {
                 metrics,
                 on_event,
                 None,
+                Some(memory),
             )
             .await?
             .map(|c| c.content.trim().to_string()))
@@ -2349,6 +2397,7 @@ impl Harness {
                 false,
                 metrics,
                 on_event,
+                None,
                 None,
             )
             .await

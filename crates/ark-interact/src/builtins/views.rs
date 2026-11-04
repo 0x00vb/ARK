@@ -15,8 +15,16 @@ impl Command for Context {
         "context",
         "What the model receives, by source, and what ARK kept out"
     );
-    async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        Ok(ix.context_view().await?.report().into())
+    fn usage(&self) -> &str {
+        "[next message]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let view = if args.trim().is_empty() {
+            ix.context_view().await?
+        } else {
+            ix.context_for_task(args).await?
+        };
+        Ok(view.report().into())
     }
 }
 

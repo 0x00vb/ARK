@@ -286,6 +286,9 @@ pub struct Harness {
 /// The pieces of the first user message, kept separate so the context report can attribute
 /// tokens to each.
 struct FirstTurn {
+    /// The project's name, target and newest artifacts. Here, not in the system prompt, so the
+    /// system prompt stays identical across projects and a vendor's prompt cache serves it.
+    project: String,
     memory: Option<String>,
     workspace: Option<String>,
     conversation: Option<String>,
@@ -303,6 +306,9 @@ struct FirstTurn {
 impl FirstTurn {
     fn render(&self) -> String {
         let mut s = String::new();
+        if !self.project.is_empty() {
+            let _ = write!(s, "== PROJECT ==\n{}\n\n", self.project);
+        }
         if let Some(w) = &self.workspace {
             let _ = write!(s, "== WORKSPACE CONTEXT ==\n{w}\n\n");
         }
@@ -636,7 +642,7 @@ impl Harness {
             }
         }
 
-        let sys = self.system_prompt(engine, profile, project).await?;
+        let sys = self.system_prompt(engine, profile).await;
         let system = sys.render();
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
@@ -653,6 +659,7 @@ impl Harness {
             .into_iter()
             .filter(|name| self.action_available(engine, name))
             .collect();
+        let core = loaded.len();
         for name in
             catalog::matching_actions(&engine.registry, &self.with_focus(&goal_text), self.preload)
         {
@@ -660,8 +667,22 @@ impl Harness {
                 loaded.push(name);
             }
         }
+        // A vendor that caches its system prompt only whole, with the tools in it, gets the
+        // task's preloaded actions after its first call. The vendor session then opens with the
+        // same instructions every turn. They stay named in READY TO CALL, and a direct call
+        // works on the first step since calls are looked up in the registry.
+        let mut held: Vec<String> = if self
+            .router
+            .provider(Role::Reason)
+            .caches_system_prompt_whole()
+        {
+            loaded.split_off(core)
+        } else {
+            Vec::new()
+        };
 
         let mut first = FirstTurn {
+            project: self.project_block(engine, project)?,
             memory: crate::memory::recall(&engine.store, project, &goal_text, budget)?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
@@ -670,7 +691,7 @@ impl Harness {
             can_add: (self.execution_mode != ExecutionMode::Plan)
                 .then(|| can_add(profile))
                 .flatten(),
-            ready: self.ready_block(engine, &loaded),
+            ready: self.ready_block(engine, &[loaded.as_slice(), held.as_slice()].concat()),
             task: self.task_text(question, budget),
         };
         let first_text = first.render();
@@ -763,6 +784,13 @@ impl Harness {
             if cancelled || self.is_cancelled() {
                 cancelled = true;
                 break;
+            }
+            if steps_taken == 1 {
+                for name in held.drain(..) {
+                    if !loaded.contains(&name) {
+                        loaded.push(name);
+                    }
+                }
             }
             steps_taken += 1;
             metrics.record_step();
@@ -1507,10 +1535,11 @@ impl Harness {
             .store
             .get_research_state(project)?
             .unwrap_or_default();
-        let sys = self.system_prompt(engine, profile, project).await?;
+        let sys = self.system_prompt(engine, profile).await;
         let system = sys.render();
         let wsctx = self.build_workspace_context(engine, project)?;
         let mut loaded = core_loaded(engine, profile);
+        let core = loaded.len();
         for name in
             catalog::matching_actions(&engine.registry, &self.with_focus(&query), self.preload)
         {
@@ -1518,14 +1547,25 @@ impl Harness {
                 loaded.push(name);
             }
         }
+        // As in a turn: a whole-cache provider gets the preloads from the second request.
+        let held: Vec<String> = if self
+            .router
+            .provider(Role::Reason)
+            .caches_system_prompt_whole()
+        {
+            loaded.split_off(core)
+        } else {
+            Vec::new()
+        };
         let first = FirstTurn {
+            project: self.project_block(engine, project)?,
             memory: crate::memory::recall(&engine.store, project, &query, self.request_budget())?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
             can_add: can_add(profile),
-            ready: self.ready_block(engine, &loaded),
+            ready: self.ready_block(engine, &[loaded.as_slice(), held.as_slice()].concat()),
             task: self.task_text(task, self.request_budget()),
         };
         let first_text = first.render();
@@ -1572,9 +1612,10 @@ impl Harness {
         step: usize,
     ) -> ContextReport {
         let instructions = estimate_tokens(&profile.prompts.instructions);
-        // The runtime's own lines: the rules after the instructions, and the project block.
-        let project = (estimate_tokens(&sys.rules) + estimate_tokens(&sys.project))
-            .saturating_sub(instructions);
+        // The runtime's own lines: the rules after the instructions, and the project block
+        // (in the first message).
+        let project_block = estimate_tokens(&first.project);
+        let project = estimate_tokens(&sys.rules).saturating_sub(instructions) + project_block;
         let ready = first.ready.as_deref().map(estimate_tokens).unwrap_or(0)
             + first.can_add.as_deref().map(estimate_tokens).unwrap_or(0);
         // The first message is the pinned head: always in the request.
@@ -1597,7 +1638,7 @@ impl Harness {
             c,
             r,
             k,
-            first_tokens.saturating_sub(w + c + r + k + ready + memory),
+            first_tokens.saturating_sub(w + c + r + k + ready + memory + project_block),
         );
         let first_kept = first_tokens;
         let ledger = ws.ledger_tokens();
@@ -2631,20 +2672,10 @@ impl Harness {
         Ok(ctx)
     }
 
-    /// The system prompt for a turn. Fixed for the whole turn, and ordered from most to least
-    /// stable (instructions and rules, the capability index, then the project and its
-    /// artifacts), so a provider's prefix cache can serve it across steps and across turns.
-    async fn system_prompt(
-        &self,
-        engine: &Engine,
-        profile: &AgentProfile,
-        project: &ProjectId,
-    ) -> Result<SystemPrompt, AgentError> {
-        let p = engine
-            .store
-            .get_project(project)?
-            .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
-        let artifacts = engine.store.list_artifacts(project)?;
+    /// The system prompt for a turn: the profile's instructions and rules, then the capability
+    /// index. It names no project and no task, so it stays byte-identical across turns, chats
+    /// and projects of one profile, and a provider's prefix cache can serve it.
+    async fn system_prompt(&self, engine: &Engine, profile: &AgentProfile) -> SystemPrompt {
         let rules = format!(
             "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
             profile.prompts.instructions
@@ -2655,6 +2686,16 @@ impl Harness {
             &profile.inferrer,
         )
         .await;
+        SystemPrompt { rules, index }
+    }
+
+    /// The project's name, target and newest artifacts, for the first message.
+    fn project_block(&self, engine: &Engine, project: &ProjectId) -> Result<String, AgentError> {
+        let p = engine
+            .store
+            .get_project(project)?
+            .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
+        let artifacts = engine.store.list_artifacts(project)?;
         let mut project_block = String::new();
         let _ = writeln!(project_block, "Project: {} — {}", p.name, p.target);
         if artifacts.is_empty() {
@@ -2684,11 +2725,7 @@ impl Harness {
                 );
             }
         }
-        Ok(SystemPrompt {
-            rules,
-            index,
-            project: project_block.trim_end().to_string(),
-        })
+        Ok(project_block.trim_end().to_string())
     }
 }
 
@@ -2731,20 +2768,20 @@ struct Tally<'a> {
     written: &'a mut Vec<String>,
 }
 
-/// Artifacts named in the system prompt. Older ones stay reachable through search.
+/// Artifacts named in the first message. Older ones stay reachable through search.
 const ARTIFACTS_LISTED: usize = 12;
 
-/// The system prompt, by part.
+/// The system prompt, by part. It names no project, so it is the same for every turn of a
+/// profile and a provider's prefix cache can serve it across turns, chats and projects.
 struct SystemPrompt {
     /// The profile's instructions plus the runtime's fixed rules.
     rules: String,
     index: String,
-    project: String,
 }
 
 impl SystemPrompt {
     fn render(&self) -> String {
-        format!("{}\n\n{}\n\n{}", self.rules, self.index, self.project)
+        format!("{}\n\n{}", self.rules, self.index)
     }
 }
 

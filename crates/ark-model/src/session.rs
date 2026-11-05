@@ -97,6 +97,10 @@ pub trait SessionBackend: Send + Sync {
     fn context_window(&self) -> Option<u32> {
         None
     }
+    /// [`Provider::caches_system_prompt_whole`].
+    fn caches_system_prompt_whole(&self) -> bool {
+        false
+    }
     /// The account whose capacity this backend draws on (`claude`, `codex`).
     fn account(&self) -> String;
     fn account_revision(&self) -> u64 {
@@ -798,6 +802,9 @@ impl Provider for ManagedSession {
     fn reads_pictures(&self) -> bool {
         self.backend.reads_pictures()
     }
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.backend.caches_system_prompt_whole()
+    }
 
     /// The vendor thread is billed whole on every call, and it rotates at
     /// [`SessionPolicy::max_context_tokens`]: that is the window a request should be sized for.
@@ -1183,6 +1190,9 @@ impl Provider for OneShot {
     }
     fn reads_pictures(&self) -> bool {
         self.backend.reads_pictures()
+    }
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.backend.caches_system_prompt_whole()
     }
     fn context_window(&self) -> Option<u32> {
         self.backend.context_window()

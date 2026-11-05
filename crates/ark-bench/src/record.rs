@@ -290,6 +290,9 @@ impl Provider for Metered {
     fn context_window(&self) -> Option<u32> {
         self.inner.context_window()
     }
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.inner.caches_system_prompt_whole()
+    }
 }
 
 #[cfg(test)]

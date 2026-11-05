@@ -462,6 +462,12 @@ pub trait Provider: Send + Sync {
     fn context_window(&self) -> Option<u32> {
         None
     }
+    /// Whether the vendor caches the system prompt only as a whole, so any change in it
+    /// writes all of it to the cache again. The harness then keeps a turn's own content out of
+    /// the opening request. The default is no; wrappers forward to what they wrap.
+    fn caches_system_prompt_whole(&self) -> bool {
+        false
+    }
     /// Human description, e.g. "ollama qwen3:4b-instruct".
     fn describe(&self) -> String;
     /// The model identifier this provider targets (e.g. "qwen3:4b-instruct"). Used by

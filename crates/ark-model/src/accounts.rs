@@ -262,6 +262,9 @@ impl Provider for AccountProvider {
     fn context_window(&self) -> Option<u32> {
         self.inner.context_window()
     }
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.inner.caches_system_prompt_whole()
+    }
     fn generates_images(&self) -> bool {
         self.inner.generates_images()
     }

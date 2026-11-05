@@ -649,7 +649,9 @@ impl CliModel {
         let p = parse_claude_result(&result)
             .map_err(|d| self.classify_with(self.signed_out_hint(d), reset))?;
         let c = self.completion(&p.reply, p.usage, &ReplyShape::open())?;
-        let gave_up = p.turns > 2 && c.tool_calls.is_empty();
+        // Only a refused native call means the model gave up. Claude Code also adds turns when
+        // it makes the model resend a plain-text answer through StructuredOutput.
+        let gave_up = reply.refused && c.tool_calls.is_empty();
         if let (Some(f), false) = (on_text, gave_up) {
             // What the stream did not show (text after a refused native call, or a reply not
             // streamed at all) is sent now. A run that gave up shows nothing: it is asked again.
@@ -1132,6 +1134,10 @@ impl Provider for CliModel {
     fn context_window(&self) -> Option<u32> {
         Some(self.cli.context_window())
     }
+    /// Claude Code marks one cache breakpoint at the end of the system prompt.
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.cli == Cli::Claude
+    }
     async fn complete(
         &self,
         system: &str,
@@ -1179,7 +1185,7 @@ struct Exec {
     completion: Completion,
     vendor: Option<String>,
     /// The model answered without asking for any tool after the CLI refused tools it tried
-    /// to call natively (Claude Code reports more than 2 internal turns).
+    /// to call natively.
     gave_up: bool,
 }
 
@@ -1317,6 +1323,10 @@ impl SessionBackend for CliModel {
     }
     fn context_window(&self) -> Option<u32> {
         Some(self.cli.context_window())
+    }
+    /// Claude Code marks one cache breakpoint at the end of the system prompt.
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.cli == Cli::Claude
     }
     fn label(&self) -> String {
         Provider::describe(self)
@@ -2090,7 +2100,6 @@ fn parse_claude_result(v: &Value) -> std::result::Result<Parsed, String> {
         reply,
         usage,
         vendor: session,
-        turns: v["num_turns"].as_u64().unwrap_or(1) as u32,
     })
 }
 
@@ -2099,9 +2108,6 @@ struct Parsed {
     reply: Value,
     usage: Usage,
     vendor: Option<String>,
-    /// Internal turns the CLI took: 2 for one structured reply, more when the model first
-    /// tried tools the CLI refused (Claude Code).
-    turns: u32,
 }
 
 /// `codex exec --json`: JSONL events; the last agent message is the reply.
@@ -2149,7 +2155,6 @@ fn parse_codex(stdout: &str) -> std::result::Result<Parsed, String> {
         reply: v,
         usage,
         vendor: thread,
-        turns: 1,
     })
 }
 
@@ -2941,6 +2946,29 @@ done
             .unwrap();
         assert!(c.tool_calls.is_empty());
         assert_eq!(c.usage.prompt_tokens, 900);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_reply_after_structured_output_enforcement_is_not_asked_again() {
+        // Claude Code adds turns when it makes the model resend a plain-text answer through
+        // StructuredOutput. No native call was refused, so the answer stands.
+        let (bin, log) = claude_stream(
+            "claude-enforced",
+            &[stream_reply(reply("6.5 seconds."), usage("S1", 3, 900))],
+        );
+        let m = CliModel::new(Cli::Claude, "sonnet").with_program(bin);
+        let shown = Mutex::new(String::new());
+        let sink = |t: &str| shown.lock().unwrap().push_str(t);
+        let c = m
+            .complete_streaming("sys", &[Message::user("how long?")], &tools(), &sink)
+            .await
+            .unwrap();
+        assert_eq!(c.content, "6.5 seconds.");
+        assert_eq!(c.usage.prompt_tokens, 900, "one run");
+        assert_eq!(*shown.lock().unwrap(), "6.5 seconds.", "shown once");
+        let log = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(log.matches("--line--").count(), 1, "{log}");
     }
 
     #[cfg(unix)]

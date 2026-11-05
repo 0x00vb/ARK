@@ -320,6 +320,8 @@ impl Provider for Tape {
     fn context_window(&self) -> Option<u32> {
         None
     }
+    // `caches_system_prompt_whole` keeps its default (no) in both modes, for the same reason:
+    // a recording and its replay make the same requests.
 }
 
 /// The request with run-specific ids replaced, hashed (FNV-1a, 64 bits, stable across builds).

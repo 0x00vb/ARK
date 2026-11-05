@@ -144,3 +144,5 @@ Local integration decisions:
 - [0096-agent-conversation-navigation](0096-agent-conversation-navigation.md)
 
 - [0097-one-chat-for-work-and-automation-runs](0097-one-chat-for-work-and-automation-runs.md)
+
+- [0102-a-system-prompt-the-same-every-turn](0102-a-system-prompt-the-same-every-turn.md)

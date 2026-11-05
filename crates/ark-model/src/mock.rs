@@ -29,6 +29,8 @@ pub struct MockProvider {
     fallback: Option<Fallback>,
     /// The window it reports ([`Provider::context_window`]); unknown by default.
     window: Option<u32>,
+    /// What it reports for [`Provider::caches_system_prompt_whole`]; no by default.
+    whole_system_cache: bool,
 }
 
 impl MockProvider {
@@ -40,6 +42,7 @@ impl MockProvider {
             chunk_delay: std::time::Duration::ZERO,
             fallback: None,
             window: None,
+            whole_system_cache: false,
         }
     }
 
@@ -103,6 +106,12 @@ impl MockProvider {
         self
     }
 
+    /// Report that the system prompt is cached only whole, as Claude Code does.
+    pub fn with_whole_system_cache(mut self) -> Self {
+        self.whole_system_cache = true;
+        self
+    }
+
     /// Stream each word with this pause between chunks.
     pub fn with_chunk_delay(mut self, delay: std::time::Duration) -> Self {
         self.chunk_delay = delay;
@@ -152,6 +161,9 @@ impl Provider for MockProvider {
     }
     fn context_window(&self) -> Option<u32> {
         self.window
+    }
+    fn caches_system_prompt_whole(&self) -> bool {
+        self.whole_system_cache
     }
     fn describe(&self) -> String {
         format!("mock {}", self.id)

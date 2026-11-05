@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The system prompt no longer names the project. The project's name, target and newest
+  artifacts open the first message (`== PROJECT ==`), so the system prompt is the same for
+  every turn of a profile and a vendor's prompt cache can serve it (ADR 0102).
+- On a provider that caches its system prompt only whole (Claude Code), a turn's preloaded
+  actions are offered from the second request. They stay listed in READY TO CALL.
+
+### Added
+
+- `Provider::caches_system_prompt_whole` and `SessionBackend::caches_system_prompt_whole`,
+  default false. `MockProvider::with_whole_system_cache` for tests.
+
+### Fixed
+
+- A Claude Code answer that the CLI made the model resend through StructuredOutput is no
+  longer asked again as if the model had given up. Only a refused native tool call counts.
+
 ## [0.34.0] - 2026-11-05
 
 ### Breaking

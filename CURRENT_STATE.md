@@ -6,6 +6,7 @@
 | Change | Automations as compact cards; Work as composer over grouped open work; runs open in the normal chat; `work-chat` and `automation-editor` views removed (ADR 0097) |
 | Consumer | Desktop 0.10.1 pins this tag and opens the receipt's conversation instead of `work-chat` |
 | Evidence | Web tests and real-host `page.rs` scenarios in `../board/evidence/automations-work-cleanup-20261105/` |
+| Checks | Local and public fresh-clone (`verify-release.sh v0.34.0` from GitHub): fmt, protocol, version, clippy, Node 22/22, WebKit 97/97, release build and benchmark pass. Two `ark-browser` tests (Chrome takes over 10 s to start under swap) and six page tests fail the same way on v0.33.2 on this Mac |
 | Not in this change | Deleting an automation (no runtime operation yet); webhook setup, execution inputs and per-step agents have no page control |
 
 # Core 0.33.2 release

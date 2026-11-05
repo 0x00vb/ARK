@@ -343,46 +343,43 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
   and an app's bundle can be checked through its browser transport.
 
-## Automations canvas
+## Automations
 
-Automations opens the project canvas. Click empty space or choose Add automation to create
-and configure a draft. Back or Escape returns to the canvas. A pending draft keeps its
-original save identity when reopened. Saved revisions, activation and execution authority
-use the existing runtime protocol.
+Automations is a list of cards, one per automation. A card holds its name, its steps in plain
+words (one text box each, up to seven), when it runs and Run. Typing saves after a short pause.
+Step names come from their first line. Each step receives what the step before it produced, and
+a final Result step returns what the last one produced. Fields the card does not show (inputs,
+authority, step targets and models, webhook setup) are kept as saved.
 
-The lower toolbar selects, pans, draws, adds rectangles and changes zoom. Undo drawing
-removes the last visual mark. Visual marks do not execute. The editor adds supported Agent,
-Approval and Result steps through Add node. Empty-space clicks open that same menu. The
-existing eight-step limit and validation apply.
+When offers When I run it, Every day, Weekdays, Every hour and Custom (cron). A timed card shows
+its next run and an On switch: on prepares and activates the saved revision, off pauses it.
+Turning on asks first when the automation names agents or allows actions. An edit to an active
+automation goes live by itself only when it grants nothing the running revision did not (same
+models and agents, no new actions, same event endpoint). Otherwise the switch shows a middle
+state and the card says the changes are not on yet; the switch turns them on after the person
+confirms. Changing an active automation to When I run it pauses it. Empty step boxes are not
+saved. A reload that arrives while the person is in a card waits until focus leaves the cards.
+Schedules made before automations are read-only cards that open the schedule panel.
 
-Overview positions and drawings use version1 local storage, scoped by runtime and project.
-Editor drawings are also local. They persist on this browser origin or native device, not
-across devices. Unsaved drafts survive section navigation within the current page; save a
-draft before reloading the page. Storage failures appear over the canvas. Step positions
-continue to use the runtime's revisioned automation_layout record.
+Run starts the saved revision and opens the run's conversation in the normal chat. There is no
+separate run or ticket page.
 
-Drag overview cards to arrange them. Alt plus an arrow moves a focused card. Enter on the
-canvas creates a draft; all tools are also reachable with Tab. Escape restores selection.
-Tasks uses the same boardView, itemPanel and ticketShell as an ordinary project board.
-Its status and owner controls keep accessible names without repeated visible labels. Delete
-lives under the three-dot actions menu. Enter sends from the composer; Shift+Enter adds a
-line. Sending creates and assigns an agent if none is assigned, retains the submission for
-safe retries, and opens the assigned agent's existing chat directly. Changing the owner starts a
-compatible admission instead of reusing another agent's receipt.
+## Work
 
-Automation names are editable in the header. New drafts start as New automation. Name
-validation remains active for edits; the name is not repeated inside Start.
+Work is a composer with the open work under it, grouped as Needs you, Working, Waiting and To do.
+The composer is the shared chat composer. Sending admits general work (or the chosen agent's,
+when the project has agents) and the new row appears under Working. A row opens its conversation
+in the normal chat; a to-do without a conversation opens its ticket on the board. Failed and
+interrupted work is listed under Needs you. A row's context menu has Stop, Start, Retry, Mark
+resolved and Archive when they apply. A retry of the same text reuses the admitted request.
+View all moves the composer to the top and shows the project board; Show less or Escape returns.
 
 A consumer can mark its agent chat view with `agentConversation: true`. The shared
 `ark.openAgentChat(name, conversation)` opens that view with `{name}` through the scoped
 view API. Without a registered agent conversation view it opens the supplied conversation.
 Navigation refuses a different runtime or project.
 
-Start and step configuration expands within the selected card. Collapse card returns focus
-to its handle. Cards scroll internally and retain their saved canvas positions. The permissions
-editor is removed. Saved authority and the activation review remain unchanged.
-
-Secondary click and Shift+F10 open the relevant card, canvas, project, chat, task, message or
+Secondary click and Shift+F10 open the relevant card, project, chat, task, message or
 file actions. Menus skip disabled items with arrow keys and support Home, End and Escape.
 Text fields, links and text selections retain their native menus.
 
@@ -394,6 +391,5 @@ Consumer views can call `ark.contextMenu(event, anchor, actions)` with action re
 `label`, `run` and optional `disabled`. It returns a close function when opened. The shared
 menu preserves native text editing and owns keyboard navigation, placement and dismissal.
 
-Automation canvas selection does not create a draft. Add automation and the canvas's
-Enter action create explicitly. Studio places the shared conversation at the right;
-its content, history and composer are the same chat surface.
+Studio places the shared conversation at the right; its content, history and composer are
+the same chat surface.

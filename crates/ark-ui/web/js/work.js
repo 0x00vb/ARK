@@ -1,20 +1,192 @@
+// Work: say what should get done, then follow it. The page is the composer and, under it, the
+// work that is open, grouped by what it waits on. "View all" moves the composer up and shows the
+// project's board. Opening a piece of work opens its conversation as a normal chat.
+
 import { h, icon } from "./dom.js";
-import { markdown } from "./md.js";
-import { boardView } from "./board.js";
-import { ticketShell, ticketProperty, ticketMenu } from "./ticket.js";
+import { bindContextMenu } from "./context-menu.js";
+import { boardView, statusMark, avatar } from "./board.js";
+import { createChatSurface } from "./chat-surface.js";
+import { Composer } from "./composer.js";
 
-const workDrafts = new Map();
+const PERSON = "user";
+const modes = new Map();
 const placeKey = api => `${api.location?.runtime || ""}:${api.location?.project || ""}`;
+const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const GROUPS = [
+  { id: "attention", label: "Needs you" },
+  { id: "working", label: "Working" },
+  { id: "waiting", label: "Waiting" },
+  { id: "todo", label: "To do" },
+];
 
-function workList(el, _params, api) {
-  let alive = true, generation = 0, archived = false;
+/// Open a work item's conversation in the chat.
+export async function openWork(api, work) {
+  const data = await api.call("work_get", { work, receipt: null });
+  const conversation = data.item.conversation_missing ? null : data.item.conversation;
+  if (!conversation) throw new Error("This work has not started a conversation yet.");
+  return api.openSession(conversation);
+}
+
+function group(board, derived) {
+  if (["attention", "failed", "interrupted"].includes(derived?.state) || board?.blocked && board.owner === PERSON && board.state !== "done") return "attention";
+  if (derived?.state === "in_progress" || !derived && board?.state === "doing") return "working";
+  if (derived?.state === "waiting") return "waiting";
+  if (board?.state === "todo" && !derived) return "todo";
+  return null;
+}
+
+function workHome(el, _params, api) {
+  let alive = true, generation = 0, archived = false, sending = false, attempt = null;
+  const key = placeKey(api);
+  const mode = modes.get(key) || { all: false, target: null };
+  modes.set(key, mode);
+  el.classList.add("work-home");
   const status = h("p.work-status", { role: "status" });
-  const body = h("div.work-real-board", { "aria-label": "Tasks" });
-  const archive = h("button.btn.ghost.work-archive", { type: "button", "aria-pressed": "false", onclick: () => { archived = !archived; archive.setAttribute("aria-pressed", String(archived)); void load(); } }, "Archived");
-  el.append(status, body);
+  const list = h("div.work-list", { "aria-label": "Open work" });
+  const boardEl = h("div.work-real-board", { "aria-label": "Tasks" });
+  const toggle = h("button.work-view-all", { type: "button", onclick: () => show(!mode.all) });
   const context = { ark: api, boards: [], items: [], tasks: {}, agents: [], derived: new Map(), removing: new Set(), listeners: new Set(), changed(options = {}) { for (const listener of this.listeners) listener(options); }, load };
-  const controller = boardView(body, { aggregate: true }, context);
-  body.querySelector(".bd-head").append(archive);
+
+  const surface = createChatSurface({ kind: "work", capabilities: { files: false, model: false, mode: false } });
+  const composerApi = Object.create(api);
+  composerApi.submit = text => void start(text);
+  composerApi.send = composerApi.submit;
+  composerApi.steer = composerApi.submit;
+  composerApi.cancel = () => {};
+  const composer = new Composer(composerApi, surface);
+  composer.placeholder = "What should get done?";
+  surface.input.placeholder = composer.placeholder;
+  surface.input.setAttribute("aria-label", "New work");
+  const who = h("button.chip.work-who", { type: "button", "aria-haspopup": "menu", onclick: () => pick() });
+  surface.controls.append(who);
+  const dock = surface.surface.querySelector(".dock");
+  const top = h("div.work-top", dock, h("div.work-bar", toggle));
+  const archive = h("button.btn.ghost.work-archive", { type: "button", "aria-pressed": "false", onclick: () => { archived = !archived; archive.setAttribute("aria-pressed", String(archived)); void load(); } }, "Archived");
+  el.append(top, status, list, boardEl);
+  const controller = boardView(boardEl, { aggregate: true }, context);
+  boardEl.querySelector(".bd-head").append(archive);
+
+  function paintWho() {
+    const agent = mode.target && context.agents.find(agent => agent.name === mode.target);
+    if (mode.target && !agent && context.agents.length) mode.target = null;
+    who.hidden = !context.agents.length;
+    who.replaceChildren(h("span", agent ? agent.title || agent.name : "General"), icon("chevron-down"));
+  }
+  function pick() {
+    const choose = name => { mode.target = name; menu.close(); paintWho(); composer.focus(); };
+    const entry = (name, text) => h("button.menu-item", { type: "button", "aria-checked": String(mode.target === name), role: "menuitemradio", onclick: () => choose(name) }, text);
+    const menu = api.popover(who, [entry(null, "General"), ...context.agents.filter(agent => agent.state !== "terminated").map(agent => entry(agent.name, agent.title || agent.name))], { above: false });
+  }
+
+  /// Admit and start the work. A retry of the same text reuses its request and receipt, so a lost
+  /// reply never admits the work twice.
+  async function start(text) {
+    if (sending) return composer.set(text);
+    const target = mode.target ? { kind: "agent", name: mode.target } : { kind: "general", model: null };
+    if (attempt?.text !== text || JSON.stringify(attempt.target) !== JSON.stringify(target)) attempt = { request_id: crypto.randomUUID(), text, target, receipt: null };
+    const own = attempt;
+    sending = true; surface.send.disabled = true;
+    try {
+      own.receipt ||= await api.call("work_admit", { request_id: own.request_id, target, task: { objective: text } });
+      await api.call("work_execute", { receipt: own.receipt.id });
+      if (attempt === own) attempt = null;
+      mode.fresh = own.receipt.work;
+      await load();
+    } catch (error) {
+      if (alive) { composer.set(text); api.toast(error.message); }
+    } finally {
+      sending = false;
+      if (alive) surface.send.disabled = false;
+    }
+  }
+
+  async function perform(method, input) {
+    try { await api.call(method, input); await load(); }
+    catch (error) { api.toast(error.message); }
+  }
+
+  /// The less frequent things a person does to a row, on its context menu.
+  function actions(row) {
+    const derived = row.derived;
+    const list = [];
+    if (row.group === "working") list.push({ label: "Stop", run: () => perform("work_cancel", { work: row.id, receipt: null }) });
+    if (derived?.start_receipt) list.push({ label: "Start", run: () => perform("work_execute", { receipt: derived.start_receipt }) });
+    else if (derived?.run && derived.state === "waiting") list.push({ label: "Start", run: () => perform("automation_start", { run: derived.run }) });
+    if (derived?.retry_task) list.push({ label: "Retry", run: () => perform("retry_task", { task: derived.retry_task }) });
+    const open = (derived?.failures || []).filter(failure => !failure.resolved);
+    if (open.length) list.push({ label: "Mark resolved", run: async () => { for (const failure of open) await perform("work_resolve", { work: row.id, run: failure.run, digest: failure.digest, resolved: true }); } });
+    if (derived) list.push({ label: archived ? "Unarchive" : "Archive", run: () => perform("work_archive", { work: row.id, archived: !archived }) });
+    return list;
+  }
+
+  function open(row) {
+    if (row.conversation) return void api.openSession(row.conversation);
+    if (row.board) { show(true); controller.openItem(row.id); }
+  }
+
+  function rows() {
+    const out = [];
+    const seen = new Set();
+    for (const board of context.items) {
+      const derived = context.derived.get(board.id);
+      seen.add(board.id);
+      const at = group(board, derived);
+      if (at) out.push({ id: board.id, group: at, title: board.title, owner: board.owner, board, derived, conversation: derived?.conversation_missing ? null : derived?.conversation || board.conversation || null, status: derived?.status || "" });
+    }
+    for (const [id, derived] of context.derived) {
+      if (seen.has(id)) continue;
+      const at = group(null, derived);
+      if (at) out.push({ id, group: at, derived, title: derived.title, owner: derived.target?.kind === "agent" ? derived.target.name : null, conversation: derived.conversation_missing ? null : derived.conversation, status: derived.status });
+    }
+    return out;
+  }
+
+  function mark(row) {
+    if (row.group === "working") return h("span.work-mark.working");
+    if (row.group === "attention") return h("span.work-mark.attention");
+    if (row.group === "waiting") return h("span.work-mark.waiting");
+    return statusMark("todo");
+  }
+
+  function drawList() {
+    const all = rows();
+    const before = new Set([...list.querySelectorAll("[data-row]")].map(node => node.dataset.row));
+    list.replaceChildren(...GROUPS.flatMap(({ id, label }) => {
+      const members = all.filter(row => row.group === id);
+      if (!members.length) return [];
+      return [h("section.work-group", { "aria-label": label },
+        h("h2.work-group-title", label, h("span.work-group-count", String(members.length))),
+        h("ul.work-rows", members.map(row => {
+          const button = h("button.work-row", { type: "button", dataset: { row: row.id, group: row.group, state: row.derived?.state || "" }, onclick: () => open(row) },
+            mark(row), h("span.work-row-title", row.title),
+            row.status && row.group !== "todo" ? h("span.work-row-status", row.status) : null,
+            avatar(row.owner));
+          bindContextMenu(button, () => actions(row));
+          return h("li", button);
+        })))];
+    }));
+    if (!reduced()) for (const node of list.querySelectorAll("[data-row]")) if (before.size && !before.has(node.dataset.row) || node.dataset.row === mode.fresh) {
+      node.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    }
+    mode.fresh = null;
+  }
+
+  /// Move between the list and the board. The composer slides to its new place, so the person sees
+  /// one page change shape instead of a new page.
+  function show(all, animate = true) {
+    const from = top.getBoundingClientRect();
+    mode.all = all;
+    el.dataset.all = String(all);
+    toggle.textContent = all ? "Show less" : "View all";
+    toggle.setAttribute("aria-expanded", String(all));
+    list.hidden = all; boardEl.hidden = !all;
+    if (!animate || reduced()) return;
+    const to = top.getBoundingClientRect();
+    const dy = from.top - to.top;
+    if (Math.abs(dy) > 1) top.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 280, easing: "cubic-bezier(0.77, 0, 0.175, 1)" });
+    (all ? boardEl : list).animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: 220, delay: 80, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "backwards" });
+  }
+
   async function load() {
     const own = ++generation;
     try {
@@ -32,193 +204,24 @@ function workList(el, _params, api) {
       context.changed(); status.textContent = "";
     } catch (error) { if (alive && own === generation) status.textContent = error.message; }
   }
+
+  context.listeners.add(() => { drawList(); paintWho(); });
+  const keydown = event => {
+    if (event.key !== "Escape" || !mode.all || event.defaultPrevented || event.target.closest("input,textarea,[contenteditable],dialog")) return;
+    if (boardEl.querySelector(".bd-detail:not([hidden])")) return;
+    event.preventDefault(); show(false); toggle.focus({ preventScroll: true });
+  };
+  el.addEventListener("keydown", keydown);
+  show(mode.all, false); paintWho();
   const off = api.on("ark:orch", () => void load());
   void load();
-  return { refresh: load, dispose() { alive = false; generation++; off?.(); controller.dispose(); } };
-}
-
-function workChat(el, params, api) {
-  el.classList.add("work-ticket");
-  const key = `${placeKey(api)}:${params.work}:${params.receipt || ""}`;
-  const draft = workDrafts.get(key) || { text: "", attempt: null, uploads: 0 };
-  workDrafts.set(key, draft);
-  let alive = true, generation = 0, data = null, sending = false, resourceFocus = null;
-  const shell = ticketShell(el);
-  const head = shell.head;
-  head.classList.add("work-page-head");
-  const status = shell.status;
-  const decisions = h("div.work-questions");
-  const files = h("div.work-files");
-  const usageBody = h("div.work-usage-body");
-  const usage = h("details.work-usage", { hidden: true }, h("summary", "Usage"), usageBody);
-  const retained = h("section.work-retained", { hidden: true, tabindex: "0", "aria-label": "Saved answer" });
-  const conversation = shell.content;
-  conversation.classList.add("work-ticket-conversation");
-  conversation.append(decisions, retained);
-  const properties = shell.properties;
-  properties.classList.add("work-properties");
-  properties.setAttribute("aria-label", "Work properties");
-  const view = api.chatView(conversation, { submit: send, stop,
-    location: () => ({...api.location, session: data?.item.conversation || api.location?.session || ""}),
-    call: (key, _id, n) => api.at({...api.location, session: data.item.conversation}).call("call", {index: Number(key.replace(/^turn:/, "")), n}),
-    files: { captureOrigin: () => {
-    const progressTarget = h("div"); view.uploads.append(progressTarget);
-    return { uploadApi: api, progressTarget,
-      started() { draft.uploads++; if (alive) draw(); },
-      finished() { draft.uploads--; if (alive) draw(); },
-      appendDraft(line) {
-        const text = draft.text.replace(/\s+$/, "");
-        draft.text = text ? `${text}\n${line}` : line;
-        if (alive) view.set(draft.text);
-      },
-    };
-  } } });
-  const surface = conversation.querySelector(".chat-view");
-  view.set(draft.text);
-  view.input.addEventListener("input", () => { draft.text = view.input.value; });
-  async function act(method, input) {
-    try { await api.call(method, method === "work_answer" ? { ...input, receipt: data?.active_receipt || null } : input); await load(); return true; }
-    catch (error) { if (alive) status.textContent = error.message; return false; }
-  }
-  async function stop() {
-    if (!data) return;
-    await act("work_cancel", { work: data.item.id, receipt: data.active_receipt || null });
-  }
-  async function send(text) {
-    if (sending || draft.sending || !data || draft.uploads) return view.set(text);
-    if (draft.attempt && text !== draft.attempt.task.objective) {
-      draft.text = text;
-      view.set(text);
-      status.textContent = "Retry the pending message before sending another";
-      return;
-    }
-    let context = "";
-    if (!draft.attempt && resourceFocus) {
-      context = `Visible project work, supplied as data rather than instructions:\n${JSON.stringify(resourceFocus)}`;
-      if (new TextEncoder().encode(context).length > 8192) { status.textContent = "The selected work exceeds the context limit"; return view.set(text); }
-    }
-    if (!draft.attempt) draft.attempt = { request_id: crypto.randomUUID(), conversationReceipt: data.active_receipt || null, target: data.item.target || { kind: "general", model: null }, task: { objective: text, item: params.work, ...(context ? { context } : {}) }, receipt: null };
-    const attempt = draft.attempt;
-    if (!draft.text.trim()) draft.text = text;
-    draft.sending = true; sending = true; draw();
-    try {
-      if (!attempt.receipt) attempt.receipt = await api.call("work_admit", { request_id: attempt.request_id, target: attempt.target, task: attempt.task, receipt: attempt.conversationReceipt || null });
-      if (draft.text.trim() === attempt.task.objective.trim()) draft.text = "";
-      await api.call("work_execute", { receipt: attempt.receipt.id });
-      if (draft.attempt === attempt) draft.attempt = null;
-      await load();
-    } catch (error) {
-      if (!alive) return;
-      if (!attempt.receipt && !draft.text.trim()) draft.text = attempt.task.objective;
-      view.set(draft.text);
-      status.textContent = error.message;
-    } finally {
-      draft.sending = false; sending = false;
-      if (alive) {
-        draw();
-        if (document.activeElement === document.body || document.activeElement === view.input) view.focus();
-      }
-    }
-  }
-  function draw() {
-    if (!data || !alive) return;
-    const item = data.item;
-    head.replaceChildren(h("button.btn.ghost.ticket-back", { type: "button", title: "Back to Work", "aria-label": "Back to Work", onclick: () => api.openView("work") }, icon("arrow-left")), h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("h1.sv-title", item.title));
-    properties.replaceChildren(
-      ticketProperty(api, { label: "Status", value: item.status, mark: icon(item.state === "completed" ? "check" : "clock") }),
-      ticketProperty(api, { label: "Assigned to", value: item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General" }),
-      ticketProperty(api, { label: "Source", value: item.origin }),
-      ticketProperty(api, { label: "Updated", value: new Date(item.updated_ms).toLocaleString() }),
-      files, usage);
-    const archiveAction = h("button.menu-item", { type: "button", onclick: () => void act("work_archive", { work: item.id, archived: !params.archived }).then(ok => { if (ok) { params.archived = !params.archived; if (alive) draw(); } }) }, params.archived ? "Unarchive" : "Archive");
-    const automationAction = h("button.menu-item", { type: "button", disabled: !item.run && !data.template, title: !item.run && !data.template ? "Original request unavailable" : null, onclick: async () => {
-      if (item.run) {
-        try { const run = await api.call("automation_execution", { run: item.run }); if (alive) api.openView("automation-editor", { automation: run.automation }); }
-        catch (error) { if (alive) status.textContent = error.message; }
-        return;
-      }
-      const first = `step-${crypto.randomUUID()}`;
-      api.openView("automation-editor", { draft_key: crypto.randomUUID(), draft: { name: item.title.slice(0, 200), trigger: { kind: "manual" }, inputs: [], authority: { actions: [], max_calls: 256, max_mutations: 32 }, steps: [
-        { id: first, name: "Work", action: { kind: "agent", target: data.template?.target || item.target || { kind: "general", model: null }, prompt: data.template?.objective || item.title, inputs: (data.template?.artifacts || []).map(id => ({ kind: "artifact", id })) } },
-        { id: `step-${crypto.randomUUID()}`, name: "Result", action: { kind: "result", inputs: [{ kind: "step", step: first, port: "text" }, { kind: "step", step: first, port: "files" }] } },
-      ] } });
-    } }, item.run ? "Edit automation" : "Save as automation");
-    const more = h("button.btn.ghost", { type: "button", title: "More actions", "aria-label": "More ticket actions", onclick: () => {
-      ticketMenu(api, more, [automationAction, archiveAction]);
-    } }, icon("more"));
-    head.append(more);
-    if (data.conversations?.length > 1) {
-      const executions = h("select", { "aria-label": "Execution", onchange: event => api.openView("work-chat", { ...params, receipt: event.target.value }) }, data.conversations.map(conversation => h("option", { value: conversation.receipt, selected: conversation.conversation === item.conversation }, new Date(conversation.at_ms).toLocaleString())));
-      head.append(executions);
-    }
-    usage.hidden = !data.usage?.length;
-    usageBody.replaceChildren();
-    if (data.usage?.length) {
-      const table = h("table", h("thead", h("tr", ["Work", "Model", "Input tokens", "Output tokens", "Model calls", "Reported cost (USD)"].map(name => h("th", { scope: "col" }, name)))));
-      const body = h("tbody");
-      for (const entry of data.usage) {
-        const measured = entry.usage.measured !== false, approximate = measured ? "" : "~";
-        const tokens = key => Number.isFinite(entry.usage[key]) ? `${approximate}${entry.usage[key].toLocaleString()}` : "Not reported";
-        body.append(h("tr", h("th", { scope: "row" }, entry.label.slice(0, 100)), h("td", entry.model || "Not reported"), h("td", tokens("prompt_tokens")), h("td", tokens("completion_tokens")), h("td", String(entry.usage.model_calls)), h("td", Number.isFinite(entry.usage.cost_micro_usd) ? (entry.usage.cost_micro_usd / 1000000).toFixed(6) : "Not reported")));
-      }
-      table.append(body); usageBody.append(table);
-    }
-    view.render(data.transcript.map(turn => ({ ...turn, key: `turn:${turn.index}` })), { empty: item.status });
-    retained.hidden = !data.retained || data.transcript.some(turn => turn.answer === data.retained);
-    retained.replaceChildren();
-    if (!retained.hidden) retained.append(h("h2", "Saved answer"), markdown(data.retained));
-    const busy = ["in_progress", "waiting", "attention"].includes(item.state);
-    view.setComposer({ placeholder: "Continue this work…", disabled: sending || draft.sending || item.conversation_missing, running: item.cancel_conversation || item.cancel_tasks.length > 0, submitDisabled: busy || sending || draft.sending || !!draft.uploads || !!draft.attempt });
-    decisions.replaceChildren();
-    for (const question of item.questions) {
-      decisions.append(h("section.work-question", h("h2", question.title), h("p", question.detail),
-        (question.files || []).map(file => h("button.btn", { type: "button", onclick: () => api.openArtifact(file.id) }, file.name)),
-        question.request ? h("details", h("summary", "Review details"), h("pre.work-question-input", JSON.stringify(question.request.input, null, 2))) : null,
-        question.choices.map(choice => h("button.btn", { type: "button", onclick: () => void act("work_answer", { work: item.id, id: question.id, decision: choice.decision }) }, choice.label))));
-    }
-    for (const failed of item.failures) decisions.append(h("div.work-failure", h("p", failed.error),
-      h("button.btn", { type: "button", onclick: () => void act("work_resolve", { work: item.id, run: failed.run, digest: failed.digest, resolved: !failed.resolved }) }, failed.resolved ? "Reopen" : "Mark resolved")));
-    if (item.run && item.state === "waiting" && !item.start_receipt) decisions.append(h("button.btn", { type: "button", onclick: () => void act("automation_start", { run: item.run }) }, "Start"));
-    if (item.start_receipt) decisions.append(h("button.btn", { type: "button", onclick: () => void act("work_execute", { receipt: item.start_receipt }) }, "Start"));
-    if (item.retry_task) decisions.append(h("button.btn", { type: "button", onclick: () => void act("retry_task", { task: item.retry_task }) }, "Retry"));
-    if (draft.attempt) decisions.append(h("button.btn", { type: "button", disabled: sending, onclick: () => void send(draft.attempt.task.objective) }, "Retry sending"));
-    files.replaceChildren(...item.outputs.map(file => h("button.btn", { type: "button", onclick: () => api.openArtifact(file.id) }, file.name)));
-  }
-  async function load() {
-    const own = ++generation;
-    try {
-      const next = await api.call("work_get", { work: params.work, receipt: params.receipt || null });
-      if (!alive || own !== generation) return;
-      if (JSON.stringify(data) === JSON.stringify(next)) return;
-      data = next; status.textContent = next.item.delivery_error ? `${next.item.status}. Result delivery: ${next.item.delivery_error}` : ""; draw();
-    } catch (error) { if (alive && own === generation) status.textContent = error.message; }
-  }
-  const timer = setInterval(() => { if (alive && (!el.hidden || surface?.closest(".workspace-conversation")) && !document.hidden) void load(); }, 1500);
-  const off = api.on("ark:orch", message => {
-    const event = message.event;
-    const foreground = !el.hidden || !!surface?.closest(".workspace-conversation");
-    if (foreground && event?.type === "agent" && event.event?.type === "present" && data?.item.tasks?.includes(event.task)) api.present?.(event.event.directive);
-    void load();
-  });
-  void load();
-  return { refresh: load, focus: () => view.focus(), conversation: () => ({
-    surface, title: data?.item.title || "Work",
-    location: { ...api.location, session: data?.item.conversation || "" }, attention: decisions,
-    focus: value => { resourceFocus = value ? structuredClone(value) : null; },
-  }), dispose() { alive = false; generation++; clearInterval(timer); off?.(); view.dispose(); } };
+  return {
+    refresh: load,
+    focusInput: () => composer.focus(),
+    dispose() { alive = false; generation++; off?.(); el.removeEventListener("keydown", keydown); controller.dispose(); composer.dispose(); },
+  };
 }
 
 export function registerWork(api) {
-  api.view({ id: "work", title: "Work", icon: "check", nav: "Work", projectScoped: true, resourceScoped: true, render: (el, params, scoped) => workList(el, params, scoped || api) });
-  api.view({ id: "work-chat", title: "Work", icon: "chat", resourceScoped: true, render: (el, params, scoped) => {
-    const bound = scoped || api;
-    let controller = workChat(el, params, bound);
-    return {
-      update(next) { controller.dispose(); el.replaceChildren(); controller = workChat(el, next, bound); },
-      refresh: () => controller.refresh(),
-      conversation: () => controller.conversation(),
-      focusInput: () => controller.focus(),
-      dispose: () => controller.dispose(),
-    };
-  } });
+  api.view({ id: "work", title: "Work", icon: "check", nav: "Work", projectScoped: true, resourceScoped: true, render: (el, params, scoped) => workHome(el, params, scoped || api) });
 }

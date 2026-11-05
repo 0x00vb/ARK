@@ -3,7 +3,7 @@ import { h, icon } from "./dom.js";
 let current;
 export function contextMenu(event, anchor, actions, { handled = false } = {}) {
   if (event.defaultPrevented && !handled || event.target.closest("input,textarea,[contenteditable],a,.xterm")) return;
-  if (String(window.getSelection() || "") && !event.target.closest("button,[role=treeitem],.auto-node,.auto-gallery-item")) return;
+  if (String(window.getSelection() || "") && !event.target.closest("button,[role=treeitem]")) return;
   const items = actions.filter(Boolean);
   if (!items.length) return;
   event.preventDefault(); event.stopPropagation(); current?.(); document.querySelector(".popover")?.close?.();

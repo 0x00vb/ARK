@@ -142,3 +142,5 @@ Local integration decisions:
 - [0095-native-computer-uses-agent-desktop](0095-native-computer-uses-agent-desktop.md)
 
 - [0096-agent-conversation-navigation](0096-agent-conversation-navigation.md)
+
+- [0097-one-chat-for-work-and-automation-runs](0097-one-chat-for-work-and-automation-runs.md)

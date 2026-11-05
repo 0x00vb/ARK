@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.34.0] - 2026-11-05
+
+### Breaking
+
+- The `work-chat` and `automation-editor` page views are removed. Open a work item's
+  conversation with `ark.openSession(receipt.conversation)` (or `openWork(api, id)` from
+  `work.js`) instead of `openView("work-chat", {work})`. Automations are edited on their card
+  in the Automations view.
+
+### Changed
+
+- Automations is a list of compact cards: name, steps in plain words, when, an On switch for
+  timed ones and Run. Typing saves. The canvas, execution inputs, step sources, history and
+  revision labels are gone from the page; saved fields the card does not show are kept.
+- Running an automation or a schedule, or opening a piece of work, opens its conversation in
+  the normal chat.
+- Work is a composer with the open work grouped under it (Needs you, Working, Waiting,
+  To do). Failed and interrupted work is under Needs you. Stop, Start, Retry, Mark resolved and
+  Archive are on a row's context menu. View all moves the composer up and shows the board.
+
 ## [0.33.2] - 2026-11-04
 
 - Computer can launch a stopped application. An initial not-running result now reaches

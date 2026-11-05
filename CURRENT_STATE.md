@@ -1,8 +1,18 @@
+# Core 0.34.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.34.0 (2026-11-05). Compact Automations cards and the Work home. |
+| Change | Automations as compact cards; Work as composer over grouped open work; runs open in the normal chat; `work-chat` and `automation-editor` views removed (ADR 0097) |
+| Consumer | Desktop 0.10.1 pins this tag and opens the receipt's conversation instead of `work-chat` |
+| Evidence | Web tests and real-host `page.rs` scenarios in `../board/evidence/automations-work-cleanup-20261105/` |
+| Not in this change | Deleting an automation (no runtime operation yet); webhook setup, execution inputs and per-step agents have no page control |
+
 # Core 0.33.2 release
 
 | Release state | Value |
 | --- | --- |
-| Latest tag | v0.33.2 (2026-11-04). Release source prepared; public checks recorded below. |
+| Tag | v0.33.2 (2026-11-04). Public checks recorded below. |
 | Consumer | Desktop0.10.0 pins this tag after publication and fresh-clone qualification. |
 
 The integrated source combines Design Studio support, direct assigned-agent Work chats,

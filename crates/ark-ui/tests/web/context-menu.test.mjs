@@ -5,7 +5,7 @@ import { resolve, extname } from 'node:path';
 import test from 'node:test';
 import { webkit } from 'playwright-core';
 
-test('card configuration preserves authority; contextual actions support keyboard, edges and text editing', async () => {
+test('shared context menu stays in the window and closes on scroll, resize, Tab and outside click', async () => {
   const root = resolve(import.meta.dirname, '../../web');
   const server = createServer(async (request, response) => {
     const path = new URL(request.url, 'http://fixture').pathname;
@@ -22,54 +22,6 @@ test('card configuration preserves authority; contextual actions support keyboar
     page.setDefaultTimeout(5000);
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.evaluate(async()=>{
-      const {editor}=await import('/js/automation-editor.js');
-      const calls=[];
-      const draft={name:'Morning review',trigger:{kind:'manual'},inputs:[],authority:{actions:[{action:'file.write',inputs:{},unattended:false,per_run:2,quota:{count:3,window_ms:3600000}}],max_calls:12,max_mutations:2},steps:[{id:'writer',name:'Write',action:{kind:'agent',target:{kind:'general',model:null},prompt:'Review the notes',inputs:[]}},{id:'result',name:'Result',action:{kind:'result',inputs:[]}}]};
-      const api={location:{runtime:'local',project:'owned'},on:()=>()=>{},openView(){},async call(method,input){calls.push({method,input:structuredClone(input)});if(method==='artifacts')return [{id:'notes',name:'Notes'}];if(['agents','tools','project_models'].includes(method))return [];if(method==='automation_validate')return {can_save:true,issues:[],activation_issues:[]};if(method==='automation_preview')return {next:[]};if(method==='automation_save')return {automation:'owned',revision:1};if(method==='automation_history')return {runs:[],next:null};if(method==='automation_get')return {entry:{definition:{id:'owned',revision:1,enabled:false},revision:{number:1,draft:calls.find(c=>c.method==='automation_save').input.draft}},layout:{version:0,positions:{}}};throw Error(method);}};
-      window.fixture={calls,draft,controller:editor(document.querySelector('#stage'),{draft_key:'owned',draft},api)};
-    });
-    assert.equal(await page.getByText('Permissions',{exact:true}).count(),0);
-    assert.equal(await page.locator('aside.auto-inspector').count(),0);
-    assert.equal(await page.locator('.auto-node').evaluateAll(nodes=>nodes.some(node=>[...node.childNodes].some(child=>child.nodeType===Node.TEXT_NODE && child.textContent==='null'))),false);
-    await page.getByRole('button',{name:'Select Start',exact:true}).click();
-    assert.equal(await page.getByLabel('Automation name',{exact:true}).evaluate(el=>!!el.closest('.auto-head')),true);
-    await page.getByLabel('Automation name',{exact:true}).fill('Weekly review');
-    await page.getByLabel('Trigger',{exact:true}).selectOption('schedule');
-    assert.equal(await page.getByLabel('Time zone',{exact:true}).evaluate(el=>!!el.closest('.auto-start')),true);
-    await page.getByLabel('Trigger',{exact:true}).selectOption('manual');
-    await page.getByRole('button',{name:'Collapse card',exact:true}).click();
-    assert.equal(await page.getByRole('button',{name:'Select Start',exact:true}).evaluate(el=>el===document.activeElement),true);
-    await page.getByRole('button',{name:'Select Write',exact:true}).click();
-    assert.equal(await page.getByLabel('Task',{exact:true}).evaluate(el=>el.closest('[data-step]').dataset.step),'writer');
-    await page.getByLabel('Task',{exact:true}).fill('Summarize the notes');
-    await page.getByRole('button',{name:'Add input',exact:true}).click();
-    const source=page.getByLabel('Source',{exact:true});
-    await source.scrollIntoViewIfNeeded();await source.focus();
-    const card=page.locator('.auto-node-expanded');
-    const scrollBefore=await card.evaluate(el=>el.scrollTop);
-    assert.ok(scrollBefore>0);
-    await source.selectOption('artifact');
-    assert.equal(await card.evaluate(el=>el.scrollTop),scrollBefore);
-    assert.equal(await source.evaluate(el=>{const r=el.getBoundingClientRect(),c=el.closest('.auto-node').getBoundingClientRect();return el===document.activeElement&&r.top>=c.top&&r.bottom<=c.bottom;}),true);
-
-    await page.getByRole('button',{name:'Select Write',exact:true}).press('Shift+F10');
-    assert.equal(await page.getByRole('menuitem',{name:'Move up',exact:true}).isDisabled(),true);
-    await page.keyboard.press('End');
-    assert.equal(await page.getByRole('menuitem',{name:'Remove step',exact:true}).evaluate(el=>el===document.activeElement),true);
-    await page.keyboard.press('Home');
-    assert.equal(await page.getByRole('menuitem',{name:'Collapse card',exact:true}).evaluate(el=>el===document.activeElement),true);
-    await page.keyboard.press('ArrowDown');
-    assert.equal(await page.getByRole('menuitem',{name:'Move down',exact:true}).evaluate(el=>el===document.activeElement),true);
-    await page.keyboard.press('Escape');
-    await page.getByLabel('Task',{exact:true}).click({button:'right'});
-    assert.equal(await page.getByRole('menu').count(),0);
-    await page.getByRole('button',{name:'Save',exact:true}).click();
-    const saved=await page.evaluate(()=>window.fixture.calls.find(c=>c.method==='automation_save').input.draft);
-    assert.equal(saved.steps[0].action.prompt,'Summarize the notes');
-    assert.deepEqual(saved.steps[0].action.inputs,[{kind:'artifact',id:'notes'}]);
-    assert.equal(saved.name,'Weekly review');
-    assert.deepEqual(saved.authority,await page.evaluate(()=>window.fixture.draft.authority));
     // Exercise the shared menu at the lower-right edge with a disabled item.
     await page.evaluate(async()=>{
       const {bindContextMenu}=await import('/js/context-menu.js');
@@ -98,9 +50,9 @@ test('card configuration preserves authority; contextual actions support keyboar
     await page.getByRole('button',{name:'Edge',exact:true}).press('Shift+F10');await page.keyboard.press('Tab');assert.equal(await page.getByRole('menu').count(),0);
     await page.getByRole('button',{name:'Edge',exact:true}).click({button:'right'});await page.mouse.click(1,1);assert.equal(await page.getByRole('menu').count(),0);
     await page.evaluate(()=>document.documentElement.dataset.theme='dark');
-    if(process.env.ARK_UI_SHOTS){await mkdir(process.env.ARK_UI_SHOTS,{recursive:true});await page.screenshot({path:`${process.env.ARK_UI_SHOTS}/inline-card-dark.png`});}
+    if(process.env.ARK_UI_SHOTS){await mkdir(process.env.ARK_UI_SHOTS,{recursive:true});await page.screenshot({path:`${process.env.ARK_UI_SHOTS}/context-menu-dark.png`});}
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('html').evaluate(el=>el.scrollWidth<=innerWidth),true);
-    assert.deepEqual(errors,[]);await page.evaluate(()=>window.fixture.controller.dispose());
+    assert.deepEqual(errors,[]);
   } finally { await browser.close();server.closeAllConnections();await new Promise(done=>server.close(done)); }
 });

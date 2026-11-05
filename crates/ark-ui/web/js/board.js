@@ -217,7 +217,7 @@ function boardsSection(el) {
 
 // ---- small pieces ---------------------------------------------------------------------------------
 
-function avatar(owner) {
+export function avatar(owner) {
   if (!owner) return null;
   const you = owner === PERSON;
   let hash = 0;
@@ -230,7 +230,7 @@ function avatar(owner) {
 }
 
 /// The status circle: empty (to do), half (in progress), filled with a check (done).
-function statusMark(state) {
+export function statusMark(state) {
   const svg = {
     todo: '<circle cx="8" cy="8" r="6"/>',
     doing: '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/>',
@@ -741,6 +741,7 @@ export function boardView(el, params, context = null) {
       render({ animate: false });
     },
     refresh: () => load(),
+    openItem(id) { const w = item(id); if (w) open(w); },
     focus: () => {
       const w = openId() && item(store.openItem);
       const b = boardOf(v.board);

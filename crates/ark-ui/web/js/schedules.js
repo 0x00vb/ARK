@@ -7,6 +7,7 @@
 import { h, icon, clear, clip } from "./dom.js";
 import { markdown } from "./md.js";
 import { registerAutomations } from "./automations.js";
+import { openWork } from "./work.js";
 
 const store = {
   ark: null,
@@ -125,10 +126,10 @@ function schedulePanel(el, params, ark = store.ark) {
           runRequest = null;
           if (result.receipt.kind === "automation") {
             const execution = await ark.call("automation_execution", { run: result.execution });
-            ark.openView("work-chat", { work: execution.work });
+            await ark.openSession(execution.conversation);
           } else {
             const execution = await ark.call("task", { task: result.task });
-            if (execution.task.item) ark.openView("work-chat", { work: execution.task.item });
+            if (execution.task.item) await openWork(ark, execution.task.item);
           }
         } catch (error) { ark.toast(error.message); }
         finally { running = false; await fetch(); }
@@ -153,7 +154,7 @@ function schedulePanel(el, params, ark = store.ark) {
         h("div.sc-when", s.says, s.tz && s.tz !== here() ? h("span.sc-tz", s.tz) : null),
         h("div.sc-state", { "data-tone": TONE[s.state] || null }, s.state === "running" ? h("span.working-dot") : null, s.status),
         s.last && !s.status.startsWith(s.last) ? h("div.sc-last", s.last) : null),
-      h("div.sc-actions", run, pause, s.target ? null : stop, h("button.btn.small", { type: "button", onclick: () => s.target ? ark.openView("automation-editor", { automation: s.target }) : ark.openView("automation-editor", { legacy_schedule: s.id }) }, "Edit automation")),
+      h("div.sc-actions", run, pause, s.target ? null : stop, s.target ? h("button.btn.small", { type: "button", onclick: () => ark.openView("schedules") }, "Edit automation") : null),
     );
     if (s.context) el.append(h("details.sc-context", h("summary", "What each run is told"), h("div.prose", { html: markdown(s.context) })));
 

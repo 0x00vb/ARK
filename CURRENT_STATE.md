@@ -1,19 +1,18 @@
-# Claude Code cache reuse (in development, 2026-11-05)
+# Core 0.35.0 release
 
-| State | Value |
+| Release state | Value |
 | --- | --- |
-| Where | worktree `../ark-claude-cost`, branch `claude-cost` from v0.34.0. Uncommitted. Desktop test build in `../ark-desktop-claude-cost` (gitignored `[patch]`) |
-| Change | ADR 0102: the system prompt names no project; on Claude Code the turn's preloaded actions arrive with the second request; a reply after Claude Code's structured-output enforcement is not asked again |
-| Measured | 5 coding tasks x 3, live `claude:sonnet`: est. cost per success $0.080 to $0.047 (Claude Code $0.069), fresh input 211k to 88k, success 14/15 plus 5/5 extra (installed 15/15). Evidence `../board/evidence/ark-vs-claude-code-20261105/round2/` |
-| Gates | fmt, workspace clippy `-D warnings`, ark-model/ark-runtime/ark-bench/ark-sdk/ark-interact tests, simulated bench (baseline regenerated, +0.2% tokens), QA GO. Full `scripts/ci.sh` and page tests not run: free disk under 20 GB |
+| Latest tag | v0.35.0 (2026-11-05). Claude Code serves ARK's system prompt from its cache (ADR 0102). |
+| Change | The system prompt names no project; on Claude Code a turn's preloaded actions arrive with the second request; a reply after Claude Code's structured-output enforcement is not asked again |
+| Measured | 5 coding tasks x 3, live `claude:sonnet`: est. cost per success $0.080 to $0.047 (Claude Code $0.069), fresh input 211k to 88k tokens. Evidence `../board/evidence/ark-vs-claude-code-20261105/` |
+| Consumer | Desktop 0.10.2 pins this tag |
 | Not covered | orchestrated agents (`agent.rs`) still name the project in their system prompt; Claude Code's own structured-output enforcement retry |
-| Next | owner: commit and release; Desktop pin |
 
 # Core 0.34.0 release
 
 | Release state | Value |
 | --- | --- |
-| Latest tag | v0.34.0 (2026-11-05). Compact Automations cards and the Work home. |
+| Tag | v0.34.0 (2026-11-05). Compact Automations cards and the Work home. |
 | Change | Automations as compact cards; Work as composer over grouped open work; runs open in the normal chat; `work-chat` and `automation-editor` views removed (ADR 0097) |
 | Consumer | Desktop 0.10.1 pins this tag and opens the receipt's conversation instead of `work-chat` |
 | Evidence | Web tests and real-host `page.rs` scenarios in `../board/evidence/automations-work-cleanup-20261105/` |

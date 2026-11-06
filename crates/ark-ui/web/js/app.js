@@ -1249,6 +1249,9 @@ function popover(anchor, children, { above = false, end = false, onClose } = {})
   el.style.maxHeight = `${Math.max(0, window.innerHeight - 24)}px`;
   el.style.overflowY = "auto";
   const height = el.offsetHeight;
+  // Above is the default for a composer control. Menus fill in after they open, so an anchor
+  // in the top half has no room there for one that grows.
+  if (above && r.top < Math.max(height + 18, 360) && window.innerHeight - r.bottom > r.top) above = false;
   if (above) {
     el.style.bottom = `${Math.max(12, Math.min(window.innerHeight - r.top + 6, window.innerHeight - height - 12))}px`;
     el.classList.add("above");

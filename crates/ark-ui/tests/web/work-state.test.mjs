@@ -12,6 +12,16 @@ let browser;
 before(async () => { browser = await webkit.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
 
+async function shoot(page, name) {
+  if (!process.env.ARK_UI_SHOTS) return;
+  await mkdir(process.env.ARK_UI_SHOTS, { recursive: true });
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(mode => window.arkTheme.setMode(mode), theme);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: resolve(process.env.ARK_UI_SHOTS, `${name}-${theme}.png`), animations: "disabled" });
+  }
+}
+
 async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
@@ -421,6 +431,7 @@ test("an empty chat shows nothing, then a typing mark, then one local line and n
   const text = await page.locator(".greeting .prose.answer").innerText();
   assert.ok(GREETING_LINES.some(([, plain]) => plain === text), text);
   assert.equal(await page.locator(".turn").count(), 0);
+  await shoot(page, "calm-empty-chat");
 }, { empty: true }));
 
 test("the greeting uses the first word of the profile name and none of the model's tokens", () => fixture(async page => {
@@ -441,6 +452,7 @@ test("the title bar names who the chat is with and opens the details in the side
   await chip.click();
   const panel = page.locator("#pane .identity-panel");
   await panel.waitFor();
+  await shoot(page, "calm-details-pane");
   assert.equal(await panel.locator("h2").textContent(), "ARK");
   assert.equal(await panel.locator(".identity-row-label").textContent(), "Model");
   assert.equal(await panel.locator(".identity-row").isEnabled(), true);

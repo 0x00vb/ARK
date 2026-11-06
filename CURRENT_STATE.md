@@ -6,7 +6,8 @@
 | Change | Rail with `ark.rail` pins, title-bar identity chip and details pane, local greeting, composer chips hidden, new chats set to Auto |
 | Checks | Web fixtures pass (work-state 27, project-section 42, upload-drafts 15, compose-append 3). Real-host page suite serial: 61 pass, 6 fail, the same 6 fail on v0.35.0 (`an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`, `steering_lands_where_it_was_read_and_replays_the_same`, `streamed_text_keeps_its_last_chunk_and_answers_once`, `text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once`, `the_window_on_a_runtime_elsewhere_has_its_controls_and_a_way_back`). Three independent reviews triaged and fixed |
 | Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). An agent cannot change the mode on request yet |
-| Consumer | Desktop 0.11.0 pins this tag |
+| Consumer | Desktop 0.11.0 pins this tag; published 2026-11-06 |
+| Verification | Tag on `origin` and `github`. Same tree: fmt, clippy, release build, simulated benchmark, node 22 of 22, WebKit fixtures 98 of 98, page suite 61 of 67 (the same 6 fail on v0.35.0). Fresh clone via `verify-release.sh v0.36.0` passed protocol, version and clippy, then stopped at the 5 `ark-browser` Chrome-start timeouts (environment) |
 
 # Core 0.35.0 release
 

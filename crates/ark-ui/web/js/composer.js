@@ -22,9 +22,8 @@ export class Composer {
     this.send = elements.send || $("#send");
     this.queueEl = elements.queue || $("#queue");
     this.slash = elements.slash || $("#slash");
-    // `null` leaves a control out (an app's conversation has no model, mode or files).
+    // `null` leaves a control out (an app's conversation has no model or files).
     this.model = "model" in elements ? elements.model : $("#model-chip");
-    this.mode = "mode" in elements ? elements.mode : $("#mode-chip");
     this.attach = "attach" in elements ? elements.attach : $("#attach");
     const dictationId = `dictation-status-${++composerNumber}`;
     this.mic = elements.mic || this.form.querySelector(".dictate") || h("button.icon-btn.dictate", { type: "button", "aria-label": "Start dictation" });
@@ -50,7 +49,6 @@ export class Composer {
       else this.submit(false);
     });
     this.model?.addEventListener("click", () => elements.modelOpen ? elements.modelOpen(this.model, () => this.focus()) : this.modelMenu());
-    this.mode?.addEventListener("click", () => this.modeMenu());
     this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft, { captureOrigin: elements.captureOrigin, progressTarget: elements.uploads }));
     this.dictation = new DictationController({
       api,
@@ -155,56 +153,13 @@ export class Composer {
     this.updateSlash();
   }
 
+  /// The chat's authority as its summary says it. Not drawn: the person changes it in words.
   setExecutionMode(mode, revision = 0) {
     this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "manual";
     this.executionModeRevision = revision;
-    this.mode.textContent = this.executionMode[0].toUpperCase() + this.executionMode.slice(1);
-    this.mode.dataset.mode = this.executionMode;
-    this.mode.setAttribute("aria-label", `${this.mode.textContent} execution mode`);
-  }
-
-  async chooseMode(mode) {
-    if (mode === this.executionMode) return;
-    this.mode.disabled = true;
-    try {
-      await this.api.setExecutionMode(mode);
-    } finally {
-      this.mode.disabled = false;
-      this.focus();
-    }
-  }
-
-  cycleMode() {
-    const modes = ["plan", "manual", "auto"];
-    const next = modes[(modes.indexOf(this.executionMode || "manual") + 1) % modes.length];
-    void this.chooseMode(next);
-  }
-
-  modeMenu() {
-    const open = document.querySelector(".popover.modes-pop.open");
-    if (open) return open.close();
-    const choices = [
-      ["plan", "Plan", "Inspect and return a plan. No changes."],
-      ["manual", "Manual", "Ask before ungranted changes."],
-      ["auto", "Auto", "Continue confined project work without asking."],
-    ];
-    let menu;
-    const rows = choices.map(([id, name, detail]) => h("button.menu-item.mode-item", {
-      type: "button",
-      role: "menuitemradio",
-      "aria-checked": String(id === this.executionMode),
-      onclick: () => { menu.close(); void this.chooseMode(id); },
-    }, h("span", name), h("span.menu-sub", detail)));
-    menu = this.api.popover(this.mode, rows, { above: true });
-    menu.classList.add("modes-pop");
   }
 
   key(e) {
-    if (this.mode && e.key === "Tab" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      e.preventDefault();
-      this.cycleMode();
-      return;
-    }
     if (!this.slash.hidden) {
       const items = [...this.slash.querySelectorAll(".slash-item")];
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {

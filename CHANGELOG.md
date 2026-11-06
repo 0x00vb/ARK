@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.37.0] - 2026-11-06
+
+### Breaking
+
+- `createChatSurface` no longer takes `capabilities.mode` or returns `mode` and `controls`, and `chatView` no longer returns `controls`. The `chat-view-controls` slot is gone. An app that filled it puts the control elsewhere or drops it.
+
+### Changed
+
+- The composer has no mode chip and no Shift+Tab. Send sits alone at the right edge of the composer.
+- The strip of open chats stays over a conversation view (a new chat) and shows it as a selected tab. Tabs keep their element while open, so the selection moves with a transition and a click highlights at once.
+
+### Added
+
+- A chat changes its own execution mode when the person asks in words. The model calls `mode.set`, the person approves every change, and the mode applies from the next message (ADR 0104). Plan keeps the tool, so a person can leave it. New action flag `stays_in_plan`.
+
 ## [0.36.0] - 2026-11-06
 
 ### Breaking

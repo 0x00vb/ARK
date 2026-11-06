@@ -22,7 +22,7 @@ async function shoot(page, name) {
   }
 }
 
-async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, gateMode = false, places = { here: "This computer", places: [] } } = {}) {
+async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, gateMode = false, tabs = null, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
   let summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: chosenMode ? 1 : 0 };
@@ -88,6 +88,7 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const context = await browser.newContext({ viewport: { width: 1180, height: 800 }, hasTouch: coarse });
+  if (tabs) await context.addInitScript(ids => localStorage.setItem("ark-open-chats", JSON.stringify({ version: 1, ids })), tabs);
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
   page.on("pageerror", error => errors.push(error.message));
@@ -250,20 +251,19 @@ test("primary controls have distinct targets and shared icons at desktop and pho
 }));
 
 
-test("the composer shows attachment and dictation, and no model or mode chip until one needs the person", () => fixture(async (page, { modeCalls }) => {
+test("the composer shows attachment and dictation, no mode control, and no model chip until one needs the person", () => fixture(async (page, { modeCalls }) => {
   assert.deepEqual(await page.locator(".composer-bar > button").evaluateAll(nodes => nodes.slice(0, 2).map(node => node.id)), ["attach", "dictate"]);
   assert.equal(await page.locator("#model-chip").isVisible(), false);
-  assert.equal(await page.locator("#mode-chip").isVisible(), false);
-  await page.waitForFunction(() => document.querySelector("#mode-chip").dataset.mode === "auto");
+  assert.equal(await page.locator("#mode-chip").count(), 0);
+  await page.waitForTimeout(500);
   assert.deepEqual(modeCalls, [{ method: "chat_execution_mode", session: "chat-a", mode: "auto", revision: 0, model: "mock" }]);
   assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 44);
 }, { empty: true }));
 
-test("a chat with history keeps the mode it has and shows its chip", () => fixture(async (page, { modeCalls }) => {
+test("a chat with history keeps the mode it has and shows no control for it", () => fixture(async (page, { modeCalls }) => {
   await page.waitForTimeout(500);
   assert.deepEqual(modeCalls, []);
-  assert.equal(await page.locator("#mode-chip").isVisible(), true);
-  assert.equal(await page.locator("#mode-chip").getAttribute("data-mode"), "manual");
+  assert.equal(await page.locator("#mode-chip").count(), 0);
 }));
 
 test("the first message waits for the Auto call, so the host and the page agree", () => fixture(async (page, { modeCalls, sendCalls, releaseMode }) => {
@@ -272,16 +272,19 @@ test("the first message waits for the Auto call, so the host and the page agree"
   await page.waitForTimeout(400);
   assert.equal(sendCalls.length, 0, "the send waits while the mode call is open");
   releaseMode();
-  await page.waitForFunction(() => document.querySelector("#mode-chip").dataset.mode === "auto");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(700);
   assert.equal(sendCalls.length, 1);
   assert.deepEqual([sendCalls[0].params.execution_mode, sendCalls[0].params.execution_mode_revision], ["auto", 1]);
   assert.equal(modeCalls.length, 1);
 }, { empty: true, gateMode: true }));
 
-test("a mode the person chose stays visible so it can be changed back", () => fixture(async page => {
-  assert.equal(await page.locator("#mode-chip").isVisible(), true);
-  assert.equal(await page.locator("#mode-chip").getAttribute("data-mode"), "manual");
+test("a mode the person chose is sent with the turn and has no control", () => fixture(async (page, { sendCalls }) => {
+  assert.equal(await page.locator("#mode-chip").count(), 0);
+  await page.locator("#input").fill("hello");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(500);
+  assert.equal(sendCalls.length, 1);
+  assert.equal(sendCalls[0].params.execution_mode, "manual");
 }, { chosenMode: true }));
 
 
@@ -436,6 +439,29 @@ test("agent chat navigation uses the registered conversation view with a session
   await page.getByText("Conversation with Editor", { exact: true }).waitFor();
 }));
 
+
+test("open tabs stay while a new chat is drafted, and a click moves the selection at once", () => fixture(async page => {
+  await page.evaluate(async () => {
+    window.ark.view({ id: "draft-chat", title: "New chat", agentConversation: true, resourceScoped: true, render(el) { el.textContent = "A new chat"; return { title: () => "New chat" }; } });
+  });
+  const tabs = page.locator("#chat-tab-list .chat-tab-item");
+  await page.waitForFunction(() => document.querySelectorAll("#chat-tab-list .chat-tab-item").length === 2);
+  const before = await tabs.evaluateAll(nodes => nodes.map(node => node.dataset.session));
+  await page.evaluate(() => window.ark.openView("draft-chat"));
+  await page.getByText("A new chat", { exact: true }).waitFor();
+  assert.equal(await page.locator("#chat-tabs").isVisible(), true, "the strip stays over a new chat");
+  assert.equal(await tabs.count(), 3);
+  assert.deepEqual(await tabs.evaluateAll(nodes => nodes.map(node => node.dataset.selected)), ["false", "false", "true"]);
+  assert.deepEqual((await tabs.evaluateAll(nodes => nodes.map(node => node.dataset.session))).slice(0, 2), before, "the open tabs keep their order");
+  assert.equal(await tabs.nth(2).locator(".chat-tab-title").textContent(), "New chat");
+  await shoot(page, "tabs-new-chat");
+  const first = await tabs.first().elementHandle();
+  await tabs.first().locator(".chat-tab").click();
+  await page.waitForFunction(() => document.querySelector("#chat-tab-list .chat-tab-item").dataset.selected === "true");
+  await page.waitForFunction(() => document.querySelectorAll("#chat-tab-list .chat-tab-item").length === 2);
+  assert.equal(await first.evaluate(node => node.isConnected), true, "a tab keeps its element while it stays open");
+  assert.equal(await page.locator("#chat-tabs").isVisible(), true);
+}, { tabs: ["chat-a", "chat-b"] }));
 
 test("a property menu stays within the window at the bottom edge", () => fixture(async page => {
   const bounds = await page.evaluate(() => {

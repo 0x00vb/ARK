@@ -527,7 +527,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   font-size: 13px; font-weight: 500; color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.app:not([data-view]) .topbar:has(.chat-tabs:not([hidden])) .title { display: none; }
+.app:is(:not([data-view]), [data-conversation-view]) .topbar:has(.chat-tabs:not([hidden])) .title { display: none; }
 /* Renaming: the field fills the title's place. */
 .title:has(input) { display: flex; }
 .top-actions { display: flex; align-items: center; gap: 4px; }
@@ -562,6 +562,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   font: inherit; cursor: pointer;
 }
 .chat-tab:active, .chat-tab-close:active, .chat-split:active { scale: 0.96; }
+.chat-tab-face { display: inline-flex; flex: none; margin-right: 6px; }
 .chat-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-tab-close { width: var(--control-compact); height: var(--control-compact); padding: 0; margin-inline: var(--rail-tab-gap); flex: none; display: grid; place-items: center; border: 0; border-radius: var(--rail-tab-radius); background: transparent; color: inherit; cursor: pointer; opacity: 0; }
 .chat-tab-close .ico { width: var(--control-icon); height: var(--control-icon); }
@@ -940,7 +941,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* ---- views in the main column (ark.view) -------------------------------------------------- */
 
 .stage { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.app[data-view] .chat-tabs, .app[data-view] .chat-workspace .scroller, .app[data-view] .chat-workspace .dock { display: none; }
+.app[data-view]:not([data-conversation-view]) .chat-tabs, .app[data-view] .chat-workspace .scroller, .app[data-view] .chat-workspace .dock { display: none; }
 .app[data-view] .chat-workspace { position: absolute; inset: 0; z-index: 20; display: block; pointer-events: none; }
 .app[data-view] .chat-layout-leaf { width: 100%; height: 100%; overflow: visible; }
 .app[data-view] .chat-surface { position: static; }
@@ -1150,10 +1151,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 }
 .chip:hover { background: var(--hover); color: var(--text-2); }
 .model-chip { order: 3; min-width: 0; max-width: 45%; margin-left: auto; }
-.mode-chip { order: 2; flex: none; max-width: none; font-variant-numeric: tabular-nums; }
-.mode-chip[data-mode="plan"] { color: var(--text-2); }
-.mode-chip[data-mode="auto"] { color: var(--accent); }
-.mode-chip:disabled { opacity: 0.55; cursor: default; }
 /* Nothing chosen yet: the button asks for it. */
 .chip[data-missing="true"] { color: var(--accent); font-weight: 500; background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .chip[data-missing="true"]:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
@@ -1168,13 +1165,14 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   transition-duration: 150ms;
 }
 .ctx-meter:empty { display: none; }
-.ctx-meter { order: 4; height: 30px; white-space: nowrap; flex: none; }
+.ctx-meter { order: 4; height: 30px; white-space: nowrap; flex: none; margin-left: auto; }
+.ctx-meter:not(:empty) ~ .send, .chat-view-actions:not(:empty) ~ .send { margin-left: 0; }
 .ctx-meter:hover { background: var(--hover); color: var(--text-2); }
 .ctx-meter[data-level="mid"] { color: var(--warn); }
 .ctx-meter[data-level="high"] { color: var(--err); }
 .send {
   position: relative;
-  order: 5; width: 30px; height: 30px; flex: none; margin-left: 0;
+  order: 5; width: 30px; height: 30px; flex: none; margin-left: auto;
   border: 0; border-radius: 50%;
   background: var(--text); color: var(--bg);
   display: grid; place-items: center;
@@ -1479,12 +1477,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .menu-head { padding: 7px 10px 2px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .menu-sep { height: 1px; background: var(--hair); margin: 5px 4px; }
 .models, .model-picker { min-width: 280px; }
-.modes-pop { width: min(340px, calc(100vw - 24px)); }
-.mode-item { align-items: flex-start; }
-.mode-item > span:first-child { min-width: 52px; font-weight: 600; color: var(--text-2); }
-.mode-item .menu-sub { text-align: right; line-height: 1.35; text-wrap: pretty; }
-.mode-item[aria-checked="true"] > span:first-child::before { content: "✓"; display: inline-block; width: 16px; color: var(--accent); }
-.mode-item:not([aria-checked="true"]) > span:first-child { padding-left: 16px; }
 .model-group + .model-group { margin-top: 4px; }
 .model-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px 3px; font-size: 12px; }
 .model-name { font-weight: 600; color: var(--text-2); }
@@ -2219,7 +2211,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .chat-view { flex: 1; min-height: 0; height: 100%; }
 .chat-view-actions { order: 4; margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .chat-view-actions:empty { display: none; }
-.chat-view-actions:empty + .send { margin-left: auto; }
 .chat-view-actions:not(:empty) + .send { display: none; }
 
 .place-mark { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-3); vertical-align: 1px; }
@@ -2272,7 +2263,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .composer-bar .attach .ico, .composer-bar .dictate .ico, .composer-bar .send .ico { width: 20px; height: 20px; }
 .composer-bar { min-height: 40px; }
 .composer-bar .model-chip { order: 2; flex: 0 1 auto; max-width: 45%; margin-left: 0; text-align: left; }
-.composer-bar .mode-chip { order: 3; margin-left: auto; }
 .composer-bar .place-chip { order: 4; max-width: 28%; color: var(--text-3); }
 .composer-bar .place-chip { min-width: 0; }
 .composer-bar .attach { margin-left: 0; }
@@ -2338,7 +2328,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .pane-tab-menu .ico { width: 14px; height: 14px; }
 .pane-tab-menu:hover { background: var(--hover); }
 .pane-tab-menu:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.composer-bar:has(.mode-chip) .chat-view-actions:empty + .send { margin-left: 0; }
 
 .market-types { display: flex; gap: 24px; margin: 0 0 20px; border-bottom: 1px solid var(--hair); }
 .market-types > button { padding: 10px 0; color: var(--text-2); background: none; border: 0; border-bottom: 1px solid transparent; cursor: pointer; font: inherit; }
@@ -2365,10 +2354,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .work-question button + button { margin-inline-start: 8px; }
 .work-files { display: flex; flex-wrap: wrap; gap: 8px; }
 
-.chat-view-controls { order: 4; margin-left: auto; display: flex; align-items: center; gap: 4px; }
-.chat-view-controls:empty { display: none; }
-.chat-view-controls:not(:empty) ~ .send { margin-left: 0; }
-.chat-view-controls:not(:empty) + .chat-view-actions { margin-left: 0; }
 
 @media (max-width: 640px) {
 }
@@ -2541,4 +2526,4 @@ button.ticket-property:hover { background: var(--hover); }
 
 /* The composer carries no mode or model chip until one needs the person: a mode other than
    Auto, or no model yet. Shift+Tab still cycles the mode; the model lives in the chat's details. */
-.composer .mode-chip[data-mode="auto"], .composer .model-chip:not([data-missing="true"]) { display: none; }
+.composer .model-chip:not([data-missing="true"]) { display: none; }

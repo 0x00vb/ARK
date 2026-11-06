@@ -31,7 +31,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
   api.cancel = () => {};
   let running = false;
 
-  const elements = createChatSurface({ kind: "chat-view", capabilities: { model: !!model, files: !!files, mode: false } });
+  const elements = createChatSurface({ kind: "chat-view", capabilities: { model: !!model, files: !!files } });
   const { surface, scroller, threadEl: root, input, send, form, queue, actions } = elements;
   input.placeholder = placeholder;
   el.append(surface);
@@ -180,7 +180,6 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     reset,
     input,
     actions,
-    controls: elements.controls,
     uploads: elements.uploads,
     addLine: (text, options) => {
       composer.addLine(text, options);

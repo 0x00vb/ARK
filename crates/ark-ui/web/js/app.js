@@ -626,44 +626,53 @@ async function closeChatTab(id) {
   renderChatTabs();
 }
 
-function renderChatTabs() {
-  const bar = $("#chat-tabs");
-  const list = $("#chat-tab-list");
-  if (!bar || !list) return;
-  bar.hidden = chatTabs.ids.length < 2 && visibleChats(chatLayout).length < 2;
-  clear(list);
-  const active = activeSession || state.sessionId;
-  let selectedItem = null;
-  for (const id of chatTabs.ids) {
-    const title = chatTabs.titles.get(id) || "Untitled chat";
-    const selected = id === active;
-    const close = h("button.chat-tab-close", { type: "button", title: `Close ${title}`, "aria-label": `Close ${title}` }, icon("x"));
-    close.addEventListener("click", (event) => { event.stopPropagation(); void closeChatTab(id); });
-    const open = (event) => event.altKey ? void splitInto(id, active, "right") : void openChatTab(id);
-    const tab = h("button.chat-tab", {
-      type: "button", role: "tab", "aria-selected": String(selected),
-      title: selected ? `${title}\nDouble-click to rename` : title,
-      onclick: open,
-      onkeydown: (event) => {
-        if (event.key === "Tab" && !event.shiftKey) {
-          event.preventDefault();
-          close.focus();
-          return;
-        }
-        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
-      },
-    }, h("span.chat-tab-title", title));
-    const item = h("div.chat-tab-item", { "data-session": id, "data-selected": String(selected), draggable: "true" }, tab, close);
-    bindContextMenu(item, () => [
-      { label: "Open chat", run: () => void openChatTab(id) },
-      { label: "Rename chat", disabled: id !== active || (id === state.sessionId ? state.running : !!secondaryChats.get(id)?.running), run: () => renameChatTabInline(item, id, title) },
-      { label: "Split right", disabled: id === active || visibleChats(chatLayout).length >= MAX_VISIBLE_CHATS, run: () => void splitInto(id, active, "right") },
-      { label: "Close chat", run: () => void closeChatTab(id) },
-    ]);
-    item.addEventListener("dragstart", (event) => beginTabDrag(event, id, item));
-    item.addEventListener("dragend", (event) => void endTabDrag(event, id));
+/// The strip of open chats. A tab keeps its element while it stays open, so the selection
+/// moves with a transition, the focus and hover survive and nothing flickers. A conversation
+/// view that is not a chat yet (a new chat) takes a tab of its own at the end.
+const chatTabItems = new Map();
+const DRAFT_TAB = "view:draft";
+
+function chatTabItem(key) {
+  const close = h("button.chat-tab-close", { type: "button" }, icon("x"));
+  const titleEl = h("span.chat-tab-title");
+  const tab = h("button.chat-tab", { type: "button", role: "tab" }, titleEl);
+  const item = h("div.chat-tab-item", { "data-key": key, draggable: key === DRAFT_TAB ? "false" : "true" }, tab, close);
+  const entry = { key, item, tab, close, titleEl, title: "" };
+  const draft = key === DRAFT_TAB;
+  const select = (event) => {
+    if (draft) return;
+    // The highlight moves now; the chat follows when the host has switched.
+    for (const other of chatTabItems.values()) other.item.dataset.selected = String(other === entry);
+    (event.altKey ? splitInto(key, activeSession || state.sessionId, "right") : openChatTab(key)).finally(renderChatTabs);
+  };
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (draft) void showConversation();
+    else void closeChatTab(key);
+  });
+  tab.addEventListener("click", select);
+  tab.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && !event.shiftKey) {
+      event.preventDefault();
+      close.focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(event); }
+  });
+  if (!draft) {
+    bindContextMenu(item, () => {
+      const active = activeSession || state.sessionId;
+      return [
+        { label: "Open chat", run: () => void openChatTab(key) },
+        { label: "Rename chat", disabled: key !== active || (key === state.sessionId ? state.running : !!secondaryChats.get(key)?.running), run: () => renameChatTabInline(entry) },
+        { label: "Split right", disabled: key === active || visibleChats(chatLayout).length >= MAX_VISIBLE_CHATS, run: () => void splitInto(key, active, "right") },
+        { label: "Close chat", run: () => void closeChatTab(key) },
+      ];
+    });
+    item.addEventListener("dragstart", (event) => beginTabDrag(event, key, item));
+    item.addEventListener("dragend", (event) => void endTabDrag(event, key));
     item.addEventListener("dragover", (event) => {
-      if (!draggedSession || draggedSession === id) return;
+      if (!draggedSession || draggedSession === key) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       item.dataset.drop = "true";
@@ -673,9 +682,9 @@ function renderChatTabs() {
       event.preventDefault();
       const from = draggedSession;
       delete item.dataset.drop;
-      if (!from || from === id) return;
-      const ordered = chatTabs.ids.filter((entry) => entry !== from);
-      ordered.splice(ordered.indexOf(id), 0, from);
+      if (!from || from === key) return;
+      const ordered = chatTabs.ids.filter((entryId) => entryId !== from);
+      ordered.splice(ordered.indexOf(key), 0, from);
       chatTabs.ids = ordered;
       saveTabs();
       renderChatTabs();
@@ -683,12 +692,60 @@ function renderChatTabs() {
     tab.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      renameChatTabInline(item, id, title);
+      renameChatTabInline(entry);
     });
-    list.append(item);
-    if (selected) selectedItem = item;
   }
-  requestAnimationFrame(() => selectedItem?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+  return entry;
+}
+
+function renderChatTabs() {
+  const bar = $("#chat-tabs");
+  const list = $("#chat-tab-list");
+  if (!bar || !list) return;
+  const conversationView = !!state.view && !!registry.views.get(state.view)?.agentConversation;
+  const draftTitle = conversationView ? views.get(state.view)?.ctl?.title?.() || "New chat" : null;
+  const keys = [...chatTabs.ids, ...(conversationView ? [DRAFT_TAB] : [])];
+  bar.hidden = keys.length < 2 && visibleChats(chatLayout).length < 2;
+  if (conversationView) appEl.dataset.conversationView = "true";
+  else delete appEl.dataset.conversationView;
+  const active = state.view ? null : activeSession || state.sessionId;
+  let selected = null;
+  keys.forEach((key, index) => {
+    let entry = chatTabItems.get(key);
+    if (!entry) {
+      entry = chatTabItem(key);
+      chatTabItems.set(key, entry);
+    }
+    const draft = key === DRAFT_TAB;
+    const title = draft ? draftTitle : chatTabs.titles.get(key) || "Untitled chat";
+    const isSelected = draft || key === active;
+    if (entry.title !== title) {
+      entry.title = title;
+      entry.titleEl.textContent = title;
+      entry.close.title = `Close ${title}`;
+      entry.close.setAttribute("aria-label", entry.close.title);
+    }
+    if (draft && !entry.face) {
+      const face = views.get(state.view)?.ctl?.identity?.()?.avatar?.(16);
+      if (face) {
+        entry.face = h("span.chat-tab-face", { "aria-hidden": "true" }, face);
+        entry.tab.prepend(entry.face);
+      }
+    }
+    entry.item.dataset.session = draft ? "" : key;
+    entry.item.dataset.selected = String(isSelected);
+    entry.tab.setAttribute("aria-selected", String(isSelected));
+    entry.tab.title = isSelected && !draft ? `${title}\nDouble-click to rename` : title;
+    if (list.children[index] !== entry.item) list.insertBefore(entry.item, list.children[index] || null);
+    if (isSelected) selected = entry.item;
+  });
+  for (const [key, entry] of chatTabItems) {
+    if (keys.includes(key)) continue;
+    entry.item.remove();
+    chatTabItems.delete(key);
+  }
+  if (selected && selected !== lastSelectedTab) requestAnimationFrame(() => selected.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }));
+  lastSelectedTab = selected;
   const split = $("#chat-split");
   if (split) {
     const divided = visibleChats(chatLayout).length > 1;
@@ -698,15 +755,17 @@ function renderChatTabs() {
     split.setAttribute("aria-label", split.title);
   }
 }
+let lastSelectedTab = null;
 
-function renameChatTabInline(item, id, before) {
+function renameChatTabInline(entry) {
+  const { item, key: id, title: before } = entry;
   const active = activeSession || state.sessionId;
   const running = id === state.sessionId
     ? state.running
     : !!secondaryChats.get(id)?.running;
   if (item.querySelector("input") || id !== active || running) return;
   const input = h("input.chat-tab-rename", { value: before === "Untitled chat" ? "" : before, "aria-label": "Chat title" });
-  clear(item).append(input);
+  item.replaceChildren(input);
   input.focus();
   input.select();
   let done = false;
@@ -723,8 +782,9 @@ function renameChatTabInline(item, id, before) {
         } catch (error) { toast(error.message || String(error)); }
       } else if (await change("rename_session", { id, title })) chatTabs.titles.set(id, title);
     }
+    item.replaceChildren(entry.tab, entry.close);
     renderChatTabs();
-    requestAnimationFrame(() => document.querySelector(`.chat-tab-item[data-session="${CSS.escape(id)}"] .chat-tab`)?.focus());
+    requestAnimationFrame(() => entry.tab.focus());
   };
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { event.preventDefault(); void finish(true); }
@@ -1904,7 +1964,7 @@ function showHome(focusComposer = true) {
 
 function destinationTarget(destination) {
   const entry = state.view && views.get(state.view);
-  const visibleChatTitle = state.view || $("#chat-tabs").hidden
+  const visibleChatTitle = (state.view && !appEl.dataset.conversationView) || $("#chat-tabs").hidden
     ? $("#session-title")
     : document.querySelector('.chat-tab[aria-selected="true"]');
   return entry?.el.querySelector("[data-destination-heading], h1, [role='heading']") || visibleChatTitle;
@@ -1971,6 +2031,7 @@ function showTitle() {
   // The face and name of who the chat is with replace the plain title and open its details.
   const chip = identity?.draw(chatIdentity());
   if (chip) el.replaceChildren(chip);
+  renderChatTabs();
   // A chat that runs on another computer says where.
   const place = !v && state.summary?.place;
   if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));

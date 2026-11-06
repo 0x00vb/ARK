@@ -104,6 +104,11 @@ pub struct ActionDescriptor {
     /// without a question in [`ExecutionMode::Auto`]. False is the safe default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_eligible: bool,
+    /// Offered and runnable in [`ExecutionMode::Plan`] although it is `Mutate`. For an action
+    /// that changes no project state, only the authority of the next turn, so that a person in
+    /// Plan can still leave it. It must also be `person_only`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stays_in_plan: bool,
 }
 
 /// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
@@ -164,7 +169,15 @@ impl ActionDescriptor {
             person_only: false,
             grant: None,
             auto_eligible: false,
+            stays_in_plan: false,
         }
+    }
+
+    /// See [`ActionDescriptor::stays_in_plan`]. Implies [`person_only`](Self::person_only).
+    pub fn stays_in_plan(mut self) -> Self {
+        self = self.person_only();
+        self.stays_in_plan = true;
+        self
     }
 
     pub fn person_only(mut self) -> Self {

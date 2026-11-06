@@ -31,6 +31,7 @@ pub mod interaction;
 pub mod labels;
 pub mod links;
 pub mod logging;
+mod mode;
 pub mod orchestration;
 pub mod plugins;
 pub mod remote;

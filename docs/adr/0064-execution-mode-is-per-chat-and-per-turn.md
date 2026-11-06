@@ -1,6 +1,6 @@
 # 0064. Execution mode is per chat and frozen for a turn
 
-Status: Accepted
+Status: Accepted. Amended by 0104 (the composer control is gone; the mode changes by words).
 Date: 2026-10-11
 
 ## Context

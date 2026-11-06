@@ -1538,13 +1538,17 @@ impl Interaction {
     ) -> TurnEnd {
         self.refresh_names();
         ctl.recorder.lock().unwrap().start(input);
+        // What `mode.set` asked for in this turn; it applies when the turn has ended.
+        let requested_mode = crate::mode::Requested::default();
+        let mode_revision = self.session.execution_mode_revision();
+        let tools = self.model_tools(requested_mode.clone());
         let opts = TurnOptions {
             cancel: Some(ctl.cancel.clone()),
             approvals: ctl.ask.then(|| self.gate.clone()),
             focus: self.focus.clone(),
             steer: Some(ctl.steer.clone()),
             present: self.present,
-            tools: self.turn_tools(),
+            tools,
             execution_mode: self.session.execution_mode(),
         };
         let work_orchestrator = self.orchestrator.clone();
@@ -1621,6 +1625,14 @@ impl Interaction {
             })
             .await
         };
+        // The person approved it, so it applies even if the turn was cut short. A mode another
+        // client set meanwhile has a newer revision and wins.
+        let asked = requested_mode.lock().unwrap().take();
+        if let Some(mode) = asked {
+            if let Err(error) = session.set_execution_mode(ark.engine(), mode_revision, mode) {
+                tracing::warn!(%error, "the mode the chat asked for was not applied");
+            }
+        }
         if let (Some(orchestrator), Ok(Some(receipt))) = (&work_orchestrator, &admitted) {
             orchestrator
                 .close_general_work_models(&receipt.conversation)
@@ -1730,11 +1742,25 @@ impl Interaction {
             .collect()
     }
 
+    /// [`turn_tools`](Self::turn_tools) as a turn's model sees them, with the mode tool.
+    fn model_tools(&self, requested: crate::mode::Requested) -> Vec<ark_sdk::TurnTools> {
+        let mut tools = self.turn_tools();
+        tools.push(crate::mode::turn_tools(
+            self.session.execution_mode(),
+            requested,
+        ));
+        tools
+    }
+
     /// What the model receives, by source, and what ARK kept out.
     pub async fn context_view(&self) -> anyhow::Result<ContextView> {
         let preview = self
             .ark
-            .context_preview_with(&self.session, self.present, &self.turn_tools())
+            .context_preview_with(
+                &self.session,
+                self.present,
+                &self.model_tools(Default::default()),
+            )
             .await?;
         let (report, source, next) = match &self.last_context {
             Some(r) => (r.clone(), ContextSource::LastRequest, Some(preview.total)),
@@ -1747,7 +1773,12 @@ impl Interaction {
     pub async fn context_for_task(&self, task: &str) -> anyhow::Result<ContextView> {
         let report = self
             .ark
-            .context_preview_task(&self.session, self.present, &self.turn_tools(), task)
+            .context_preview_task(
+                &self.session,
+                self.present,
+                &self.model_tools(Default::default()),
+                task,
+            )
             .await?;
         Ok(ContextView::build(
             &report,

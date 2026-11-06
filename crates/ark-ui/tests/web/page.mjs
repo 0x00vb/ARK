@@ -45,7 +45,7 @@ async function finished(page, send) {
 }
 
 /// A new chat starts in Auto and runs project writes without a question. A scenario that tests the
-/// question itself sets Manual first, as a person does with Shift+Tab.
+/// question itself sets Manual first, as the model does when asked in words.
 async function manual(page) {
   await page.locator("#app.ready").waitFor();
   await page.waitForFunction(() => window.ark.summary()?.execution_mode === "auto");
@@ -441,10 +441,8 @@ const scenarios = {
       view.render([...turns, { key: "run", input: "Keep going", note: "From planner", activity: [{ kind: "tool", label: "Reading notes", call: "x", action: "notes.read" }], working: { label: "Working", since: Date.now() - 3000 } }]);
       await new Promise((ok) => setTimeout(ok, 700));
       const run = [...pane.querySelectorAll(".turn")].pop();
-      const mode = document.querySelector("#mode-chip").textContent;
       const input = pane.querySelector("textarea");
       input.focus();
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
       input.value = "Next step";
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
       const chatShape = shape(main), viewShape = shape(pane);
@@ -476,8 +474,8 @@ const scenarios = {
         same: JSON.stringify(chatShape) === JSON.stringify(viewShape), chat: chatShape, view: viewShape, drift, kept,
         note: run.querySelector(".user-note")?.textContent, open: run.querySelector(".work")?.dataset.open,
         elapsed: run.querySelector(".working-line .elapsed")?.textContent, inspectable: !!run.querySelector(".act.inspectable"),
-        controls: [...pane.querySelectorAll(".composer .model-chip, .composer .mode-chip, .composer .attach")].length,
-        mode: document.querySelector("#mode-chip").textContent === mode, sent,
+        controls: [...pane.querySelectorAll(".composer .model-chip, .composer .attach")].length,
+        sent,
       };
     });
     assert.ok(result.same, `chat ${JSON.stringify(result.chat)} view ${JSON.stringify(result.view)}`);
@@ -488,7 +486,6 @@ const scenarios = {
     assert.match(result.elapsed, /^\d+s$/, "elapsed time without an Esc hint");
     assert.equal(result.inspectable, false);
     assert.equal(result.controls, 0);
-    assert.equal(result.mode, true, "Shift+Tab in the view leaves the chat's mode alone");
     assert.deepEqual(result.sent, ["Next step"]);
     assert.equal(result.stored, true, "after reset, turns do not rise in");
     assert.deepEqual(result.notices, ["notice tone-error: Provider unavailable", "notice tone-muted: Stopped.", "notice tone-muted: Paused"]);
@@ -3043,6 +3040,12 @@ async function chatWorkspacePolish(page) {
     await page.locator("#new-session").click();
     await page.waitForFunction((id) => window.ark.summary().session.id !== id, before);
   }
+  await page.waitForFunction(() => {
+    const list = document.querySelector("#chat-tab-list");
+    const chosen = list.querySelector('[data-selected="true"]').getBoundingClientRect();
+    const bounds = list.getBoundingClientRect();
+    return chosen.right > bounds.left && chosen.left < bounds.right;
+  });
   const overflow = await page.evaluate(() => {
     const list = document.querySelector("#chat-tab-list");
     const selected = list.querySelector('[data-selected="true"]');

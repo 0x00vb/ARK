@@ -148,3 +148,5 @@ Local integration decisions:
 - [0102-a-system-prompt-the-same-every-turn](0102-a-system-prompt-the-same-every-turn.md)
 
 - [0103-a-calm-chat-page](0103-a-calm-chat-page.md)
+
+- [0104-the-chat-changes-its-own-mode-on-request](0104-the-chat-changes-its-own-mode-on-request.md)

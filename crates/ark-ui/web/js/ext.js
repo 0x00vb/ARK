@@ -52,8 +52,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      Optional `model.open(anchor)` opens the consumer's real model picker.
 //                      Optional `files.captureOrigin()` runs before the chooser opens and returns
 //                      `{ uploadApi, appendDraft, progressTarget, started?, finished? }`, all bound to that origin.
-//                      `uploads` is this view's upload container. Mode controls require a real
-//                      execution contract and are absent from projected task conversations.
+//                      `uploads` is this view's upload container.
 //                      `turns` take `chat_read`'s transcript shape plus `key`, `note`,
 //                      `working: { label, since }`, `status`, `after` (an app's node under
 //                      the reply), `streaming` (text being written now) and `approvals`

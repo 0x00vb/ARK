@@ -1,3 +1,13 @@
+# Core 0.37.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.37.0 (2026-11-06), over v0.36.0 (dd9407b). A chat changes its own mode when asked (ADR 0104) |
+| Change | `mode.set` tool (person approves every change, applies from the next message), no mode chip, Send at the right edge, the open-chat strip stays over a new chat. Breaking: `createChatSurface` and `chatView` drop `mode` and `controls` |
+| Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). No mode indicator on the page |
+| Checks | fmt, protocol, clippy, release build, simulated benchmark (no delta), tests 128 binaries with only the 5 `ark-browser` Chrome-start timeouts failing, web fixtures 99 of 99, real-host page suite 61 of 67 (the same 6 fail on v0.36.0). Not run: live benchmark |
+| Consumer | Desktop 0.12.0 pins this tag once published |
+
 # Core 0.36.0 release
 
 | Release state | Value |
@@ -5,7 +15,7 @@
 | Latest tag | v0.36.0 (2026-11-06), over v0.35.0 (5b97a81). A calm chat page (ADR 0103). Breaking: Work and Automations pages removed |
 | Change | Rail with `ark.rail` pins, title-bar identity chip and details pane, local greeting, composer chips hidden, new chats set to Auto |
 | Checks | Web fixtures pass (work-state 27, project-section 42, upload-drafts 15, compose-append 3). Real-host page suite serial: 61 pass, 6 fail, the same 6 fail on v0.35.0 (`an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`, `steering_lands_where_it_was_read_and_replays_the_same`, `streamed_text_keeps_its_last_chunk_and_answers_once`, `text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once`, `the_window_on_a_runtime_elsewhere_has_its_controls_and_a_way_back`). Three independent reviews triaged and fixed |
-| Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). An agent cannot change the mode on request yet |
+| Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary).  |
 | Consumer | Desktop 0.11.0 pins this tag; published 2026-11-06 |
 | Verification | Tag on `origin` and `github`. Same tree: fmt, clippy, release build, simulated benchmark, node 22 of 22, WebKit fixtures 98 of 98, page suite 61 of 67 (the same 6 fail on v0.35.0). Fresh clone via `verify-release.sh v0.36.0` passed protocol, version and clippy, then stopped at the 5 `ark-browser` Chrome-start timeouts (environment) |
 

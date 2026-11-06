@@ -1113,7 +1113,7 @@ impl Harness {
                     continue;
                 };
 
-                if self.execution_mode == ExecutionMode::Plan && desc.risk == RiskTier::Mutate {
+                if !self.descriptor_available(&desc) {
                     flush!();
                     round.push(Message::tool_result(
                         call,
@@ -2838,7 +2838,9 @@ impl Harness {
     }
 
     fn descriptor_available(&self, descriptor: &ark_core::ActionDescriptor) -> bool {
-        self.execution_mode != ExecutionMode::Plan || descriptor.risk != RiskTier::Mutate
+        self.execution_mode != ExecutionMode::Plan
+            || descriptor.risk != RiskTier::Mutate
+            || descriptor.stays_in_plan
     }
 
     fn action_available(&self, engine: &Engine, name: &str) -> bool {

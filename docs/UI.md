@@ -343,36 +343,16 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
   and an app's bundle can be checked through its browser transport.
 
-## Automations
+## The calm page
 
-Automations is a list of cards, one per automation. A card holds its name, its steps in plain
-words (one text box each, up to seven), when it runs and Run. Typing saves after a short pause.
-Step names come from their first line. Each step receives what the step before it produced, and
-a final Result step returns what the last one produced. Fields the card does not show (inputs,
-authority, step targets and models, webhook setup) are kept as saved.
+ADR 0103. The fixed rail holds Chat, the app's views, what the app pinned with `ark.rail`, and the
+account. There are no Work or Automations pages: an agent makes and runs them when asked.
 
-When offers When I run it, Every day, Weekdays, Every hour and Custom (cron). A timed card shows
-its next run and an On switch: on prepares and activates the saved revision, off pauses it.
-Turning on asks first when the automation names agents or allows actions. An edit to an active
-automation goes live by itself only when it grants nothing the running revision did not (same
-models and agents, no new actions, same event endpoint). Otherwise the switch shows a middle
-state and the card says the changes are not on yet; the switch turns them on after the person
-confirms. Changing an active automation to When I run it pauses it. Empty step boxes are not
-saved. A reload that arrives while the person is in a card waits until focus leaves the cards.
-Schedules made before automations are read-only cards that open the schedule panel.
-
-Run starts the saved revision and opens the run's conversation in the normal chat. There is no
-separate run or ticket page.
-
-## Work
-
-Work is a composer with the open work under it, grouped as Needs you, Working, Waiting and To do.
-The composer is the shared chat composer. Sending admits general work (or the chosen agent's,
-when the project has agents) and the new row appears under Working. A row opens its conversation
-in the normal chat; a to-do without a conversation opens its ticket on the board. Failed and
-interrupted work is listed under Needs you. A row's context menu has Stop, Start, Retry, Mark
-resolved and Archive when they apply. A retry of the same text reuses the admitted request.
-View all moves the composer to the top and shows the project board; Show less or Escape returns.
+| Part | Behavior |
+|---|---|
+| Composer | No model or mode chip. The model chip shows while no model is chosen. The mode chip shows for a mode the person chose (Plan, Manual). Shift+Tab cycles the mode. A chat with `execution_mode_revision` 0 runs in Auto |
+| Title bar | A chip with the chat's face and name opens the details in the side pane: face, name, description, model row (the app's picker, with the provider's mark when `modelPicker.mark` exists). An app view supplies it with `identity()` on its controller |
+| Empty chat | Nothing, then a typing mark for one second, then one line from `greeting.js`, with the first word of `ark.profile()` when there is one. Not sent to the model, not stored. A chat already greeted in this window shows its line at once |
 
 A consumer can mark its agent chat view with `agentConversation: true`. The shared
 `ark.openAgentChat(name, conversation)` opens that view with `{name}` through the scoped

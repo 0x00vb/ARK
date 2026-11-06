@@ -1,12 +1,12 @@
-# Calm chat page, ready on branch minimal-ui (not released)
+# Core 0.36.0 release
 
-| State | Value |
+| Release state | Value |
 | --- | --- |
-| Branch | `minimal-ui` in worktree `ark-minimal-ui`, over v0.35.0 (5b97a81). Next tag would be v0.36.0 (Breaking: Work and Automations pages removed) |
-| Change | ADR 0103: rail with `ark.rail` pins, title-bar identity chip and details pane, local greeting, composer chips hidden, new chats set to Auto |
+| Latest tag | v0.36.0 (2026-11-06), over v0.35.0 (5b97a81). A calm chat page (ADR 0103). Breaking: Work and Automations pages removed |
+| Change | Rail with `ark.rail` pins, title-bar identity chip and details pane, local greeting, composer chips hidden, new chats set to Auto |
 | Checks | Web fixtures pass (work-state 27, project-section 42, upload-drafts 15, compose-append 3). Real-host page suite serial: 61 pass, 6 fail, the same 6 fail on v0.35.0 (`an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`, `steering_lands_where_it_was_read_and_replays_the_same`, `streamed_text_keeps_its_last_chunk_and_answers_once`, `text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once`, `the_window_on_a_runtime_elsewhere_has_its_controls_and_a_way_back`). Three independent reviews triaged and fixed |
-| Not done | `scripts/ci.sh` in full (clippy, workspace tests, release build: needs more disk than was free), version bump, tag, push to `origin` and `github`, `verify-release.sh`. `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). An agent cannot change the mode on request yet |
-| Then | Bump Desktop's pin to the new tag |
+| Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). An agent cannot change the mode on request yet |
+| Consumer | Desktop 0.11.0 pins this tag |
 
 # Core 0.35.0 release
 

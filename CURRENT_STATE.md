@@ -5,7 +5,8 @@
 | Latest tag | v0.35.0 (2026-11-05). Claude Code serves ARK's system prompt from its cache (ADR 0102). |
 | Change | The system prompt names no project; on Claude Code a turn's preloaded actions arrive with the second request; a reply after Claude Code's structured-output enforcement is not asked again |
 | Measured | 5 coding tasks x 3, live `claude:sonnet`: est. cost per success $0.080 to $0.047 (Claude Code $0.069), fresh input 211k to 88k tokens. Evidence `../board/evidence/ark-vs-claude-code-20261105/` |
-| Consumer | Desktop 0.10.2 pins this tag |
+| Consumer | Desktop 0.10.2 pins this tag; published 2026-11-05 on the Mac download and updater |
+| Verification | Tag on `origin` and `github`. Fresh clone of `origin` at v0.35.0: version, fmt, clippy, release build, simulated benchmark (no delta) and 128 test binaries pass. Known environment failures only: 5 Chrome-start timeouts (`ark-browser`) and the 6 page tests that fail on v0.34.0 and v0.33.2 too. Logs `../board/evidence/ark-vs-claude-code-20261105/release/` |
 | Not covered | orchestrated agents (`agent.rs`) still name the project in their system prompt; Claude Code's own structured-output enforcement retry |
 
 # Core 0.34.0 release

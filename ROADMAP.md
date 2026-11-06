@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.35.0**: the system prompt is the same every turn, so Claude Code serves it from its cache (ADR 0102). |
-| Consumers | ARK Desktop 0.10.2 release train pins v0.35.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
+| Stable release | **v0.36.0**: a calm chat page. Pinned agents in the rail, the agent chip and details pane, a local greeting. The Work and Automations pages are removed (ADR 0103). |
+| Consumers | ARK Desktop 0.11.0 release train pins v0.36.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

@@ -240,7 +240,7 @@ const api = {
   contextMenu,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
   refreshNavigation: () => topbar?.render(),
-  refreshModel: () => composer.setModel(state.summary?.model),
+  refreshModel: () => { composer.setModel(state.summary?.model); showTitle(); },
   setExecutionMode: async (mode) => {
     try {
       const summary = await transport.call("execution_mode", {
@@ -331,15 +331,23 @@ const RESOURCE_METHODS = {
   picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
 };
 
-/// A chat nobody chose a mode for (revision 0, still Manual) is set to Auto once, through the
-/// same call a chosen mode uses, so the host and the page agree before the first message. A
-/// failure leaves the chat in Manual with its chip showing.
+/// A new chat nobody has written in and nobody chose a mode for (revision 0, Manual, no turns) is
+/// set to Auto once, through the call a chosen mode uses, so the host and the page agree before
+/// the first message. An older chat keeps the authority it has. A failure leaves the chat in
+/// Manual with its chip showing, and is tried again after a few seconds.
 const adopted = new Set();
+const adopting = new Map();
 function adoptAuto(summary, set) {
   const id = summary?.session?.id;
-  if (!id || summary.execution_mode_revision || summary.execution_mode !== "manual" || adopted.has(id)) return;
+  if (!id || summary.session.turns || summary.execution_mode_revision || summary.execution_mode !== "manual" || adopted.has(id)) return;
   adopted.add(id);
-  set().catch(() => {});
+  const pending = set()
+    .catch((error) => {
+      console.error("Could not set Auto", error);
+      setTimeout(() => adopted.delete(id), 5000);
+    })
+    .finally(() => adopting.delete(id));
+  adopting.set(id, pending);
 }
 
 function activeSummary() {
@@ -788,7 +796,10 @@ class SecondaryChat {
     this.summary = summary;
     this.composer.setModel(summary.model);
     this.composer.setExecutionMode(summary.execution_mode || "manual", summary.execution_mode_revision || 0);
-    adoptAuto(summary, async () => this.applySummary(await transport.call("chat_execution_mode", { session: this.session, mode: "auto", revision: 0, model: summary.model })));
+    adoptAuto(summary, async () => {
+      const adoptedSummary = await transport.call("chat_execution_mode", { session: this.session, mode: "auto", revision: 0, model: summary.model });
+      if (secondaryChats.get(this.session) === this) this.applySummary(adoptedSummary);
+    });
     chatTabs.titles.set(this.session, summary.session.title || "Untitled chat");
     if (detachedWindow && activeSession === this.session) {
       state.summary = summary;
@@ -808,6 +819,8 @@ class SecondaryChat {
   async submit(text) {
     text = String(text || "").trim();
     if (!text || this.running) return;
+    await adopting.get(this.session);
+    if (this.running) return;
     this.thread.begin(text).local = true;
     this.setRunning(true);
     try {
@@ -1311,6 +1324,7 @@ async function submit(text) {
       return toast(e.message || String(e));
     }
   }
+  await adopting.get(state.sessionId);
   thread.begin(text).local = true;
   setRunning(true);
   try {
@@ -1393,6 +1407,7 @@ async function loadEarlier(before) {
 function setRunning(on) {
   state.running = on;
   composer.setRunning(on);
+  showTitle();
   appEl.dataset.running = String(on);
   places?.show(state.summary, on);
 }
@@ -1436,9 +1451,10 @@ function applySummary(s) {
   composer.setModel(s.model);
   composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
   adoptAuto(s, async () => {
-    const summary = await transport.call("execution_mode", { mode: "auto", revision: 0 });
+    const summary = await transport.call("chat_execution_mode", { session: s.session.id, mode: "auto", revision: 0, model: s.model });
     if (state.sessionId === s.session.id) applySummary(summary);
   });
+  showTitle();
   rememberTab(s);
   if (changed) {
     // Promotion disposes the secondary composer and saves its latest draft first.
@@ -1932,7 +1948,7 @@ function chatIdentity() {
     model: {
       label: active.model.textContent,
       mark: () => picker?.mark?.(spec) || null,
-      disabled: state.running,
+      disabled: secondaryChats.get(activeSession)?.running ?? state.running,
       open: (anchor) => active.modelMenu(anchor),
     },
   };

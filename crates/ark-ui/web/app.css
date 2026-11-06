@@ -308,7 +308,10 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   padding: 0 6px 10px;
   position: relative; z-index: 2;
 }
-.workspace-destinations, .rail-pins, .rail-item { display: contents; }
+.workspace-destinations, .rail-item { display: contents; }
+/* Pins scroll inside their own box, so the account stays reachable however many are pinned. */
+.rail-pins { min-height: 0; flex: 0 1 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; overflow-y: auto; scrollbar-width: none; }
+.rail-pins::-webkit-scrollbar { display: none; }
 .destination-drag { width: 100%; height: 44px; flex: none; }
 .app[data-shell="browser"] .destination-drag { height: 44px; }
 .destination {
@@ -499,6 +502,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .app[data-compact="true"] .destination-drag { display: none; }
 .app[data-compact="true"] .destination { width: min(144px, 36vw); min-height: 44px; height: 44px; flex-direction: row; gap: 7px; padding: 0 14px; }
 .app[data-compact="true"] .destination-spacer { display: none; }
+.app[data-compact="true"] .rail-pins { flex-direction: row; min-width: 0; overflow: auto hidden; }
 .app[data-compact="true"] .destination-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; font-size: 12px; }
 .app[data-compact="true"] .main { grid-area: 1 / 1; }
 .app[data-compact="true"] .pane { grid-area: 1 / 2; }

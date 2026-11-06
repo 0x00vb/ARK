@@ -22,6 +22,7 @@ export class Identity {
   /// The chip for `identity`, to sit where the title text was; null when the view has none.
   draw(identity) {
     if (!identity) {
+      if (this.api.panelOpen?.(DETAILS)) this.api.closePanel(DETAILS);
       this.chip.remove();
       for (const redraw of this.redraws) redraw(null);
       return null;
@@ -51,7 +52,7 @@ export class Identity {
       latest = identity;
       // Same data, same pane: a redraw would drop the focus on the model row and detach its open menu.
       const model = identity?.model;
-      const sig = identity ? JSON.stringify([identity.name, identity.description, model?.label, model?.disabled, !!model?.mark]) : "";
+      const sig = identity ? JSON.stringify([identity.name, identity.description, model?.label, model?.disabled, model?.disabledReason, !!model?.mark]) : "";
       if (sig === drawn && el.firstChild) return;
       drawn = sig;
       clear(el);
@@ -61,7 +62,7 @@ export class Identity {
         h("h2.identity-title", identity.name),
         identity.description ? h("p.identity-description", identity.description) : null,
         model ? h("button.identity-row", {
-          type: "button", "aria-haspopup": "menu", disabled: !!model.disabled,
+          type: "button", "aria-haspopup": "menu", disabled: !!model.disabled, title: model.disabled ? model.disabledReason : null,
           onclick: (event) => latest?.model?.open(event.currentTarget),
         },
           h("span.identity-row-label", "Model"),

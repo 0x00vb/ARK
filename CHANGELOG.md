@@ -20,7 +20,7 @@
 ### Changed
 
 - The composer hides the model chip until no model is chosen and the mode chip while the mode
-  is Auto. A chat nobody chose a mode for is set to Auto before its first message.
+  is Auto. A new chat with no turns is set to Auto before its first message; older chats keep their mode.
 
 ## [0.35.0] - 2026-11-05
 

@@ -6,7 +6,8 @@
 | Change | `mode.set` tool (person approves every change, applies from the next message), no mode chip, Send at the right edge, the open-chat strip stays over a new chat. Breaking: `createChatSurface` and `chatView` drop `mode` and `controls` |
 | Known gaps | `chat_execution_mode` emits no summary event (other windows of a chat learn its mode on their next summary). No mode indicator on the page |
 | Checks | fmt, protocol, clippy, release build, simulated benchmark (no delta), tests 128 binaries with only the 5 `ark-browser` Chrome-start timeouts failing, web fixtures 99 of 99, real-host page suite 61 of 67 (the same 6 fail on v0.36.0). Not run: live benchmark |
-| Consumer | Desktop 0.12.0 pins this tag once published |
+| Verification | Tag on `origin` and `github`. Fresh clone via `verify-release.sh v0.37.0` passed fmt, protocol, version and clippy, then stopped at the `ark-browser` Chrome-start timeouts (environment, as on v0.36.0) |
+| Consumer | Desktop 0.12.0 pins this tag; published 2026-11-06 |
 
 # Core 0.36.0 release
 

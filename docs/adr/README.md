@@ -146,3 +146,5 @@ Local integration decisions:
 - [0097-one-chat-for-work-and-automation-runs](0097-one-chat-for-work-and-automation-runs.md)
 
 - [0102-a-system-prompt-the-same-every-turn](0102-a-system-prompt-the-same-every-turn.md)
+
+- [0103-a-calm-chat-page](0103-a-calm-chat-page.md)

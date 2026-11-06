@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking
+
+- The Work and Automations pages are removed (ADR 0103). Delete calls to
+  `openView("work")`, `openView("schedules")`, `openWork` and the `registerWork` and
+  `registerSchedules` page modules. The runtime operations are unchanged.
+- The page no longer draws the app's `welcome` title, subtitle or suggestions. An empty chat
+  shows a typing mark, then one local line.
+
+### Added
+
+- `ark.rail({ id, render(el, api) })`: buttons in the fixed rail for what the person pinned.
+- `ark.profile(() => ({ name }))`: the person's name for the first line of an empty chat.
+- `identity()` on a view's controller, and an optional `mark(model)` on `ark.modelPicker`: the
+  title-bar chip and the details pane.
+
+### Changed
+
+- The composer hides the model chip until no model is chosen and the mode chip until a mode
+  other than Auto is chosen. A chat nobody set a mode for runs in Auto.
+
 ## [0.35.0] - 2026-11-05
 
 ### Changed

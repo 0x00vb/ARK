@@ -55,21 +55,78 @@ export class Composer {
       button: this.mic,
       status: this.dictationStatus,
       insert: (text) => this.insertDictation(text),
+      beginLive: () => this.beginLive(),
+      live: (text) => this.showLive(text),
+      endLive: () => this.endLive(),
     });
     this.changed();
   }
 
+  /// Words heard so far stand in the draft where the transcript will land. Typing waits until
+  /// Stop, so nothing the person types is overwritten by the next preview.
+  beginLive() {
+    this.live = { at: Math.max(0, Math.min(this.caret ?? this.input.value.length, this.input.value.length)), text: "" };
+    this.input.readOnly = true;
+  }
+
+  /// Where the interim words are now, or -1 when the draft no longer holds them.
+  liveAt() {
+    const live = this.live;
+    if (!live?.text) return live ? live.at : -1;
+    const value = this.input.value;
+    if (value.startsWith(live.text, live.at)) return live.at;
+    return value.indexOf(live.text);
+  }
+
+  /// Replace the interim words, or the empty spot where they will go, with `text`.
+  writeLive(text) {
+    const live = this.live;
+    const at = this.liveAt();
+    if (at < 0) { live.text = ""; return false; }
+    const value = this.input.value;
+    const before = value.slice(0, at);
+    const after = value.slice(at + live.text.length);
+    const left = text && before && !/\s$/.test(before) ? " " : "";
+    const right = text && after && !/^\s/.test(after) ? " " : "";
+    const written = text ? `${left}${text}${right}` : "";
+    this.input.value = before + written + after;
+    live.at = at;
+    live.text = written;
+    this.caret = at + written.length;
+    this.changed();
+    return true;
+  }
+
+  showLive(text) {
+    if (this.live) this.writeLive(String(text).trim());
+  }
+
+  endLive() {
+    if (!this.live) return;
+    this.writeLive("");
+    this.live = null;
+    this.input.readOnly = false;
+  }
+
   insertDictation(text) {
     const returnToInput = document.activeElement === this.mic || document.activeElement === document.body;
-    const at = Math.max(0, Math.min(this.caret ?? this.input.value.length, this.input.value.length));
-    const before = this.input.value.slice(0, at);
-    const after = this.input.value.slice(at);
-    const left = before && !/\s$/.test(before) ? " " : "";
-    const right = after && !/^\s/.test(after) ? " " : "";
-    const inserted = `${left}${String(text).trim()}${right}`;
-    this.input.value = before + inserted + after;
-    this.caret = at + inserted.length;
-    this.changed();
+    const words = String(text).trim();
+    if (this.live && this.writeLive(words)) {
+      this.live = null;
+      this.input.readOnly = false;
+    } else {
+      this.live = null;
+      this.input.readOnly = false;
+      const at = Math.max(0, Math.min(this.caret ?? this.input.value.length, this.input.value.length));
+      const before = this.input.value.slice(0, at);
+      const after = this.input.value.slice(at);
+      const left = before && !/\s$/.test(before) ? " " : "";
+      const right = after && !/^\s/.test(after) ? " " : "";
+      const inserted = `${left}${words}${right}`;
+      this.input.value = before + inserted + after;
+      this.caret = at + inserted.length;
+      this.changed();
+    }
     if (returnToInput) this.input.focus();
     if (document.activeElement === this.input) this.input.setSelectionRange(this.caret, this.caret);
     this.input.dispatchEvent(new Event("input", { bubbles: true }));

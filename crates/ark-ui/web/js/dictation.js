@@ -4,6 +4,9 @@ import { icon } from "./dom.js";
 const OUT_RATE = 16000;
 const MAX_SAMPLES = 8 * 60 * OUT_RATE;
 const CHUNK = 256 * 1024;
+const FLUSH_MS = 700;
+const PREVIEW_MS = 500;
+const MIN_PREVIEW = OUT_RATE / 2;
 let lease = null;
 
 function reason(error) {
@@ -25,8 +28,9 @@ function b64(bytes) {
 }
 
 export class DictationController {
-  constructor({ api, button, status, insert }) {
-    Object.assign(this, { api, button, status, insert });
+  constructor({ api, button, status, insert, live, beginLive, endLive }) {
+    Object.assign(this, { api, button, status });
+    this.options = { insert, live, beginLive, endLive };
     this.token = 0;
     this.checkToken = 0;
     this.onClick = () => void this.toggle();
@@ -85,10 +89,12 @@ export class DictationController {
     return !unavailable;
   }
 
+  /// The button is the only sign of dictation: the microphone, or a square while it listens.
+  /// Words appear only for what the person must know: the speech model downloading, a failure.
   paint(phase, line = "") {
     if (this.disposed) return;
     this.phase = phase;
-    const active = ["requesting", "recording", "preparing", "transcribing"].includes(phase);
+    const active = ["requesting", "recording", "finishing"].includes(phase);
     this.button.replaceChildren(icon(active ? "stop" : "mic"));
     this.button.setAttribute("aria-label", phase === "recording" ? "Stop dictation" : active ? "Cancel dictation" : phase === "unavailable" ? "Dictation unavailable" : "Start dictation");
     this.button.setAttribute("aria-pressed", String(phase === "recording"));
@@ -96,13 +102,13 @@ export class DictationController {
     this.button.dataset.state = phase;
     this.status.textContent = line;
     this.status.hidden = !line;
-    this.status.setAttribute("aria-live", phase === "recording" ? "off" : "polite");
+    this.status.setAttribute("aria-live", "polite");
   }
 
   async toggle() {
     if (this.disposed || this.phase === "checking") return;
     if (this.phase === "recording") return this.stop();
-    if (["requesting", "preparing", "transcribing"].includes(this.phase)) return this.cancel();
+    if (["requesting", "finishing"].includes(this.phase)) return this.cancel();
     if (this.unavailable) {
       const token = this.token;
       this.paint("checking");
@@ -121,8 +127,12 @@ export class DictationController {
     this.recordingCall = call;
     this.parts = [];
     this.samples = 0;
+    this.sent = 0;
+    this.index = 0;
     this.limit = false;
     this.downloading = false;
+    this.preview = true;
+    this.flushing = Promise.resolve();
     clearTimeout(this.completeTimer);
     this.paint("requesting");
     try {
@@ -149,15 +159,11 @@ export class DictationController {
         if (token === this.token) this.fail(error);
         return null; // Begin failure must release capture even without Stop.
       });
-      this.started = performance.now();
       this.statusTimer = setInterval(() => void this.providerLine(token, call), 700);
-      this.timer = setInterval(() => {
-        if (token !== this.token || this.phase !== "recording") return;
-        const elapsed = Math.floor((performance.now() - this.started) / 1000);
-        const model = this.downloading ? " · downloading 148 MB speech model" : "";
-        this.paint("recording", `Listening · ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}${model}`);
-      }, 1000);
-      this.paint("recording", "Listening · 0:00");
+      this.flushTimer = setInterval(() => void this.flush(token, call), FLUSH_MS);
+      this.options.beginLive?.();
+      this.paint("recording");
+      void this.preview_loop(token, call);
     } catch (error) { if (token === this.token) this.fail(error); }
   }
 
@@ -165,12 +171,50 @@ export class DictationController {
     try {
       const state = await call("dictation_status");
       if (token !== this.token) return;
-      this.downloading = state.status === "downloading";
-      if (["preparing", "transcribing"].includes(this.phase)) {
-        this.paint(this.phase, this.downloading ? "Downloading 148 MB speech model"
-          : this.phase === "transcribing" ? "Transcribing" : "Preparing speech recognition");
-      }
+      const downloading = state.status === "downloading";
+      if (downloading === this.downloading) return;
+      this.downloading = downloading;
+      if (["recording", "finishing"].includes(this.phase)) this.paint(this.phase, downloading ? "Downloading speech model" : "");
     } catch {}
+  }
+
+  /// Send what was heard since the last call. Calls queue, so chunks arrive in order.
+  flush(token, call) {
+    const run = this.flushing.then(async () => {
+      if (token !== this.token || !this.parts.length) return;
+      const upload = await this.uploadPromise;
+      if (!upload || token !== this.token) return;
+      const parts = this.parts;
+      this.parts = [];
+      const pcm = new Int16Array(parts.reduce((all, part) => all + part.length, 0));
+      let offset = 0;
+      for (const part of parts) { pcm.set(part, offset); offset += part.length; }
+      const bytes = new Uint8Array(pcm.buffer);
+      for (let at = 0; at < bytes.length; at += CHUNK) {
+        if (token !== this.token) return;
+        await call("dictation_chunk", { id: upload.id, index: this.index++, data: b64(bytes.subarray(at, at + CHUNK)) });
+      }
+      this.sent += pcm.length;
+    });
+    this.flushing = run.catch((error) => { if (token === this.token) this.fail(error); });
+    return this.flushing;
+  }
+
+  /// While recording, ask for the words so far and show them where the transcript will land.
+  /// A computer that cannot preview (an older ARK there) leaves the words to Stop.
+  async preview_loop(token, call) {
+    while (token === this.token && this.phase !== "finishing") {
+      await new Promise((resolve) => setTimeout(resolve, PREVIEW_MS));
+      const upload = await this.uploadPromise;
+      if (!upload || token !== this.token || this.phase !== "recording" || !this.preview) continue;
+      if (this.sent < MIN_PREVIEW) continue;
+      try {
+        const result = await call("dictation_preview", { id: upload.id });
+        if (token === this.token && this.phase === "recording" && typeof result?.text === "string") this.options.live?.(result.text);
+      } catch (error) {
+        if (token === this.token) this.preview = false;
+      }
+    }
   }
 
   capture(input) {
@@ -192,7 +236,7 @@ export class DictationController {
   }
 
   releaseCapture() {
-    clearInterval(this.timer);
+    clearInterval(this.flushTimer);
     clearInterval(this.statusTimer);
     this.node?.disconnect();
     this.source?.disconnect();
@@ -207,24 +251,14 @@ export class DictationController {
     const call = this.recordingCall;
     const pending = this.uploadPromise;
     this.releaseCapture();
-    this.paint("preparing", this.limit ? "Eight-minute limit reached · transcribing" : "Preparing speech recognition");
+    this.paint("finishing", this.downloading ? "Downloading speech model" : "");
     this.statusTimer = setInterval(() => void this.providerLine(token, call), 700);
     try {
-      await this.providerLine(token, call);
+      await this.flush(token, call);
       if (token !== this.token) return;
       const upload = await pending;
       if (!upload || token !== this.token) return;
-      const pcm = new Int16Array(this.samples);
-      let offset = 0;
-      for (const part of this.parts) { pcm.set(part, offset); offset += part.length; }
-      this.parts = [];
-      const bytes = new Uint8Array(pcm.buffer);
-      for (let index = 0, at = 0; at < bytes.length; index++, at += CHUNK) {
-        if (token !== this.token) return;
-        await call("dictation_chunk", { id: upload.id, index, data: b64(bytes.subarray(at, at + CHUNK)) });
-      }
-      if (token !== this.token) return;
-      this.paint("transcribing", this.downloading ? "Downloading 148 MB speech model" : "Transcribing");
+      if (this.sent < 3200 / 2) throw new Error("No speech was detected");
       const result = await call("dictation_finish", { id: upload.id });
       if (token !== this.token) return;
       clearInterval(this.statusTimer);
@@ -233,9 +267,8 @@ export class DictationController {
       this.recordingCall = null;
       if (lease === this) lease = null;
       if (!result.text?.trim()) throw new Error("No speech was detected");
-      this.insert(result.text);
-      this.paint("complete", "Dictation added");
-      this.completeTimer = setTimeout(() => token === this.token && this.paint("ready"), 2200);
+      this.options.insert(result.text);
+      this.paint("ready");
     } catch (error) { if (token === this.token) this.fail(error); }
   }
 
@@ -251,12 +284,13 @@ export class DictationController {
     this.parts = [];
     this.downloading = false;
     if (lease === this) lease = null;
+    this.options.endLive?.();
     this.paint("ready");
   }
 
   beforeSubmit() {
     if (this.phase === "recording") { void this.stop(); return true; }
-    return ["requesting", "preparing", "transcribing"].includes(this.phase);
+    return ["requesting", "finishing"].includes(this.phase);
   }
 
   dispose() {

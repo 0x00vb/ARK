@@ -427,8 +427,8 @@ impl Host {
     ) -> Option<anyhow::Result<Value>> {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         match method {
-            "dictation_status" | "dictation_begin" | "dictation_chunk" | "dictation_finish"
-            | "dictation_cancel" => {
+            "dictation_status" | "dictation_begin" | "dictation_chunk" | "dictation_preview"
+            | "dictation_finish" | "dictation_cancel" => {
                 // Empty means here, even if a held chat is now shown. Never follow focus.
                 let place = match params.get("place") {
                     Some(Value::String(place)) => place,

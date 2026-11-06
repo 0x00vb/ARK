@@ -73,6 +73,12 @@ mod held;
 
 const DICTATION_CHUNK: usize = 256 * 1024;
 const DICTATION_MAX: usize = 8 * 60 * 16_000 * 2;
+/// A live preview reads at least half a second and at most thirty seconds of audio. Speech
+/// older than the last twelve seconds is settled once its stretch ends three seconds back.
+const PREVIEW_MIN_SAMPLES: usize = 8_000;
+const PREVIEW_MAX_SAMPLES: usize = 30 * 16_000;
+const SETTLE_AFTER_MS: u64 = 12_000;
+const SETTLE_KEEP_MS: u64 = 3_000;
 
 struct DictationUpload {
     owner: String,
@@ -81,6 +87,33 @@ struct DictationUpload {
     bytes: usize,
     chunks: HashMap<u64, (usize, [u8; 32])>,
     touched: std::time::Instant,
+    /// Samples at the start of the recording whose words a preview has already settled.
+    settled: usize,
+    settled_text: String,
+    shown: String,
+    previewing: bool,
+}
+
+fn join_words(first: &str, second: &str) -> String {
+    let (first, second) = (first.trim(), second.trim());
+    match (first.is_empty(), second.is_empty()) {
+        (true, _) => second.to_string(),
+        (_, true) => first.to_string(),
+        _ => format!("{first} {second}"),
+    }
+}
+
+/// The recording from sample `from` on. The file stays positioned for the next chunk.
+fn read_recording(upload: &mut DictationUpload, from: usize) -> anyhow::Result<Vec<i16>> {
+    upload.file.flush()?;
+    upload.file.seek(SeekFrom::Start(from as u64 * 2))?;
+    let mut bytes = vec![0u8; (upload.bytes - upload.bytes % 2).saturating_sub(from * 2)];
+    upload.file.read_exact(&mut bytes)?;
+    upload.file.seek(SeekFrom::End(0))?;
+    Ok(bytes
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect())
 }
 
 fn begin_dictation_upload(
@@ -100,6 +133,10 @@ fn begin_dictation_upload(
             bytes: 0,
             chunks: HashMap::new(),
             touched: std::time::Instant::now(),
+            settled: 0,
+            settled_text: String::new(),
+            shown: String::new(),
+            previewing: false,
         },
     );
     Ok(id)
@@ -1052,21 +1089,101 @@ impl Host {
         if upload.bytes < 3_200 || upload.bytes % 2 != 0 {
             anyhow::bail!("the recording is empty or malformed");
         }
-        upload.file.flush()?;
-        upload.file.seek(SeekFrom::Start(0))?;
-        let mut bytes = Vec::with_capacity(upload.bytes);
-        upload.file.read_to_end(&mut bytes)?;
-        let pcm = bytes
-            .chunks_exact(2)
-            .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
-            .collect();
+        let settled = upload.settled;
+        let settled_text = std::mem::take(&mut upload.settled_text);
+        let pcm = read_recording(&mut upload, settled)?;
         let provider = self
             .transcription
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Dictation is not included in this app."))?;
         provider.prepare().await?;
-        let text = provider.transcribe(pcm, language).await?;
-        Ok(json!({ "text": text.trim() }))
+        let text = if settled == 0 {
+            provider.transcribe(pcm, language).await?
+        } else if pcm.len() < PREVIEW_MIN_SAMPLES / 4 {
+            String::new()
+        } else {
+            provider
+                .segments(pcm, language)
+                .await?
+                .iter()
+                .fold(String::new(), |all, segment| join_words(&all, &segment.text))
+        };
+        Ok(json!({ "text": join_words(&settled_text, &text) }))
+    }
+
+    /// The words of the recording so far, while it goes on. Speech older than the last twelve
+    /// seconds is settled and not read again, so each preview reads at most thirty seconds.
+    /// A preview that cannot run now (another is under way, too little audio, the model not
+    /// ready) answers the last text.
+    async fn dictation_preview(&self, params: &Value) -> anyhow::Result<Value> {
+        let owner = Self::dictation_owner(params)?;
+        let id = params.get("id").and_then(Value::as_str).unwrap_or("");
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let provider = self
+            .transcription
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Dictation is not included in this app."))?;
+        let (pcm, window) = {
+            let mut uploads = self.dictations.lock().unwrap();
+            let upload = uploads
+                .get_mut(id)
+                .ok_or_else(|| anyhow::anyhow!("dictation expired"))?;
+            if upload.owner != owner {
+                anyhow::bail!("dictation belongs to another client");
+            }
+            upload.touched = std::time::Instant::now();
+            let window = (upload.bytes / 2).saturating_sub(upload.settled);
+            let ready = provider.state().status == crate::transcription::Status::Ready;
+            if upload.previewing
+                || !ready
+                || !(PREVIEW_MIN_SAMPLES..=PREVIEW_MAX_SAMPLES).contains(&window)
+            {
+                return Ok(json!({ "text": upload.shown }));
+            }
+            upload.previewing = true;
+            let settled = upload.settled;
+            match read_recording(upload, settled) {
+                Ok(pcm) => (pcm, window),
+                Err(error) => {
+                    upload.previewing = false;
+                    return Err(error);
+                }
+            }
+        };
+        let result = provider.segments(pcm, language).await;
+        let mut uploads = self.dictations.lock().unwrap();
+        let Some(upload) = uploads.get_mut(id) else {
+            return Ok(json!({ "text": "" }));
+        };
+        upload.previewing = false;
+        let segments = result?;
+        let window_ms = window as u64 * 1000 / 16_000;
+        if window_ms >= SETTLE_AFTER_MS {
+            let limit = window_ms - SETTLE_KEEP_MS;
+            let count = segments
+                .iter()
+                .take_while(|segment| segment.end_ms <= limit)
+                .count();
+            if let Some(last) = segments[..count].last() {
+                for segment in &segments[..count] {
+                    upload.settled_text = join_words(&upload.settled_text, &segment.text);
+                }
+                upload.settled = (upload.settled + (last.end_ms * 16) as usize).min(upload.bytes / 2);
+            }
+            let tail = segments[count..]
+                .iter()
+                .fold(String::new(), |all, segment| join_words(&all, &segment.text));
+            upload.shown = join_words(&upload.settled_text, &tail);
+        } else {
+            let all = segments
+                .iter()
+                .fold(String::new(), |all, segment| join_words(&all, &segment.text));
+            upload.shown = join_words(&upload.settled_text, &all);
+        }
+        Ok(json!({ "text": upload.shown }))
     }
 
     /// The process is about to exit (SIGTERM, a deploy, the app quitting). Every run stops at its
@@ -4339,6 +4456,7 @@ impl Host {
             "dictation_begin" => self.dictation_begin(&params),
             "dictation_chunk" => self.dictation_chunk(&params),
             "dictation_cancel" => self.dictation_cancel(&params),
+            "dictation_preview" => self.dictation_preview(&params).await,
             "dictation_finish" => self.dictation_finish(&params).await,
             "hello" => {
                 // The person's zone, as their browser says it: "at 9" is their 9 also when

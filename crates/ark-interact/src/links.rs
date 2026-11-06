@@ -292,7 +292,7 @@ impl Links {
         let f = self.get(runtime)?;
         // A copy reads or writes a folder there: it may take longer than a call.
         let limit = match method {
-            "dictation_finish" => DICTATION,
+            "dictation_preview" | "dictation_finish" => DICTATION,
             name if name.starts_with("copy_") => COPY,
             _ => CALL,
         };

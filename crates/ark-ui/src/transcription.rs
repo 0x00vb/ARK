@@ -32,10 +32,34 @@ impl State {
     }
 }
 
+/// One stretch of speech in a transcript, timed from the start of the audio it was read from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Segment {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
     fn state(&self) -> State;
     async fn prepare(&self) -> anyhow::Result<()>;
     /// 16 kHz, mono, signed 16-bit PCM. Empty language means automatic detection.
     async fn transcribe(&self, pcm: Vec<i16>, language: Option<String>) -> anyhow::Result<String>;
+    /// The same audio as timed stretches of speech, so a live preview can settle the early ones
+    /// and read only the rest again. A provider without timings answers one stretch for the
+    /// whole audio, which is never settled.
+    async fn segments(
+        &self,
+        pcm: Vec<i16>,
+        language: Option<String>,
+    ) -> anyhow::Result<Vec<Segment>> {
+        let end_ms = pcm.len() as u64 * 1000 / 16_000;
+        let text = self.transcribe(pcm, language).await?;
+        Ok(vec![Segment {
+            start_ms: 0,
+            end_ms,
+            text,
+        }])
+    }
 }

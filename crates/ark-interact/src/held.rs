@@ -42,6 +42,7 @@ pub const CHAT_CALLS: &[&str] = &[
     "dictation_status",
     "dictation_begin",
     "dictation_chunk",
+    "dictation_preview",
     "dictation_finish",
     "dictation_cancel",
     // The project's copy there (ADR 0052, Project copy).

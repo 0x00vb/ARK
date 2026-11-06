@@ -2406,10 +2406,32 @@ scenarios.dictation = async (page) => {
     window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
   });
   await mic.click();
-  await page.waitForFunction(() => document.querySelector("#dictation-status")?.textContent === "Dictation added");
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready" && document.querySelector("#input").value.includes("Texto dictado."));
+  assert.equal(await page.locator("#dictation-status").isVisible(), false, "a finished dictation leaves no label");
   assert.equal(await input.inputValue(), "Hola 👋 Texto dictado. mundo", "UTF-16 caret and every draft character are preserved");
   assert.equal(await page.evaluate(() => window.__trackStopped), true, "the microphone is released");
   assert.equal(await input.evaluate((el) => el === document.activeElement), true, "completion does not steal focus");
+
+  // The words appear while the person talks, where the transcript will land, and the final
+  // text replaces them. Typing waits so a preview never overwrites what was typed.
+  await input.evaluate((el) => { el.focus(); el.setSelectionRange(4, 4); el.dispatchEvent(new Event("select")); });
+  const before = await input.inputValue();
+  dictationFixture.previewText = "hola";
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  assert.equal(await input.evaluate((el) => el.readOnly), true, "typing waits while listening");
+  assert.equal(await page.locator("#dictation-status").isVisible(), false, "listening has no label");
+  for (let i = 0; i < 3; i++) await sample();
+  await page.waitForFunction(() => document.querySelector("#input").value.includes("hola"));
+  dictationFixture.previewText = "hola mundo";
+  await page.waitForFunction(() => document.querySelector("#input").value.includes("hola mundo"));
+  assert.equal(await input.inputValue(), `${before.slice(0, 4)} hola mundo${before.slice(4)}`, "the preview stands at the caret");
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready");
+  assert.equal(await input.inputValue(), `${before.slice(0, 4)} Texto dictado.${before.slice(4)}`, "the final text replaces the preview");
+  assert.equal(await input.evaluate((el) => el.readOnly), false, "typing works again");
+  dictationFixture.previewText = "";
+  await input.fill(before);
 
   await page.evaluate(() => { window.__trackStopped = false; });
   await mic.click();
@@ -2445,7 +2467,7 @@ scenarios.dictation = async (page) => {
   await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
   await page.evaluate(() => window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(9600).fill(0.15) } }));
   await mic.click();
-  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready");
   await shot(page, "dictation-complete");
   await page.setViewportSize({ width: 390, height: 800 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
@@ -2467,12 +2489,12 @@ scenarios.dictation = async (page) => {
   await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
   await sample();
   await mic.click();
-  await page.locator("#dictation-status", { hasText: "Downloading 148 MB speech model" }).waitFor();
+  await page.locator("#dictation-status", { hasText: "Downloading speech model" }).waitFor();
   dictationFixture.downloading = false;
-  await page.locator("#dictation-status", { hasText: /^Transcribing$/ }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "finishing" && document.querySelector("#dictation-status").hidden);
   dictationFixture.releaseFinish();
   dictationFixture.finishWait = null;
-  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready");
 
   // Cancel while Begin is delayed, switch chats, then release the late upload. Cleanup must
   // still name the original computer and its result must not reach the new draft.
@@ -2501,7 +2523,7 @@ scenarios.dictation = async (page) => {
   await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
   await sample();
   await mic.click();
-  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready");
   assert.equal(dictationFixture.seen.filter((r) => r.method === "dictation_finish").at(-1).place, "vps", "pending-place dictation runs there before the first message");
 
   // A result arriving after a chat change is discarded, even when inference cannot be stopped.
@@ -2510,7 +2532,7 @@ scenarios.dictation = async (page) => {
   await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
   await sample();
   await mic.click();
-  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "transcribing");
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "finishing");
   await fixtureWait(() => dictationFixture.seen.filter((r) => r.method === "dictation_finish").length >= 3 && dictationFixture.active.size === 0);
   const secondSession = await page.evaluate(() => window.ark.summary().session.id);
   await page.evaluate(() => window.ark.newSession());
@@ -3705,6 +3727,7 @@ try {
         if (fixture.failChunk) { fixture.failChunk = false; return error("network failed"); }
         return answer({ next: Number(params.index || 0) + 1 });
       }
+      if (body.method === "dictation_preview") return answer({ text: fixture.previewText || "" });
       fixture.active.delete(params.id);
       await fixture.finishWait;
       return answer({ text: "Texto dictado." });

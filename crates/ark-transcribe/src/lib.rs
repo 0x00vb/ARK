@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once};
 
 use anyhow::Context as _;
-use ark_ui::transcription::{State, Status, TranscriptionProvider};
+use ark_ui::transcription::{Segment, State, Status, TranscriptionProvider};
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use sha2::{Digest, Sha256};
@@ -39,6 +39,23 @@ pub struct LocalWhisper {
     state: Arc<Mutex<State>>,
     preparing: tokio::sync::Mutex<()>,
     inference: Arc<tokio::sync::Semaphore>,
+    /// The loaded model, kept while dictation is in use so a live preview does not read 148 MB
+    /// from disk each time.
+    loaded: Arc<Mutex<Option<Loaded>>>,
+    releasing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct Loaded {
+    context: Arc<WhisperContext>,
+    used: std::time::Instant,
+}
+
+const KEEP_LOADED: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// Whisper writes `[BLANK_AUDIO]` or `(music)` for stretches without speech.
+fn is_marker(text: &str) -> bool {
+    let text = text.trim();
+    (text.starts_with('[') && text.ends_with(']')) || (text.starts_with('(') && text.ends_with(')'))
 }
 
 impl LocalWhisper {
@@ -62,6 +79,8 @@ impl LocalWhisper {
             state: Arc::new(Mutex::new(State::new(status))),
             preparing: tokio::sync::Mutex::new(()),
             inference: Arc::new(tokio::sync::Semaphore::new(1)),
+            loaded: Arc::new(Mutex::new(None)),
+            releasing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -139,6 +158,58 @@ impl TranscriptionProvider for LocalWhisper {
     }
 
     async fn transcribe(&self, pcm: Vec<i16>, language: Option<String>) -> anyhow::Result<String> {
+        let segments = self.read(pcm, language, false).await?;
+        Ok(segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>()
+            .trim()
+            .to_string())
+    }
+
+    async fn segments(
+        &self,
+        pcm: Vec<i16>,
+        language: Option<String>,
+    ) -> anyhow::Result<Vec<Segment>> {
+        let mut segments = self.read(pcm, language, true).await?;
+        segments.retain(|segment| !is_marker(&segment.text));
+        Ok(segments)
+    }
+}
+
+impl LocalWhisper {
+    fn context(
+        loaded: &Mutex<Option<Loaded>>,
+        model: &Path,
+    ) -> anyhow::Result<Arc<WhisperContext>> {
+        let mut slot = loaded.lock().unwrap();
+        if let Some(entry) = slot.as_mut() {
+            entry.used = std::time::Instant::now();
+            return Ok(entry.context.clone());
+        }
+        let context = Arc::new(
+            WhisperContext::new_with_params(
+                model.to_string_lossy().as_ref(),
+                WhisperContextParameters::default(),
+            )
+            .context("speech model could not be loaded")?,
+        );
+        *slot = Some(Loaded {
+            context: context.clone(),
+            used: std::time::Instant::now(),
+        });
+        Ok(context)
+    }
+
+    /// Timed stretches of speech. `timed` asks Whisper for timestamps, which a preview needs to
+    /// know where speech can be settled.
+    async fn read(
+        &self,
+        pcm: Vec<i16>,
+        language: Option<String>,
+        timed: bool,
+    ) -> anyhow::Result<Vec<Segment>> {
         if pcm.is_empty() || pcm.len() > 8 * 60 * 16_000 {
             anyhow::bail!("recording is empty or longer than eight minutes");
         }
@@ -151,20 +222,17 @@ impl TranscriptionProvider for LocalWhisper {
         }
         let permit = self.inference.clone().acquire_owned().await?;
         let model = self.model_path();
-        tokio::task::spawn_blocking(move || {
+        let loaded = self.loaded.clone();
+        let result = tokio::task::spawn_blocking(move || {
             // Cancellation drops the async waiter, but native inference keeps its permit
             // until the blocking operation actually ends.
             let _permit = permit;
-            let context = WhisperContext::new_with_params(
-                model.to_string_lossy().as_ref(),
-                WhisperContextParameters::default(),
-            )
-            .context("speech model could not be loaded")?;
+            let context = Self::context(&loaded, &model)?;
             let mut state = context
                 .create_state()
                 .context("speech engine could not start")?;
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-            params.set_no_timestamps(true);
+            params.set_no_timestamps(!timed);
             params.set_print_progress(false);
             params.set_print_realtime(false);
             params.set_print_special(false);
@@ -177,21 +245,52 @@ impl TranscriptionProvider for LocalWhisper {
             state
                 .full(params, &audio)
                 .context("recording could not be transcribed")?;
-            let segments = state.full_n_segments();
-            let mut text = String::new();
-            for index in 0..segments {
+            let mut segments = Vec::new();
+            for index in 0..state.full_n_segments() {
                 let segment = state
                     .get_segment(index)
                     .context("transcript segment could not be read")?;
-                text.push_str(
-                    &segment
+                segments.push(Segment {
+                    // Whisper counts in hundredths of a second.
+                    start_ms: u64::try_from(segment.start_timestamp()).unwrap_or(0) * 10,
+                    end_ms: u64::try_from(segment.end_timestamp()).unwrap_or(0) * 10,
+                    text: segment
                         .to_str_lossy()
-                        .context("transcript segment could not be decoded")?,
-                );
+                        .context("transcript segment could not be decoded")?
+                        .into_owned(),
+                });
             }
-            Ok::<_, anyhow::Error>(text.trim().to_string())
+            Ok::<_, anyhow::Error>(segments)
         })
-        .await?
+        .await?;
+        self.release_later();
+        result
+    }
+
+    /// Let go of the model once nothing has used it for a while. One watcher at a time.
+    fn release_later(&self) {
+        use std::sync::atomic::Ordering;
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if self.releasing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let (loaded, releasing) = (self.loaded.clone(), self.releasing.clone());
+        runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let mut slot = loaded.lock().unwrap();
+                if slot
+                    .as_ref()
+                    .map_or(true, |entry| entry.used.elapsed() >= KEEP_LOADED)
+                {
+                    *slot = None;
+                    releasing.store(false, Ordering::SeqCst);
+                    return;
+                }
+            }
+        });
     }
 }
 

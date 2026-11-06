@@ -1,6 +1,6 @@
 # 0070. Dictation is client capture and an injected transcriber
 
-Status: Accepted
+Status: Accepted. Amended by [0105](0105-dictation-shows-words-while-listening.md): words show while listening and the status lines below are gone.
 Date: 2026-10-14
 
 ## Context

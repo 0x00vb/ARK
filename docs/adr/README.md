@@ -150,3 +150,4 @@ Local integration decisions:
 - [0103-a-calm-chat-page](0103-a-calm-chat-page.md)
 
 - [0104-the-chat-changes-its-own-mode-on-request](0104-the-chat-changes-its-own-mode-on-request.md)
+- [0105-dictation-shows-words-while-listening](0105-dictation-shows-words-while-listening.md)

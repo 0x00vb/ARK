@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Dictation shows the words while the person talks (ADR 0105). New call `dictation_preview` and `TranscriptionProvider::segments` (a default method, so existing providers keep working and show their words at Stop). Audio uploads while recording; a preview reads at most 30 s.
+
+### Changed
+
+- Dictation draws no label while listening or transcribing. A line shows only for the speech model download and for a failure. The draft is read-only while listening.
+- Send closes the composer row on the right through a spacer, whichever controls the row draws (v0.36.0 left it beside the microphone when a hidden mode chip stayed in the row).
+
 ## [0.37.0] - 2026-11-06
 
 ### Breaking

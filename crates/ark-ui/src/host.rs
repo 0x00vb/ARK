@@ -1106,7 +1106,9 @@ impl Host {
                 .segments(pcm, language)
                 .await?
                 .iter()
-                .fold(String::new(), |all, segment| join_words(&all, &segment.text))
+                .fold(String::new(), |all, segment| {
+                    join_words(&all, &segment.text)
+                })
         };
         Ok(json!({ "text": join_words(&settled_text, &text) }))
     }
@@ -1171,16 +1173,19 @@ impl Host {
                 for segment in &segments[..count] {
                     upload.settled_text = join_words(&upload.settled_text, &segment.text);
                 }
-                upload.settled = (upload.settled + (last.end_ms * 16) as usize).min(upload.bytes / 2);
+                upload.settled =
+                    (upload.settled + (last.end_ms * 16) as usize).min(upload.bytes / 2);
             }
             let tail = segments[count..]
                 .iter()
-                .fold(String::new(), |all, segment| join_words(&all, &segment.text));
+                .fold(String::new(), |all, segment| {
+                    join_words(&all, &segment.text)
+                });
             upload.shown = join_words(&upload.settled_text, &tail);
         } else {
-            let all = segments
-                .iter()
-                .fold(String::new(), |all, segment| join_words(&all, &segment.text));
+            let all = segments.iter().fold(String::new(), |all, segment| {
+                join_words(&all, &segment.text)
+            });
             upload.shown = join_words(&upload.settled_text, &all);
         }
         Ok(json!({ "text": upload.shown }))

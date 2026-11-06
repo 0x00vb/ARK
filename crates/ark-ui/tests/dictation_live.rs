@@ -109,7 +109,13 @@ async fn a_preview_settles_early_speech_and_the_final_text_joins_it() {
     let preview = || {
         let (url, token, id) = (url.clone(), token.clone(), id.clone());
         async move {
-            let r = rpc(&url, &token, "dictation_preview", json!({"place":"", "id":id})).await;
+            let r = rpc(
+                &url,
+                &token,
+                "dictation_preview",
+                json!({"place":"", "id":id}),
+            )
+            .await;
             assert_eq!(r["ok"], true, "{r}");
             r["result"]["text"].as_str().unwrap().to_string()
         }
@@ -142,15 +148,34 @@ async fn a_preview_settles_early_speech_and_the_final_text_joins_it() {
         json!({"place":"", "id":id, "_dictation_owner":"forged"}),
     )
     .await;
-    assert_eq!(other["ok"], true, "the transport sets the owner, not the page");
-    let finished = rpc(&url, &token, "dictation_finish", json!({"place":"", "id":id})).await;
+    assert_eq!(
+        other["ok"], true,
+        "the transport sets the owner, not the page"
+    );
+    let finished = rpc(
+        &url,
+        &token,
+        "dictation_finish",
+        json!({"place":"", "id":id}),
+    )
+    .await;
     assert_eq!(
         finished["result"]["text"], "block1 block2 block3 block4 block5",
         "{finished}"
     );
     let reads = speech.reads.lock().unwrap().clone();
-    assert_eq!(reads.last().copied(), Some(8 * 16_000), "finish read the unsettled tail only");
+    assert_eq!(
+        reads.last().copied(),
+        Some(8 * 16_000),
+        "finish read the unsettled tail only"
+    );
 
-    let gone = rpc(&url, &token, "dictation_preview", json!({"place":"", "id":id})).await;
+    let gone = rpc(
+        &url,
+        &token,
+        "dictation_preview",
+        json!({"place":"", "id":id}),
+    )
+    .await;
     assert_eq!(gone["ok"], false, "a finished recording has no preview");
 }

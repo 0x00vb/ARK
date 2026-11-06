@@ -150,7 +150,7 @@ let ui = ArkUi::new(app(root, secrets)?)
 | `new(app)`, `.start(Start)` | The app, and model/project/session choices as the shell's flags give them |
 | `.accent(css)`, `.logo(asset)` | Theme colour and logo |
 | `.theme(Theme::Light)` | The theme until the person picks one in Settings › Appearance (default `Theme::System`) |
-| `.welcome(title, line)`, `.suggestion(label, prompt)` | The empty-session screen; an empty `line` shows no line (without `.welcome`, the tagline) |
+| `.welcome(title, line)`, `.suggestion(label, prompt)` | Kept for compatibility. The page no longer draws them: an empty chat shows a typing mark, then a local greeting (ADR 0103) |
 | `.asset(path, bytes)` | A file the page can load, served at `ext/<path>` |
 | `.frame_asset(path, bytes)` | Trusted shipped HTML at an exact `ext/<path>`. Its HTTP response permits same-origin embedding. Root pages, ordinary assets and error responses still refuse embedding. Use a restrictive frame CSP and a worker for untrusted bytes; this does not create an authority sandbox |
 | `.wasm_worker_asset(path, bytes)` | Trusted confined `.js` worker entry. Only its successful exact HTTP response permits WebAssembly compilation, never JavaScript eval. Connections are denied. Same-origin module imports remain possible, so the worker should replace `Worker` itself. Root and ordinary asset policies are unchanged. Only the HTTP serve path sends this header; a native window keeps the app's own CSP |
@@ -350,7 +350,7 @@ account. There are no Work or Automations pages: an agent makes and runs them wh
 
 | Part | Behavior |
 |---|---|
-| Composer | No model or mode chip. The model chip shows while no model is chosen. The mode chip shows for a mode the person chose (Plan, Manual). Shift+Tab cycles the mode. A chat with `execution_mode_revision` 0 runs in Auto |
+| Composer | No model or mode chip. The model chip shows while no model is chosen. The mode chip shows for any mode but Auto (Plan, Manual). Shift+Tab cycles the mode. A chat nobody chose a mode for (revision 0, Manual) is set to Auto once with the `execution_mode` call before its first message |
 | Title bar | A chip with the chat's face and name opens the details in the side pane: face, name, description, model row (the app's picker, with the provider's mark when `modelPicker.mark` exists). An app view supplies it with `identity()` on its controller |
 | Empty chat | Nothing, then a typing mark for one second, then one line from `greeting.js`, with the first word of `ark.profile()` when there is one. Not sent to the model, not stored. A chat already greeted in this window shows its line at once |
 

@@ -24,6 +24,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
     calls.push({ method, params });
     if (method === "hello") return { summary: summary(), ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime };
     if (method === "summary") return summary();
+    if (method === "execution_mode" || method === "chat_execution_mode") return { ...summary(), execution_mode: params.mode, execution_mode_revision: 1 };
     if (method === "chat_read") return { summary: summary(chats.find(chat => chat.id === params.session)), transcript: [], approvals: [], running: null };
     if (method === "projects") return projects.map(p => ({ ...p, current: p.id === current.project }));
     if (method === "sessions") return chats.filter(c => c.project === params.project).map(c => ({ ...c, turns: 1, updated_at: Date.now() }));

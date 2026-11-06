@@ -331,6 +331,17 @@ const RESOURCE_METHODS = {
   picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
 };
 
+/// A chat nobody chose a mode for (revision 0, still Manual) is set to Auto once, through the
+/// same call a chosen mode uses, so the host and the page agree before the first message. A
+/// failure leaves the chat in Manual with its chip showing.
+const adopted = new Set();
+function adoptAuto(summary, set) {
+  const id = summary?.session?.id;
+  if (!id || summary.execution_mode_revision || summary.execution_mode !== "manual" || adopted.has(id)) return;
+  adopted.add(id);
+  set().catch(() => {});
+}
+
 function activeSummary() {
   return secondaryChats.get(activeSession)?.summary || state.summary;
 }
@@ -777,6 +788,7 @@ class SecondaryChat {
     this.summary = summary;
     this.composer.setModel(summary.model);
     this.composer.setExecutionMode(summary.execution_mode || "manual", summary.execution_mode_revision || 0);
+    adoptAuto(summary, async () => this.applySummary(await transport.call("chat_execution_mode", { session: this.session, mode: "auto", revision: 0, model: summary.model })));
     chatTabs.titles.set(this.session, summary.session.title || "Untitled chat");
     if (detachedWindow && activeSession === this.session) {
       state.summary = summary;
@@ -1423,6 +1435,10 @@ function applySummary(s) {
   }
   composer.setModel(s.model);
   composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
+  adoptAuto(s, async () => {
+    const summary = await transport.call("execution_mode", { mode: "auto", revision: 0 });
+    if (state.sessionId === s.session.id) applySummary(summary);
+  });
   rememberTab(s);
   if (changed) {
     // Promotion disposes the secondary composer and saves its latest draft first.

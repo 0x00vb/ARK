@@ -127,7 +127,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     if (!turns.length) {
       for (const entry of views.values()) drop(entry);
       views = new Map();
-      if (!root.querySelector(".greeting")) thread.greet(greet);
+      if (root.querySelector(".greeting")?.dataset.key !== String(greet)) thread.greet(greet);
       drawn = true;
       return;
     }

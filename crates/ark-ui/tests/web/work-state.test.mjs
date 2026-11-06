@@ -25,10 +25,11 @@ async function shoot(page, name) {
 async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
-  const summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: chosenMode ? 1 : 0 };
+  let summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: chosenMode ? 1 : 0 };
   if (remote) summary.place = { id: "remote", name: "Remote computer", state: "ok" };
   if (empty) summary.session = { ...summary.session, turns: 0 };
   const request = { id: 7, session: "chat-b", chat: "Supplier comparison", project: null, line: "Send the supplier summary?", request: {}, choices: [] };
+  const modeCalls = [];
   let approvals = [], stream, holdRead = false, releaseRead, readStarted;
   const reading = new Promise(resolve => { readStarted = resolve; });
   const errors = [];
@@ -38,6 +39,12 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
     if (method === "projects") return projects;
     if (method === "sessions") return params.project === "a" ? sessions : [];
     if (method === "summary") return summary;
+    if (method === "execution_mode" || method === "chat_execution_mode") {
+      modeCalls.push({ method, ...params });
+      if (params.revision !== summary.execution_mode_revision) throw new Error("the execution mode changed; review it and send again");
+      summary = { ...summary, execution_mode: params.mode, execution_mode_revision: summary.execution_mode_revision + 1 };
+      return summary;
+    }
     if (method === "chat_read") return { summary: { ...summary, session: sessions[1], location: { ...summary.location, session: "chat-b" } }, transcript: [], approvals: approvals.filter(a => a.session === "chat-b"), running: null };
     if (method === "transcript") {
       if (holdRead) { readStarted(); await new Promise(resolve => { releaseRead = resolve; }); holdRead = false; }
@@ -83,7 +90,7 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html${detached ? "?detached=chat-b" : ""}`);
     await page.locator('.session[data-id="chat-b"] .session-working').waitFor();
-    await run(page, { emit, request, snapshot: items => { approvals = items; }, assign: (id, names) => { sessions.find(session => session.id === id).participants = names; }, hold: () => { holdRead = true; }, reading, release: () => releaseRead() });
+    await run(page, { modeCalls, emit, request, snapshot: items => { approvals = items; }, assign: (id, names) => { sessions.find(session => session.id === id).participants = names; }, hold: () => { holdRead = true; }, reading, release: () => releaseRead() });
     assert.deepEqual(errors, []);
   } finally {
     await context.close(); stream?.end(); server.closeAllConnections();
@@ -239,11 +246,12 @@ test("primary controls have distinct targets and shared icons at desktop and pho
 }));
 
 
-test("the composer shows attachment and dictation, and no model or mode chip until one needs the person", () => fixture(async page => {
+test("the composer shows attachment and dictation, and no model or mode chip until one needs the person", () => fixture(async (page, { modeCalls }) => {
   assert.deepEqual(await page.locator(".composer-bar > button").evaluateAll(nodes => nodes.slice(0, 2).map(node => node.id)), ["attach", "dictate"]);
   assert.equal(await page.locator("#model-chip").isVisible(), false);
   assert.equal(await page.locator("#mode-chip").isVisible(), false);
-  assert.equal(await page.locator("#mode-chip").getAttribute("data-mode"), "auto");
+  await page.waitForFunction(() => document.querySelector("#mode-chip").dataset.mode === "auto");
+  assert.deepEqual(modeCalls, [{ method: "execution_mode", mode: "auto", revision: 0 }]);
   assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 44);
 }));
 
@@ -456,8 +464,13 @@ test("the title bar names who the chat is with and opens the details in the side
   assert.equal(await panel.locator("h2").textContent(), "ARK");
   assert.equal(await panel.locator(".identity-row-label").textContent(), "Model");
   assert.equal(await panel.locator(".identity-row").isEnabled(), true);
+  assert.equal(await chip.getAttribute("aria-expanded"), "true");
+  await panel.locator(".identity-row").focus();
+  await page.evaluate(() => window.ark.refreshViewTitle());
+  assert.equal(await panel.locator(".identity-row").evaluate(el => document.activeElement === el), true, "a redraw with the same data keeps the focus");
   await chip.click();
   await panel.waitFor({ state: "detached" });
+  assert.equal(await chip.getAttribute("aria-expanded"), "false");
 }));
 
 test("an app pins items in the fixed rail and they leave when the render is released", () => fixture(async page => {

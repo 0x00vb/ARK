@@ -13,7 +13,7 @@ export class Identity {
   constructor(api, current) {
     this.api = api;
     this.current = current;
-    this.chip = h("button.identity-chip", { type: "button", id: "chat-identity", "aria-haspopup": "dialog", onclick: () => this.toggle() });
+    this.chip = h("button.identity-chip", { type: "button", id: "chat-identity", "aria-expanded": "false", onclick: () => this.toggle() });
     // The chip's own double-click is not a rename: the title it replaces renames on double-click.
     this.chip.addEventListener("dblclick", (event) => event.stopPropagation());
     this.redraws = new Set();
@@ -30,6 +30,7 @@ export class Identity {
     clear(this.chip);
     this.chip.append(identity.avatar(22), h("span.identity-name", label));
     this.chip.setAttribute("aria-label", `${label}: details`);
+    this.chip.setAttribute("aria-expanded", String(!!this.api.panelOpen?.(DETAILS)));
     for (const redraw of this.redraws) redraw(identity);
     return this.chip;
   }
@@ -38,22 +39,30 @@ export class Identity {
     const open = this.api.panelOpen?.(DETAILS);
     if (open) this.api.closePanel(DETAILS);
     else this.api.openPanel(DETAILS);
+    queueMicrotask(() => this.chip.setAttribute("aria-expanded", String(!!this.api.panelOpen?.(DETAILS))));
   }
 
   /// The pane's content: face, name, description, and the model as one row.
   panel(el) {
     el.classList.add("identity-panel");
+    let drawn = "";
+    let latest = null;
     const draw = (identity) => {
+      latest = identity;
+      // Same data, same pane: a redraw would drop the focus on the model row and detach its open menu.
+      const model = identity?.model;
+      const sig = identity ? JSON.stringify([identity.name, identity.description, model?.label, model?.disabled, !!model?.mark]) : "";
+      if (sig === drawn && el.firstChild) return;
+      drawn = sig;
       clear(el);
       if (!identity) return;
-      const model = identity.model;
       el.append(...[
         h("div.identity-face", identity.avatar(72)),
         h("h2.identity-title", identity.name),
         identity.description ? h("p.identity-description", identity.description) : null,
         model ? h("button.identity-row", {
           type: "button", "aria-haspopup": "menu", disabled: !!model.disabled,
-          onclick: (event) => model.open(event.currentTarget),
+          onclick: (event) => latest?.model?.open(event.currentTarget),
         },
           h("span.identity-row-label", "Model"),
           h("span.identity-row-value", model.mark?.() || null, h("span", model.label), icon("chevron-down"))) : null,

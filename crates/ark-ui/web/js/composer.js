@@ -156,10 +156,7 @@ export class Composer {
   }
 
   setExecutionMode(mode, revision = 0) {
-    // Revision 0 means nobody chose a mode for this chat, so it runs in Auto. A chosen mode
-    // (revision 1 and up) stays, and its chip comes back so the person sees it.
-    if (!revision && mode === "manual") mode = "auto";
-    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "auto";
+    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "manual";
     this.executionModeRevision = revision;
     this.mode.textContent = this.executionMode[0].toUpperCase() + this.executionMode.slice(1);
     this.mode.dataset.mode = this.executionMode;

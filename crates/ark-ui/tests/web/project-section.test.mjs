@@ -42,6 +42,8 @@ async function fixture(run, { boot = false, searchProjects = false, holdHello = 
   const rpc = {
     hello: async () => { await helloReady; return { summary, ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime: "fixture" }; },
     summary: () => summary,
+    execution_mode: (params) => { summary.execution_mode = params.mode; summary.execution_mode_revision = 1; return summary; },
+    chat_execution_mode: (params) => { summary.execution_mode = params.mode; summary.execution_mode_revision = 1; return summary; },
     projects: () => projects,
     sessions: () => sessions,
     agent_contacts: params => {

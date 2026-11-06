@@ -64,7 +64,7 @@ export class Thread {
     this.clear();
     const text = greetingFor(key);
     const typing = h("div.greeting-typing", { role: "status", "aria-label": "Typing" }, h("span"), h("span"), h("span"));
-    const el = h("div.welcome.greeting", h("div.agent", typing));
+    const el = h("div.welcome.greeting", { "data-key": String(key) }, h("div.agent", typing));
     this.root.append(el);
     const say = () => el.firstChild.replaceChildren(h("div.prose.answer", text));
     if (greeted.has(key)) return say();

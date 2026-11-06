@@ -19,8 +19,8 @@
 
 ### Changed
 
-- The composer hides the model chip until no model is chosen and the mode chip until a mode
-  other than Auto is chosen. A chat nobody set a mode for runs in Auto.
+- The composer hides the model chip until no model is chosen and the mode chip while the mode
+  is Auto. A chat nobody chose a mode for is set to Auto before its first message.
 
 ## [0.35.0] - 2026-11-05
 

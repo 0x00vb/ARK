@@ -131,11 +131,11 @@ for (const runtime of ["fixture", "window"]) for (const other of ["chat-b", "cha
     await page.waitForFunction(id => window.ark.summary().session.id === id, other);
     await input.fill("Unrelated draft");
     await input.evaluate(el => el.setSelectionRange(3, 6));
-    await page.locator("#mode-chip").focus();
+    await page.locator("#dictate").focus();
     upload.release();
     await page.locator(".adding").waitFor({ state: "detached" });
     assert.equal(await input.inputValue(), "Unrelated draft");
-    assert.equal(await page.locator("#mode-chip").evaluate(el => document.activeElement === el), true);
+    assert.equal(await page.locator("#dictate").evaluate(el => document.activeElement === el), true);
     assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [3, 6]);
     assert.deepEqual(upload.files, [{ location: { runtime: "fixture", project: "a", session: "chat-a" }, path: "notes.txt" }]);
     if (other === "chat-c") await page.locator(".project-row", { hasText: "Notes" }).click();
@@ -202,7 +202,7 @@ for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "di
       await page.locator(".secondary").waitFor({ state: "detached" });
     } else await input.fill("Unrelated primary draft");
     await input.evaluate(el => el.setSelectionRange(2, 5));
-    await page.locator("#mode-chip").focus();
+    await page.locator("#dictate").focus();
     upload.release();
     await page.locator(".adding").waitFor({ state: "detached" });
     const expected = "Latest origin draft\nAdded to the project: notes.txt";
@@ -210,7 +210,7 @@ for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "di
     if (state === "promoted") await page.waitForFunction(v => document.querySelector("#input").value === v, expected, { timeout: 5000 }).catch(() => {});
     assert.equal(await input.inputValue(), state === "promoted" ? expected : "Unrelated primary draft");
     assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [2, 5]);
-    assert.equal(await page.locator("#mode-chip").evaluate(el => document.activeElement === el), true);
+    assert.equal(await page.locator("#dictate").evaluate(el => document.activeElement === el), true);
     if (state === "mounted") assert.equal(await origin.inputValue(), expected);
     if (state === "disposed") {
       await page.locator('.session[data-id="chat-a"]').click();

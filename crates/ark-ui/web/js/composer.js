@@ -156,7 +156,10 @@ export class Composer {
   }
 
   setExecutionMode(mode, revision = 0) {
-    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "manual";
+    // Revision 0 means nobody chose a mode for this chat, so it runs in Auto. A chosen mode
+    // (revision 1 and up) stays, and its chip comes back so the person sees it.
+    if (!revision && mode === "manual") mode = "auto";
+    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "auto";
     this.executionModeRevision = revision;
     this.mode.textContent = this.executionMode[0].toUpperCase() + this.executionMode.slice(1);
     this.mode.dataset.mode = this.executionMode;
@@ -349,13 +352,13 @@ export class Composer {
   /// Models grouped by backend: subscriptions, local Ollama, and APIs that have a key. A backend
   /// that is not ready shows the command that fixes it. The list is fetched on every open, so
   /// signing in elsewhere shows up the next time the menu opens.
-  async modelMenu() {
+  async modelMenu(anchor = this.model) {
     const open = document.querySelector(".popover.models-pop.open");
     if (open) return open.close();
     const picker = registry.modelPicker;
     if (picker) {
       const el = h("div.model-picker");
-      const menu = this.api.popover(this.model, [el], { above: true });
+      const menu = this.api.popover(anchor, [el], { above: true });
       menu.classList.add("models-pop");
       try {
         // Closing returns to the message, so Enter sends what waited for a model.
@@ -372,7 +375,7 @@ export class Composer {
     }
     const body = h("div.models");
     const input = h("input.menu-input", { placeholder: "Other model, e.g. ollama:qwen3:4b", "aria-label": "Model" });
-    const menu = this.api.popover(this.model, [body, h("div.menu-sep"), input], { above: true });
+    const menu = this.api.popover(anchor, [body, h("div.menu-sep"), input], { above: true });
     menu.classList.add("models-pop");
     let effortPage = null;
     let inlineError = null;

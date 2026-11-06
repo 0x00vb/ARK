@@ -12,10 +12,10 @@ let browser;
 before(async () => { browser = await webkit.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
 
-async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, places = { here: "This computer", places: [] } } = {}) {
+async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
-  const summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: 0 };
+  const summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: chosenMode ? 1 : 0 };
   if (remote) summary.place = { id: "remote", name: "Remote computer", state: "ok" };
   if (empty) summary.session = { ...summary.session, turns: 0 };
   const request = { id: 7, session: "chat-b", chat: "Supplier comparison", project: null, line: "Send the supplier summary?", request: {}, choices: [] };
@@ -229,13 +229,19 @@ test("primary controls have distinct targets and shared icons at desktop and pho
 }));
 
 
-test("model follows attachment and dictation in visual and keyboard order", () => fixture(async page => {
-  assert.deepEqual(await page.locator(".composer-bar > button").evaluateAll(nodes => nodes.slice(0, 3).map(node => node.id)), ["attach", "dictate", "model-chip"]);
-  const [attach, dictate, model, mode] = await Promise.all(["#attach", "#dictate", "#model-chip", "#mode-chip"].map(selector => page.locator(selector).boundingBox()));
-  assert.ok(attach.x < dictate.x && dictate.x < model.x && model.x < mode.x);
-  assert.ok(model.x - (dictate.x + dictate.width) <= 8);
+test("the composer shows attachment and dictation, and no model or mode chip until one needs the person", () => fixture(async page => {
+  assert.deepEqual(await page.locator(".composer-bar > button").evaluateAll(nodes => nodes.slice(0, 2).map(node => node.id)), ["attach", "dictate"]);
+  assert.equal(await page.locator("#model-chip").isVisible(), false);
+  assert.equal(await page.locator("#mode-chip").isVisible(), false);
+  assert.equal(await page.locator("#mode-chip").getAttribute("data-mode"), "auto");
   assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 44);
 }));
+
+test("a mode the person chose stays visible so it can be changed back", () => fixture(async page => {
+  assert.equal(await page.locator("#mode-chip").isVisible(), true);
+  assert.equal(await page.locator("#mode-chip").getAttribute("data-mode"), "manual");
+}, { chosenMode: true }));
+
 
 
 test("the sole local computer stays quiet while a real destination choice remains visible", async () => {
@@ -403,4 +409,51 @@ test("a property menu stays within the window at the bottom edge", () => fixture
   });
   assert.ok(bounds.top >= 0 && bounds.bottom <= bounds.height, JSON.stringify(bounds));
   await page.getByRole("button", { name: "Agent 11", exact: true }).click();
+}));
+
+test("an empty chat shows nothing, then a typing mark, then one local line and no hero", () => fixture(async page => {
+  await page.locator(".greeting-typing").waitFor();
+  assert.equal(await page.locator(".welcome h1, .suggestions").count(), 0);
+  assert.equal(await page.locator(".greeting .prose").count(), 0);
+  await page.locator(".greeting .prose.answer").waitFor({ timeout: 3000 });
+  assert.equal(await page.locator(".greeting-typing").count(), 0);
+  const { GREETING_LINES } = await page.evaluate(async () => ({ GREETING_LINES: (await import("/js/greeting.js")).GREETING_LINES }));
+  const text = await page.locator(".greeting .prose.answer").innerText();
+  assert.ok(GREETING_LINES.some(([, plain]) => plain === text), text);
+  assert.equal(await page.locator(".turn").count(), 0);
+}, { empty: true }));
+
+test("the greeting uses the first word of the profile name and none of the model's tokens", () => fixture(async page => {
+  const lines = await page.evaluate(async () => {
+    const { greetingFor, GREETING_LINES } = await import("/js/greeting.js");
+    window.ark.profile(() => ({ name: "Valentino Balatti" }));
+    return { text: greetingFor("any"), count: GREETING_LINES.length, same: greetingFor("any") === greetingFor("any") };
+  });
+  assert.match(lines.text, /Valentino/);
+  assert.doesNotMatch(lines.text, /Balatti|\{name\}/);
+  assert.equal(lines.same, true);
+}));
+
+test("the title bar names who the chat is with and opens the details in the side pane", () => fixture(async page => {
+  const chip = page.locator("#session-title .identity-chip");
+  await chip.waitFor();
+  assert.match(await chip.getAttribute("aria-label"), /Quarterly review: details/);
+  await chip.click();
+  const panel = page.locator("#pane .identity-panel");
+  await panel.waitFor();
+  assert.equal(await panel.locator("h2").textContent(), "ARK");
+  assert.equal(await panel.locator(".identity-row-label").textContent(), "Model");
+  assert.equal(await panel.locator(".identity-row").isEnabled(), true);
+  await chip.click();
+  await panel.waitFor({ state: "detached" });
+}));
+
+test("an app pins items in the fixed rail and they leave when the render is released", () => fixture(async page => {
+  await page.evaluate(() => { window.__released = false; });
+  await page.evaluate(() => window.ark.rail({ id: "pins", render(el) { el.innerHTML = '<button class="destination" id="pin-a" aria-label="Pin A"></button>'; return { dispose() { window.__released = true; } }; } }));
+  await page.locator("#rail-pins #pin-a").waitFor();
+  const order = await page.locator("#destinations button").evaluateAll(nodes => nodes.map(n => n.getAttribute("aria-label") || n.dataset.destination));
+  assert.deepEqual(order, ["home", "Plugins", "Pin A", "Account and settings"]);
+  await page.evaluate(() => window.ark.refreshNavigation());
+  await page.waitForFunction(() => window.__released === true);
 }));

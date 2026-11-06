@@ -119,7 +119,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     entry.view.el.remove();
   }
 
-  function render(turns, { empty = "" } = {}) {
+  function render(turns, { greet = "" } = {}) {
     const stick = thread.stick;
     // The turn in view, by key: it may be drawn again below, and must keep its place.
     const anchor = [...views].find(([, entry]) => entry.view.el.offsetTop + entry.view.el.offsetHeight >= scroller.scrollTop);
@@ -127,7 +127,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     if (!turns.length) {
       for (const entry of views.values()) drop(entry);
       views = new Map();
-      if (root.querySelector(".welcome h1")?.textContent !== (empty || "What should we work on?")) thread.welcome({ title: empty }, [], () => {});
+      if (!root.querySelector(".greeting")) thread.greet(greet);
       drawn = true;
       return;
     }
@@ -190,10 +190,11 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     set: (text) => composer.set(text),
     /// What the composer says while empty, whether it takes a message now, and whether the
     /// run goes on (with `stop`, the send button is Stop while nothing is typed).
-    setComposer({ placeholder: words, disabled, running: on, modelLabel, modelDisabled, submitDisabled: blocked } = {}) {
+    setComposer({ placeholder: words, disabled, running: on, modelLabel, modelDisabled, modelMissing, submitDisabled: blocked } = {}) {
       if (elements.model) {
         if (modelLabel != null) elements.model.textContent = modelLabel;
         if (modelDisabled != null) elements.model.disabled = !!modelDisabled;
+        if (modelMissing != null) elements.model.dataset.missing = String(!!modelMissing);
       }
       if (on != null) {
         running = !!on && typeof stop === "function";

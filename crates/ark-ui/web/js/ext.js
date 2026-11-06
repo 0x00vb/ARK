@@ -24,11 +24,12 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.plugin({ id, name, summary, category, icon, render(el, api) })
 //                      a trusted app integration in Plugins; render returns optional dispose().
 //                      icon is a bundled same-origin image URL. Listing does not enable it.
-//   ark.modelPicker({ label(model), render(el, { close }) })
+//   ark.modelPicker({ label(model), mark?(model), render(el, { close }) })
 //                      the app draws the composer's model menu and names the model on its
 //                      button. `label` gets the host's model ("claude sonnet") and returns
 //                      the text, or `{ text, missing: true }` while nothing is chosen: then
 //                      sending opens the menu instead. `ark.refreshModel()` asks again.
+//                      `mark(model)` returns the provider's own icon, shown in the chat's details.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.fileViewer({ id, kinds, render(el, file, api) })
 //                      trusted shipped code over immutable file bytes. `api.read(offset)`
@@ -72,6 +73,12 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.sidebar({ id, render(el, api) })
 //                      a row at the top of the projects list, for what the list as a whole
 //                      depends on (an app with runtimes in several places says which here)
+//   ark.rail({ id, render(el, api) })
+//                      buttons in the fixed rail between the app views and the account, for what
+//                      the person pinned. Return `{ dispose() }` to release this mount; the rail
+//                      draws again when extensions change, the render redraws itself otherwise.
+//   ark.profile(() => ({ name }) | null)
+//                      who the person is, for the first line of an empty chat. Called each time.
 //   ark.agentIdentity(name => styleKey)
 //                      one stable style key per assigned participant, shared by single and group chats.
 //   ark.searchSource({ id, load(project, api), open(entry, scopedApi) })
@@ -125,6 +132,8 @@ export const registry = {
   actions: [],
   statuses: [],
   sidebars: [],
+  rails: [],
+  profile: null,
   projectSections: new Map(),
   searchSources: new Map(),
   newChat: null,
@@ -254,6 +263,15 @@ export function installApi(api) {
       need(s, ["id", "render"], "sidebar");
       registry.sidebars.push(s);
       api._changed();
+    },
+    rail(s) {
+      need(s, ["id", "render"], "rail");
+      registry.rails.push(s);
+      api._changed();
+    },
+    profile(fn) {
+      if (typeof fn !== "function" || registry.profile) throw new Error("Invalid or duplicate profile");
+      registry.profile = fn;
     },
     searchSource(source) {
       need(source, ["id", "load", "open"], "searchSource");

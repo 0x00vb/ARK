@@ -23,13 +23,12 @@ import { registerPlugins } from "./plugins.js";
 import { registerMarketplace } from "./marketplace.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
-import { registerSchedules, schedulesFollow } from "./schedules.js";
 import { registerCalendar } from "./calendar.js";
-import { registerWork } from "./work.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 import { os, label, relabel } from "./keys.js";
 import { Places } from "./places.js";
+import { Identity, DETAILS } from "./identity.js";
 import { registerComputers } from "./computers.js";
 import { reviewComputerMessage } from "./computer-recovery.js";
 import { MAX_VISIBLE_CHATS, chatLeaf, visibleChats, splitChat as splitLayoutChat, removeChat as removeLayoutChat, replaceChat, updateRatio, restoreLayout } from "./chat-layout.js";
@@ -225,6 +224,7 @@ const api = {
       wide: !!p.wide, fill: !!p.fill, expandable: !!p.expandable, api: ark, projectScoped: !!p.projectScoped, closesWithProject: !!p.closesWithProject, project: project?.id,
     });
   },
+  panelOpen: (id) => !!pane?.isOpen && pane.active === resourceKey("panel", currentLocation(), id),
   setPanelTitle: (id, title) => {
     const p = registry.panels.get(id);
     const location = p?.projectScoped ? { ...currentLocation(), session: "" } : currentLocation();
@@ -458,7 +458,7 @@ function scopedApi(location) {
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
 
-let thread, composer, sidebar, destinations, topbar, pane, waiting, places;
+let thread, composer, sidebar, destinations, topbar, identity, pane, waiting, places;
 let primarySurface;
 let chatLayout = null;
 let pendingPrimary = null;
@@ -758,7 +758,7 @@ class SecondaryChat {
     this.composer.placeholder = `Ask ${read.summary.name} anything`;
     this.applySummary(read.summary);
     if (read.transcript?.length) this.thread.renderStored(read.transcript, { hasMore: read.transcript.length === 30 });
-    else this.thread.welcome({ title: "New chat", subtitle: "" }, [], () => {});
+    else this.thread.greet(this.session);
     if (read.running) {
       this.thread.begin(read.running);
       this.setRunning(true);
@@ -1454,18 +1454,11 @@ async function loadSession() {
   thread.scroll(true);
   sidebar.refresh(state.sessionId);
   refreshRing();
-  schedulesFollow();
   restoreScroll(state.sessionId, $("#scroller"));
 }
 
 function showWelcome() {
-  const w = state.ui.welcome || {};
-  thread.welcome(
-    // An empty subtitle from the app means none; no subtitle at all shows the tagline.
-    { title: w.title, subtitle: w.subtitle ?? state.summary?.tagline, logo: state.ui.logo },
-    w.suggestions || [],
-    (prompt) => submit(prompt),
-  );
+  thread.greet(state.sessionId);
 }
 
 function setRing(used, budget) {
@@ -1818,13 +1811,12 @@ async function showView(id, params) {
   for (const [k, x] of views) x.el.hidden = k !== id;
   state.view = id;
   entry.ctl.show?.();
-  if (id !== "schedules" && id !== SETTINGS) state.homeView = id;
+  if (id !== SETTINGS) state.homeView = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
   showTitle();
   sidebar.markView(id);
   topbar.mark(id);
-  destinations?.mark(id === "schedules" ? "schedules" : null);
   reportFocus();
   entry.ctl.focusInput?.();
   if (pane?.isOpen) pane.reportFocus();
@@ -1875,7 +1867,6 @@ function showHome(focusComposer = true) {
 }
 
 function destinationTarget(destination) {
-  if (destination === "schedules") return views.get("schedules")?.el.querySelector("[data-destination-heading]") || $("#session-title");
   const entry = state.view && views.get(state.view);
   const visibleChatTitle = state.view || $("#chat-tabs").hidden
     ? $("#session-title")
@@ -1887,8 +1878,7 @@ function destinationTarget(destination) {
 /// its button and gives the new surface one quiet, compositor-only arrival.
 async function openDestination(destination, { keyboard = false } = {}) {
   if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
-  if (destination === "schedules") await showView("schedules");
-  else if (!await showConversation(false)) return;
+  if (!await showConversation(false)) return;
   const target = destinationTarget(destination);
   if (keyboard) {
     target?.focus({ preventScroll: true });
@@ -1904,6 +1894,30 @@ async function openDestination(destination, { keyboard = false } = {}) {
 
 /// The chat's title over the conversation; over a view of the project (whose tab says which),
 /// the project's name; else the view's title (Settings).
+/// Who this chat is with. An app view supplies its own; a plain chat is with ARK itself.
+function chatIdentity() {
+  if (state.view) return views.get(state.view)?.ctl?.identity?.() || null;
+  const summary = activeSummary();
+  if (!summary?.session) return null;
+  const active = secondaryChats.get(activeSession)?.composer || composer;
+  const picker = registry.modelPicker;
+  const spec = summary.model;
+  return {
+    name: summary.name || "ARK",
+    title: secondaryChats.get(activeSession)?.summary?.session?.title || state.title || "New chat",
+    description: summary.tagline || "",
+    avatar: (size) => state.ui.logo
+      ? h("img.identity-logo", { src: state.ui.logo, alt: "", width: size, height: size })
+      : h("span.identity-logo.fallback", { style: { width: `${size}px`, height: `${size}px` } }, icon("chat")),
+    model: {
+      label: active.model.textContent,
+      mark: () => picker?.mark?.(spec) || null,
+      disabled: state.running,
+      open: (anchor) => active.modelMenu(anchor),
+    },
+  };
+}
+
 function showTitle() {
   const v = state.view && (state.view === SETTINGS ? settingsView : registry.views.get(state.view));
   const el = $("#session-title");
@@ -1918,6 +1932,9 @@ function showTitle() {
     $(".top-actions").prepend(options);
   }
   options.hidden = !controller?.menu;
+  // The face and name of who the chat is with replace the plain title and open its details.
+  const chip = identity?.draw(chatIdentity());
+  if (chip) el.replaceChildren(chip);
   // A chat that runs on another computer says where.
   const place = !v && state.summary?.place;
   if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));
@@ -2369,6 +2386,7 @@ async function bootOnce(again) {
     registerAppearance(window.ark);
     registerGrants(window.ark);
     registerMarketplace(window.ark);
+    window.ark.panel({ id: DETAILS, title: "Details", icon: "chat", render: (el) => identity.panel(el) });
     registerPlugins(window.ark);
     registerSkills(window.ark);
     registerDevices(window.ark);
@@ -2382,9 +2400,6 @@ async function bootOnce(again) {
     });
     // The project's board, when the app runs agents.
     registerBoard(window.ark);
-    registerWork(window.ark);
-    // What this chat runs on its own, above the composer.
-    registerSchedules(window.ark);
     registerCalendar(window.ark);
   }
   if (detachedWindow) {
@@ -2467,6 +2482,7 @@ async function start() {
   destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);
   topbar = new Topbar(api, destinations);
+  identity = new Identity(api, chatIdentity);
   pane = new Pane(appEl, api, { conversation: () => {
     const entry = state.view && views.get(state.view);
     const liveConversation = entry?.ctl?.conversation?.();

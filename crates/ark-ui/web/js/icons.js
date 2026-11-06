@@ -19,6 +19,7 @@ export const ICONS = {
   "sidebar": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 4h18v16H3Z M9 4v16\"/></g>",
   "pane": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 4h18v16H3Z M15 4v16\"/></g>",
   "split": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 4h7v16H3Z M14 4h7v16h-7Z\"/></g>",
+  "pin": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 3h6l-1 6 3 4H7l3-4Z M12 13v8\"/></g>",
   "chevron-down": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"/></g>",
   "chevron-right": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m9 6 6 6-6 6\"/></g>",
   "arrow-up": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 20V4 M5 11l7-7 7 7\"/></g>",

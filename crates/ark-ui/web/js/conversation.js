@@ -10,6 +10,11 @@ import { markdown } from "./md.js";
 import { renderReport } from "./report.js";
 import { registry } from "./ext.js";
 import { kindOf, kindNoun, KIND_ICON } from "./file.js";
+import { greetingFor } from "./greeting.js";
+
+const GREETING_DELAY = 1000;
+/// Chats whose line was already typed in this window.
+const greeted = new Set();
 
 
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
@@ -53,18 +58,18 @@ export class Thread {
     return !this.root.querySelector(".turn, .sysmsg");
   }
 
-  welcome(info, suggestions, onPick) {
+  /// An empty chat says nothing, then a typing mark for a second, then one line of its own. A
+  /// chat already greeted in this window shows its line at once.
+  greet(key) {
     this.clear();
-    const w = h("div.welcome",
-      info.logo ? h("img.welcome-logo", { src: info.logo, alt: "" }) : null,
-      h("h1", info.title || "What should we work on?"),
-      info.subtitle ? h("p", info.subtitle) : null,
-      suggestions.length
-        ? h("div.suggestions", suggestions.map(([label, prompt], i) =>
-            h("button.suggestion", { style: { "--i": i }, onclick: () => onPick(prompt) }, label)))
-        : null,
-    );
-    this.root.append(w);
+    const text = greetingFor(key);
+    const typing = h("div.greeting-typing", { role: "status", "aria-label": "Typing" }, h("span"), h("span"), h("span"));
+    const el = h("div.welcome.greeting", h("div.agent", typing));
+    this.root.append(el);
+    const say = () => el.firstChild.replaceChildren(h("div.prose.answer", text));
+    if (greeted.has(key)) return say();
+    greeted.add(key);
+    setTimeout(() => { if (el.isConnected) say(); }, GREETING_DELAY);
   }
 
   dropWelcome() {

@@ -308,7 +308,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   padding: 0 6px 10px;
   position: relative; z-index: 2;
 }
-.workspace-destinations { display: contents; }
+.workspace-destinations, .rail-pins, .rail-item { display: contents; }
 .destination-drag { width: 100%; height: 44px; flex: none; }
 .app[data-shell="browser"] .destination-drag { height: 44px; }
 .destination {
@@ -634,21 +634,50 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .welcome > :nth-child(3) { animation-delay: 120ms; }
 .welcome h1 { margin: 0; font-size: 27px; font-weight: 600; letter-spacing: -0.022em; text-wrap: balance; }
 .welcome p { margin: 0; color: var(--text-2); font-size: 15px; max-width: 460px; text-wrap: pretty; }
-.welcome-logo { width: 44px; height: 44px; border-radius: 12px; margin-bottom: 12px; outline: 1px solid rgba(0, 0, 0, 0.1); outline-offset: -1px; }
-.suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 24px; max-width: 560px; }
-.suggestion {
-  border: 0; border-radius: 999px;
-  padding: 8px 14px;
-  background: transparent; box-shadow: 0 0 0 1px var(--hair);
-  color: var(--text-2); font-size: 13.5px;
-  cursor: pointer;
-  animation: rise 380ms var(--ease) both;
-  animation-delay: calc(180ms + var(--i, 0) * 50ms);
-  transition-property: background-color, color, scale;
-  transition-duration: 150ms;
+/* An empty chat: nothing, then a typing mark, then one line from the agent in its own place. */
+.welcome.greeting { min-height: 0; align-items: stretch; justify-content: flex-start; text-align: left; padding-top: 18px; }
+.welcome.greeting > * { animation: none; }
+.greeting-typing { display: inline-flex; align-items: center; gap: 4px; height: 24px; animation: fade 220ms var(--ease) both; }
+.greeting-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: typing 1000ms var(--ease) infinite; }
+.greeting-typing span:nth-child(2) { animation-delay: 120ms; }
+.greeting-typing span:nth-child(3) { animation-delay: 240ms; }
+@keyframes typing { 0%, 70%, 100% { opacity: 0.35; translate: 0 0; } 35% { opacity: 1; translate: 0 -2px; } }
+@media (prefers-reduced-motion: reduce) { .greeting-typing span { animation: none; opacity: 0.6; } }
+
+/* Who the chat is with: a chip in the title bar, and the details it opens in the side pane. */
+.identity-chip {
+  max-width: 100%; display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 10px 0 4px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition-property: background-color, scale; transition-duration: 150ms; transition-timing-function: var(--ease);
 }
-.suggestion:hover { background: var(--hover); color: var(--text); }
-.suggestion:active { scale: 0.96; }
+.identity-chip:active { scale: 0.97; }
+.identity-chip:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) { .identity-chip:hover { background: var(--hover); } }
+.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.identity-chip > :first-child { flex: none; }
+.identity-logo { display: block; object-fit: contain; border-radius: 50%; }
+.identity-logo.fallback { display: grid; place-items: center; background: var(--hover); color: var(--text-2); }
+.identity-logo.fallback .ico { width: 55%; height: 55%; }
+.identity-panel { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 16px 16px; text-align: center; }
+.identity-face { display: grid; place-items: center; margin-bottom: 10px; }
+.identity-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em; overflow-wrap: anywhere; }
+.identity-description { margin: 0; max-width: 32ch; color: var(--text-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; overflow-wrap: anywhere; }
+.identity-row {
+  width: 100%; margin-top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px;
+  background: var(--hover); color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition-property: background-color, scale; transition-duration: 150ms; transition-timing-function: var(--ease);
+}
+.identity-row:active:not(:disabled) { scale: 0.99; }
+.identity-row:disabled { cursor: default; opacity: 0.6; }
+.identity-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) { .identity-row:not(:disabled):hover { background: var(--active); } }
+.identity-row-value { min-width: 0; display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
+.identity-row-value > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.identity-row-value .ico { width: 14px; height: 14px; flex: none; }
+.identity-row-value img { width: 18px; height: 18px; object-fit: contain; flex: none; }
+@media (pointer: coarse) { .identity-chip { height: 44px; } }
 
 .load-earlier { display: block; margin: 8px auto 12px; border: 0; background: none; color: var(--text-3); font-size: 12.5px; cursor: pointer; }
 .load-earlier:hover { color: var(--text); }
@@ -2356,7 +2385,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .work-card-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-columns .bd-tag { overflow-wrap: anywhere; }
 .work-board:has(.work-start-area:not([hidden])):not(:has([data-work])) .work-columns { display: none; }
-.app:is([data-view="work"], [data-view="schedules"]) .chat-workspace .waiting { display: none; }
 @media (max-width: 760px) {
   .ticket-body { display: flex; flex-direction: column; overflow: auto; }
   .ticket-properties { border-left: 0; border-top: 1px solid var(--hair); overflow: visible; }
@@ -2397,8 +2425,8 @@ button.ticket-property:hover { background: var(--hover); }
   .ticket-properties { border-left: 0; border-top: 1px solid var(--hair); overflow: visible; }
 }
 @media (pointer: coarse) {
-  .btn, .btn.small, .ticket-property, .work-source, .automations-library button:not(.auto-switch) { min-height: 44px; }
-  .auto-icon, .ticket-back { min-width: var(--control-touch); }
+  .btn, .btn.small, .ticket-property { min-height: 44px; }
+  .ticket-back { min-width: var(--control-touch); }
 }
 
 .ticket { container-type: inline-size; }
@@ -2507,97 +2535,6 @@ button.ticket-property:hover { background: var(--hover); }
 
 .app[data-view="studio"] .workspace-conversation { left: auto; right: 16px; transform: none; }
 
-/* Automations: one card per automation, read top to bottom. */
-.automations-library.sv { width: min(720px, 100%); box-sizing: border-box; padding: 32px 16px 64px; }
-.auto-lib-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-.auto-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.auto-card { background: var(--card); border-radius: 12px; box-shadow: 0 0 0 1px var(--hair); padding: 8px 12px 8px; transition: box-shadow 160ms ease; }
-.auto-card:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 20%, transparent), 0 6px 20px rgba(0, 0, 0, 0.05); }
-.auto-card-top { display: flex; align-items: center; gap: 8px; }
-.auto-card-name { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; padding: 4px 0; outline: none; }
-.auto-card-name::placeholder, .auto-point-text::placeholder { color: var(--text-3); }
-.auto-run { flex: none; gap: 4px; }
-.auto-run .ico { width: 12px; height: 12px; }
-.auto-points { list-style: none; margin: 0; padding: 0; }
-.auto-point { display: flex; align-items: flex-start; gap: 8px; }
-.auto-point-n { flex: none; width: 14px; padding-top: 5px; font-size: 12px; line-height: 1.45; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
-.auto-point-text { flex: 1; min-width: 0; resize: none; overflow: hidden; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13.5px; line-height: 1.45; padding: 4px 0; outline: none; }
-.auto-point-fixed { flex: 1; margin: 0; padding: 4px 0; font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
-.auto-point .auto-point-remove { width: 24px; height: 24px; min-height: 24px; color: var(--text-3); opacity: 0; transition: opacity 120ms ease; }
-.auto-point:focus-within .auto-point-remove { opacity: 1; }
-@media (hover: hover) and (pointer: fine) { .auto-point:hover .auto-point-remove { opacity: 1; } }
-@media (hover: none) { .auto-point .auto-point-remove { opacity: 1; } }
-.auto-card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.auto-add-point { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); font: inherit; font-size: 12.5px; padding: 4px 6px; margin-left: -6px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
-.auto-add-point .ico { width: 12px; height: 12px; }
-@media (hover: hover) and (pointer: fine) { .auto-add-point:hover { background: var(--hover); color: var(--text-2); } }
-.auto-note { flex: 1; min-width: 0; font-size: 12px; color: var(--text-3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.auto-note[data-tone="error"] { color: var(--err); white-space: normal; }
-.auto-when, .auto-time, .auto-cron { height: 26px; border: 0; border-radius: 6px; background: var(--hover); color: var(--text-2); font: inherit; font-size: 12.5px; padding: 0 6px; }
-.auto-cron { width: 110px; font-family: var(--mono); }
-.auto-switch { position: relative; flex: none; width: 30px; height: 18px; border: 0; padding: 0; background: transparent; cursor: pointer; }
-.auto-switch::before { content: ""; position: absolute; inset: 0; border-radius: 9px; background: var(--active); transition: background-color 160ms ease; }
-.auto-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: transform 180ms var(--ease); }
-.auto-switch[aria-checked="true"]::before { background: var(--accent); }
-.auto-switch[aria-checked="true"]::after { transform: translateX(12px); }
-.auto-switch[aria-checked="mixed"]::before { background: color-mix(in srgb, var(--accent) 45%, var(--active)); }
-.auto-switch[aria-checked="mixed"]::after { transform: translateX(6px); }
-.auto-switch:disabled { opacity: 0.5; cursor: default; }
-.auto-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 9px; }
-.auto-legacy { padding: 0; }
-.auto-legacy-open { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; padding: 10px 12px; border-radius: 12px; cursor: pointer; }
-.auto-legacy-what { font-size: 13.5px; line-height: 1.45; }
-.auto-legacy-when { grid-column: 1; font-size: 12px; color: var(--text-3); }
-.auto-legacy-open .auto-note { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
-.auto-dialog { border: 0; border-radius: 14px; padding: 20px; max-width: min(420px, calc(100vw - 32px)); background: var(--card); color: var(--text); box-shadow: var(--shadow-menu); }
-.auto-dialog::backdrop { background: rgba(0, 0, 0, 0.25); }
-.auto-dialog h2 { margin: 0 0 8px; font-size: 15px; }
-.auto-dialog p { margin: 4px 0; font-size: 13px; color: var(--text-2); }
-.auto-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-@media (pointer: coarse) {
-  .auto-card-name, .auto-point-text, .auto-when, .auto-time, .auto-cron { font-size: 16px; }
-  .auto-when, .auto-time, .auto-cron { height: 44px; }
-  .auto-switch { width: 44px; height: 44px; }
-  .auto-switch::before { inset: 9px 0; border-radius: 13px; }
-  .auto-switch::after { top: 11px; width: 22px; height: 22px; }
-  .auto-switch[aria-checked="true"]::after { transform: translateX(18px); }
-  .auto-switch[aria-checked="mixed"]::after { transform: translateX(9px); }
-}
-
-/* Work: the composer, then the open work under it; View all brings the board. */
-.work-home { display: flex; flex-direction: column; align-items: center; height: 100%; overflow: auto; padding: 0 16px 48px; box-sizing: border-box; }
-.work-top { width: min(720px, 100%); flex: none; margin-top: clamp(40px, 22vh, 220px); }
-.work-home[data-all="true"] .work-top { margin-top: 16px; }
-.work-top .dock { padding: 0; }
-.work-top .dock > * { max-width: none; }
-.work-bar { display: flex; justify-content: flex-end; min-height: 28px; margin-top: 4px; }
-.work-view-all { border: 0; border-radius: 6px; background: transparent; color: var(--text-3); font: inherit; font-size: 12.5px; padding: 4px 8px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
-@media (hover: hover) and (pointer: fine) { .work-view-all:hover { background: var(--hover); color: var(--text-2); } }
-.work-view-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.work-who { display: inline-flex; align-items: center; gap: 4px; }
-.work-who[hidden] { display: none; }
-.work-who .ico { width: 12px; height: 12px; }
-.work-list { width: min(720px, 100%); margin-top: 16px; }
-.work-list[hidden], .work-real-board[hidden] { display: none; }
-.work-group + .work-group { margin-top: 16px; }
-.work-group-title { display: flex; gap: 6px; margin: 0 0 2px; padding-left: 8px; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
-.work-group-count { font-variant-numeric: tabular-nums; }
-.work-rows { list-style: none; margin: 0; padding: 0; }
-.work-row { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; padding: 6px 8px; cursor: pointer; transition: background-color 120ms ease; }
-@media (hover: hover) and (pointer: fine) { .work-row:hover { background: var(--hover); } }
-.work-row:active { background: var(--active); }
-.work-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -1px; }
-.work-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.work-row-status { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-3); }
-.work-row[data-group="attention"] .work-row-status { color: var(--accent); }
-.work-row .bd-mark { color: var(--text-3); flex: none; }
-.work-row .bd-avatar { flex: none; }
-.work-mark { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
-.work-mark.working::before { content: ""; width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--text-3); border-top-color: transparent; animation: work-spin 900ms linear infinite; }
-@keyframes work-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .work-mark.working::before { animation: none; } }
-.work-mark.attention::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.work-mark.waiting::before { content: ""; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 1.5px dashed var(--text-3); }
-.work-row:is([data-state="failed"], [data-state="interrupted"]) .work-row-status { color: var(--err); }
-.work-row:is([data-state="failed"], [data-state="interrupted"]) .work-mark.attention::before { background: var(--err); }
-@media (pointer: coarse) { .work-row, .work-view-all { min-height: 44px; } }
+/* The composer carries no mode or model chip until one needs the person: a mode other than
+   Auto, or no model yet. Shift+Tab still cycles the mode; the model lives in the chat's details. */
+.composer .mode-chip[data-mode="auto"], .composer .model-chip:not([data-missing="true"]) { display: none; }

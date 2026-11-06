@@ -44,6 +44,20 @@ async function finished(page, send) {
   await page.waitForTimeout(150);
 }
 
+/// A new chat starts in Auto and runs project writes without a question. A scenario that tests the
+/// question itself sets Manual first, as a person does with Shift+Tab.
+async function manual(page) {
+  await page.locator("#app.ready").waitFor();
+  await page.waitForFunction(() => window.ark.summary()?.execution_mode === "auto");
+  await page.evaluate(() => window.ark.setExecutionMode("manual"));
+}
+
+/// The model is chosen in the chat's details; the composer carries no model chip.
+async function openModelMenu(page) {
+  if (!(await page.locator(".identity-row").isVisible())) await page.locator("#chat-identity").click();
+  await page.locator(".identity-row").click();
+}
+
 const scenarios = {
   async "product-followups"(page) {
     const calls=[];page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/rpc') calls.push(request.postDataJSON());});
@@ -626,7 +640,7 @@ const scenarios = {
     assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
     assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
     assert.equal(rail.sameSurface, false, "the fixed rail stays distinct from the project sidebar without a divider");
-    assert.deepEqual(rail.labels, [1, 1, 1, 1, 1], "wide rail labels stay available to assistive technology only");
+    assert.deepEqual(rail.labels, [1, 1, 1], "wide rail labels stay available to assistive technology only");
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     assert.equal(await page.locator(".destinations").evaluate((el) =>
       getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), false,
@@ -659,7 +673,7 @@ const scenarios = {
     });
     assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
     assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
-    assert.equal(await page.locator(".destination").count(), 5);
+    assert.equal(await page.locator(".destination").count(), 3);
     for (const button of await page.locator(".destination").all()) {
       const box = await button.boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
@@ -685,7 +699,7 @@ const scenarios = {
   async models(page) {
     const chip = page.locator("#model-chip");
     assert.ok(!(await chip.textContent()).includes("single tier"), await chip.textContent());
-    await chip.click();
+    await openModelMenu(page);
     await page.waitForSelector(".model-group .model-name");
     const menu = await page.locator(".popover").textContent();
     assert.ok(!menu.includes("Model for the next turn"), menu);
@@ -1074,6 +1088,7 @@ scenarios.board = board;
 // Files the agent writes are cards that open beside the conversation; the person edits them in
 // place and the file changes: a cell (the total follows), a document's lines.
 async function files(page) {
+  await manual(page);
   const ask = async (text) => {
     await page.locator("#input").fill(text);
     await page.keyboard.press("Enter");
@@ -1254,6 +1269,7 @@ scenarios.files = files;
 // A program the agent runs writes a chart, a table, a report that shows the chart, and a PDF.
 // Each is a card in the turn and opens in the view for its kind; nothing names the program.
 async function analysis(page) {
+  await manual(page);
   await page.locator("#input").fill("Analyze the sales and make me a chart and a short report.");
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
   await page.keyboard.press("Enter");
@@ -1303,6 +1319,7 @@ async function analysis(page) {
 scenarios.analysis = analysis;
 
 async function imageFailure(page) {
+  await manual(page);
   await page.evaluate(() => {
     URL.createObjectURL = () => "blob:unreadable-image";
   });
@@ -1323,6 +1340,7 @@ scenarios["image-failure"] = imageFailure;
 // ADR 0034: a run changes one file and removes another. Each card of that turn puts the file
 // back as it was before the turn, and the changed one can take the turn's version back.
 async function restore(page) {
+  await manual(page);
   const run = async (text) => {
     const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
     await page.locator("#input").fill(text);
@@ -1457,12 +1475,12 @@ async function uploadDrafts(page) {
       await open(other);
       await input.fill("Unrelated draft");
       await input.evaluate(el => el.setSelectionRange(2, 5));
-      await page.locator("#mode-chip").focus();
+      await page.locator("#dictate").focus();
       release();
       await page.locator(".adding").waitFor({ state: "detached" });
       assert.equal(await input.inputValue(), "Unrelated draft");
       assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [2, 5]);
-      assert.equal(await page.locator("#mode-chip").evaluate(el => document.activeElement === el), true);
+      assert.equal(await page.locator("#dictate").evaluate(el => document.activeElement === el), true);
       if (differentProject) await assert.rejects(page.evaluate(name => window.ark.call("file_read", { path: name }), name));
       await open(origin.session);
       assert.equal(await input.inputValue(), `Origin draft\nAdded to the project: ${name}`);
@@ -2934,15 +2952,14 @@ async function chatWorkspacePolish(page) {
       const r = document.querySelector(selector).getBoundingClientRect();
       return r.top + r.height / 2;
     };
-    return [center("#model-chip"), center("#mode-chip"), center("#send")];
+    return [center("#attach"), center("#dictate"), center("#send")];
   });
   assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, JSON.stringify(centers));
   const composerOrder = await page.evaluate(() => {
     const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
-    return { attach: left("#attach"), mode: left("#mode-chip"), model: left("#model-chip"), send: left("#send") };
+    return { attach: left("#attach"), dictate: left("#dictate"), send: left("#send") };
   });
-  assert.ok(composerOrder.attach < composerOrder.model && composerOrder.model < composerOrder.mode
-    && composerOrder.mode < composerOrder.send, JSON.stringify(composerOrder));
+  assert.ok(composerOrder.attach < composerOrder.dictate && composerOrder.dictate < composerOrder.send, JSON.stringify(composerOrder));
 
   const newChat = page.locator(".project-row[aria-current='true'] .project-new-chat");
   await newChat.hover();
@@ -3322,7 +3339,7 @@ scenarios.places = async (page) => {
   await page.locator(".palette-input").waitFor();
   assert.equal(await page.locator(".palette-item", { hasText: "/model" }).count(), 0);
   await page.keyboard.press("Escape");
-  await page.locator("#model-chip").click();
+  await openModelMenu(page);
   const remoteClaude = page.locator(".models-pop .model-group", { hasText: "Claude subscription" });
   await remoteClaude.waitFor();
   assert.equal(await remoteClaude.locator(".model-dot").getAttribute("data-ok"), "false");
@@ -3352,7 +3369,7 @@ scenarios.places = async (page) => {
   await line.waitFor({ state: "hidden" });
 
   // The model menu is the server's: its program signs in there, answered here.
-  await page.locator("#model-chip").click();
+  await openModelMenu(page);
   const sign = page.locator(".models-pop .model-group", { hasText: "Claude subscription" }).getByRole("button", { name: "Sign in" });
   await sign.waitFor();
   await sign.click();

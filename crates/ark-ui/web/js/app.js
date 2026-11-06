@@ -1836,6 +1836,7 @@ async function showView(id, params) {
   showTitle();
   sidebar.markView(id);
   topbar.mark(id);
+  destinations?.mark(null);
   reportFocus();
   entry.ctl.focusInput?.();
   if (pane?.isOpen) pane.reportFocus();

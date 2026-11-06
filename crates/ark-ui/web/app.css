@@ -1139,6 +1139,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 }
 .dictation-status[hidden] { display: none; }
 .composer-bar { min-height: 32px; display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+/* The empty space between what the person chooses (left) and what the chat shows and does
+   (right). Send stays at the right edge whichever of the others are drawn. */
+.composer-bar::after { content: ""; order: 4; flex: 1 1 0; min-width: 0; }
 .chip {
   height: 30px; min-height: 30px; display: inline-flex; align-items: center;
   border: 0; background: transparent;
@@ -1150,7 +1153,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   transition-duration: 150ms;
 }
 .chip:hover { background: var(--hover); color: var(--text-2); }
-.model-chip { order: 3; min-width: 0; max-width: 45%; margin-left: auto; }
+.model-chip { order: 2; min-width: 0; max-width: 45%; }
 /* Nothing chosen yet: the button asks for it. */
 .chip[data-missing="true"] { color: var(--accent); font-weight: 500; background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .chip[data-missing="true"]:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
@@ -1165,14 +1168,13 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   transition-duration: 150ms;
 }
 .ctx-meter:empty { display: none; }
-.ctx-meter { order: 4; height: 30px; white-space: nowrap; flex: none; margin-left: auto; }
-.ctx-meter:not(:empty) ~ .send, .chat-view-actions:not(:empty) ~ .send { margin-left: 0; }
+.ctx-meter { order: 5; height: 30px; white-space: nowrap; flex: none; }
 .ctx-meter:hover { background: var(--hover); color: var(--text-2); }
 .ctx-meter[data-level="mid"] { color: var(--warn); }
 .ctx-meter[data-level="high"] { color: var(--err); }
 .send {
   position: relative;
-  order: 5; width: 30px; height: 30px; flex: none; margin-left: auto;
+  order: 5; width: 30px; height: 30px; flex: none;
   border: 0; border-radius: 50%;
   background: var(--text); color: var(--bg);
   display: grid; place-items: center;
@@ -2169,7 +2171,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .wait-row[aria-disabled]:hover { background: transparent; }
 
 /* ---- where a chat runs (ADR 0052) ----------------------------------------------------------- */
-.composer-bar .chip.place-chip { order: 4; display: inline-flex; align-items: center; gap: 5px; margin-right: 0; max-width: 28%; }
+.composer-bar .chip.place-chip { order: 3; display: inline-flex; align-items: center; gap: 5px; margin-right: 0; max-width: 28%; }
 .composer-bar .chip.place-chip[hidden] { display: none; }
 .place-chip svg { width: 13px; height: 13px; flex: none; }
 .place-chip span { overflow: hidden; text-overflow: ellipsis; }
@@ -2209,7 +2211,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .composer[data-away="true"] textarea, .composer[data-away="true"] .send,
 .composer[data-unavailable="true"] textarea, .composer[data-unavailable="true"] .send, .composer[data-unavailable="true"] .dictate { pointer-events: none; opacity: 0.45; }
 .chat-view { flex: 1; min-height: 0; height: 100%; }
-.chat-view-actions { order: 4; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.chat-view-actions { order: 5; display: flex; align-items: center; gap: 4px; }
 .chat-view-actions:empty { display: none; }
 .chat-view-actions:not(:empty) + .send { display: none; }
 
@@ -2263,7 +2265,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .composer-bar .attach .ico, .composer-bar .dictate .ico, .composer-bar .send .ico { width: 20px; height: 20px; }
 .composer-bar { min-height: 40px; }
 .composer-bar .model-chip { order: 2; flex: 0 1 auto; max-width: 45%; margin-left: 0; text-align: left; }
-.composer-bar .place-chip { order: 4; max-width: 28%; color: var(--text-3); }
+.composer-bar .place-chip { order: 3; max-width: 28%; color: var(--text-3); }
 .composer-bar .place-chip { min-width: 0; }
 .composer-bar .attach { margin-left: 0; }
 .composer-bar .chip, .composer-bar .ctx-meter { min-height: 40px; }

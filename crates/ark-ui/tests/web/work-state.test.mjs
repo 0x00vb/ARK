@@ -22,16 +22,14 @@ async function shoot(page, name) {
   }
 }
 
-async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, gateMode = false, tabs = null, places = { here: "This computer", places: [] } } = {}) {
+async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, tabs = null, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
-  let summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: chosenMode ? 1 : 0 };
+  let summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: chosenMode ? "manual" : "auto", execution_mode_revision: chosenMode ? 1 : 0 };
   if (remote) summary.place = { id: "remote", name: "Remote computer", state: "ok" };
   if (empty) summary.session = { ...summary.session, turns: 0 };
   const request = { id: 7, session: "chat-b", chat: "Supplier comparison", project: null, line: "Send the supplier summary?", request: {}, choices: [] };
   const modeCalls = [], sendCalls = [];
-  let modeGate = null, releaseMode = () => {};
-  if (gateMode) modeGate = new Promise(resolve => { releaseMode = resolve; });
   let approvals = [], stream, holdRead = false, releaseRead, readStarted;
   const reading = new Promise(resolve => { readStarted = resolve; });
   const errors = [];
@@ -44,7 +42,6 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
     if (method === "send") { sendCalls.push({ params, modeCalls: modeCalls.length, mode: summary.execution_mode }); return { started: true }; }
     if (method === "execution_mode" || method === "chat_execution_mode") {
       modeCalls.push({ method, ...params });
-      if (modeGate) await modeGate;
       if (params.revision !== summary.execution_mode_revision) throw new Error("the execution mode changed; review it and send again");
       summary = { ...summary, execution_mode: params.mode, execution_mode_revision: summary.execution_mode_revision + 1 };
       return summary;
@@ -95,7 +92,7 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html${detached ? "?detached=chat-b" : ""}`);
     await page.locator('.session[data-id="chat-b"] .session-working').waitFor();
-    await run(page, { modeCalls, sendCalls, releaseMode: () => releaseMode(), emit, request, snapshot: items => { approvals = items; }, assign: (id, names) => { sessions.find(session => session.id === id).participants = names; }, hold: () => { holdRead = true; }, reading, release: () => releaseRead() });
+    await run(page, { modeCalls, sendCalls, emit, request, snapshot: items => { approvals = items; }, assign: (id, names) => { sessions.find(session => session.id === id).participants = names; }, hold: () => { holdRead = true; }, reading, release: () => releaseRead() });
     assert.deepEqual(errors, []);
   } finally {
     await context.close(); stream?.end(); server.closeAllConnections();
@@ -251,12 +248,12 @@ test("primary controls have distinct targets and shared icons at desktop and pho
 }));
 
 
-test("the composer shows attachment and dictation, no mode control, and no model chip until one needs the person", () => fixture(async (page, { modeCalls }) => {
+test("the composer shows attachment and dictation, no mode control, and no model chip until one needs the person, and the page does not switch the chat to Auto", () => fixture(async (page, { modeCalls }) => {
   assert.deepEqual(await page.locator(".composer-bar > button").evaluateAll(nodes => nodes.slice(0, 2).map(node => node.id)), ["attach", "dictate"]);
   assert.equal(await page.locator("#model-chip").isVisible(), false);
   assert.equal(await page.locator("#mode-chip").count(), 0);
   await page.waitForTimeout(500);
-  assert.deepEqual(modeCalls, [{ method: "chat_execution_mode", session: "chat-a", mode: "auto", revision: 0, model: "mock" }]);
+  assert.deepEqual(modeCalls, [], "a new chat is Auto already (ADR 0107)");
   assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 44);
 }, { empty: true }));
 
@@ -266,17 +263,15 @@ test("a chat with history keeps the mode it has and shows no control for it", ()
   assert.equal(await page.locator("#mode-chip").count(), 0);
 }));
 
-test("the first message waits for the Auto call, so the host and the page agree", () => fixture(async (page, { modeCalls, sendCalls, releaseMode }) => {
+test("the first message of a new chat goes at once, in Auto, with no mode call", () => fixture(async (page, { modeCalls, sendCalls }) => {
   await page.locator("#input").fill("hello");
   await page.keyboard.press("Enter");
+  await page.waitForFunction(() => true);
   await page.waitForTimeout(400);
-  assert.equal(sendCalls.length, 0, "the send waits while the mode call is open");
-  releaseMode();
-  await page.waitForTimeout(700);
   assert.equal(sendCalls.length, 1);
-  assert.deepEqual([sendCalls[0].params.execution_mode, sendCalls[0].params.execution_mode_revision], ["auto", 1]);
-  assert.equal(modeCalls.length, 1);
-}, { empty: true, gateMode: true }));
+  assert.deepEqual([sendCalls[0].params.execution_mode, sendCalls[0].params.execution_mode_revision], ["auto", 0]);
+  assert.equal(modeCalls.length, 0);
+}, { empty: true }));
 
 test("a mode the person chose is sent with the turn and has no control", () => fixture(async (page, { sendCalls }) => {
   assert.equal(await page.locator("#mode-chip").count(), 0);

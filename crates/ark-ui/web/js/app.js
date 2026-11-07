@@ -337,6 +337,8 @@ const RESOURCE_METHODS = {
 /// the first message. An older chat keeps the authority it has. A failure leaves the chat in
 /// Manual with its chip showing, and is tried again after a few seconds.
 const adopted = new Set();
+/// Pictures waiting in a chat's composer while another chat is shown, by chat.
+const imageStash = new Map();
 const adopting = new Map();
 function adoptAuto(summary, set) {
   const id = summary?.session?.id;
@@ -816,7 +818,7 @@ class SecondaryChat {
     this.api = Object.create(base);
     this.api.summary = () => chat.summary;
     this.api.dictationRoute = () => ({ place: chat.summary?.place?.name || "", session: chat.session, runtime: chat.summary?.location?.runtime });
-    this.api.submit = (text) => chat.submit(text);
+    this.api.submit = (text, options) => chat.submit(text, options);
     this.api.send = this.api.submit;
     this.api.steer = async (text) => {
       try {
@@ -861,6 +863,8 @@ class SecondaryChat {
     for (const approval of read.approvals || []) this.handle({ kind: "approval", ...approval });
     elements.surface.addEventListener("pointerdown", () => this.focus(false), true);
     this.composer.input.value = savedDraft(this.session);
+    this.composer.restoreImages(imageStash.get(this.session));
+    imageStash.delete(this.session);
     this.composer.changed();
     this.composer.input.addEventListener("input", () => saveDraft(this.session, this.composer.input.value));
     elements.scroller.addEventListener("scroll", () => saveScroll(this.session, elements.scroller), { passive: true });
@@ -891,11 +895,13 @@ class SecondaryChat {
     this.composer.setRunning(running);
   }
 
-  async submit(text, { images = [] } = {}) {
+  async submit(text, { images = [], named = false } = {}) {
     text = String(text || "").trim();
-    if (!text || this.running) return;
+    if (!text) return;
+    // The agent began meanwhile: the message waits for it, pictures with it.
+    if (this.running) return this.composer.enqueue(text, images);
     await adopting.get(this.session);
-    if (this.running) return;
+    if (this.running) return this.composer.enqueue(text, images);
     this.thread.begin(text, { images }).local = true;
     this.setRunning(true);
     try {
@@ -910,7 +916,8 @@ class SecondaryChat {
     } catch (error) {
       this.thread.finish({ ok: false, error: error.message });
       this.setRunning(false);
-      this.composer.set(text);
+      // A text made of the file names was never typed: it is not put back.
+      this.composer.set(named ? "" : text);
       this.composer.addImages(images.map(({ path, name }) => ({ path, name })));
       toast(error.message);
     }
@@ -947,7 +954,7 @@ class SecondaryChat {
         if (message.summary) this.applySummary(message.summary);
         this.composer.clearSteering();
         const next = this.composer.takeNext(message.undelivered || []);
-        if (next) setTimeout(() => this.submit(next.text, { images: next.images }), 120);
+        if (next) setTimeout(() => this.submit(next.text, { images: next.images, named: next.named }), 120);
         break;
       }
       default: return false;
@@ -961,6 +968,7 @@ class SecondaryChat {
 
   dispose() {
     this.composer.dispose();
+    imageStash.set(this.session, this.composer.stashImages());
     saveDraft(this.session, this.composer.input.value);
     saveScroll(this.session, this.elements.scroller);
     this.elements.surface.remove();
@@ -1380,25 +1388,26 @@ function popover(anchor, children, { above = false, end = false, onClose } = {})
 
 // ---- actions --------------------------------------------------------------------------------
 
-async function submit(text, { images = [] } = {}) {
+async function submit(text, { images = [], named = false } = {}) {
   text = String(text || "").trim();
   if (!text) return;
   // A slash word that is not a command in this chat is ordinary message text. In particular,
   // selecting another computer must never make a hidden command mutate the local empty chat.
   if (text.startsWith("/") && (viewForCommand(text, api.project()) || composer.commandAvailable(text))) return runCommand(text);
-  if (state.running) return composer.enqueue(text, images);
+  if (state.running) return composer.enqueue(text, images, named);
   // No model chosen yet: the text waits in the composer while the person picks one.
   if (composer.missing) {
-    composer.set(text);
+    composer.set(named ? "" : text);
     composer.addImages(images);
     return composer.modelMenu();
   }
   // The first message of a chat placed on another computer starts it there.
-  if (await places.beforeSend(text, images)) return;
+  if (await places.beforeSend(text, images, named)) return;
   for (const hook of registry.submitHooks) {
     try {
-      if (await hook(text)) return;
+      if (await hook(text)) return composer.addImages(images);
     } catch (e) {
+      composer.addImages(images);
       return toast(e.message || String(e));
     }
   }
@@ -1416,7 +1425,7 @@ async function submit(text, { images = [] } = {}) {
     toast(e.message);
     thread.finish({ ok: false, error: e.message });
     setRunning(false);
-    composer.set(text);
+    composer.set(named ? "" : text);
     composer.addImages(images.map(({ path, name }) => ({ path, name })));
   }
 }
@@ -1537,8 +1546,12 @@ function applySummary(s) {
   showTitle();
   rememberTab(s);
   if (changed) {
-    // Promotion disposes the secondary composer and saves its latest draft first.
+    // The pictures wait with the chat they were put in. Promotion disposes the secondary
+    // composer and saves its latest draft and pictures first.
+    if (before) imageStash.set(before, composer.stashImages());
     applyPrimaryChange(before, state.sessionId);
+    composer.restoreImages(imageStash.get(state.sessionId));
+    imageStash.delete(state.sessionId);
     const draft = savedDraft(state.sessionId);
     composer.input.value = draft;
     composer.caret = draft.length;
@@ -1758,7 +1771,7 @@ function onEvent(msg) {
       refreshRing();
       composer.clearSteering();
       const next = composer.takeNext(msg.undelivered || []);
-      if (next) setTimeout(() => submit(next.text, { images: next.images }), 120);
+      if (next) setTimeout(() => submit(next.text, { images: next.images, named: next.named }), 120);
       break;
     }
     case "summary":

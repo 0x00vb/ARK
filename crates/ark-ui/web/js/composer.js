@@ -55,7 +55,8 @@ export class Composer {
     this.fileOptions = { captureOrigin: elements.captureOrigin, progressTarget: elements.uploads };
     this.input.addEventListener("paste", (e) => {
       const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
-      if (!files.length || !elements.captureDraft || !this.attach) return;
+      // A clipboard with words as well (copied from a document) is a paste of words.
+      if (!files.length || e.clipboardData.getData("text/plain") || !elements.captureDraft || !this.attach) return;
       e.preventDefault();
       addFiles(api, elements.captureDraft, files, this.fileOptions);
     });
@@ -216,6 +217,25 @@ export class Composer {
     this.focus();
   }
 
+  /// The pictures leave with the chat they were put in, and come back with it.
+  stashImages() {
+    const kept = this.images;
+    for (const image of kept) image.el.remove();
+    this.images = [];
+    this.strip.hidden = true;
+    this.changed();
+    return kept;
+  }
+
+  restoreImages(kept = []) {
+    for (const image of kept) {
+      this.images.push(image);
+      this.strip.append(image.el);
+    }
+    this.strip.hidden = !this.images.length;
+    this.changed();
+  }
+
   /// The images go with the message: their pictures move to it, and the composer is clear.
   takeImages() {
     const taken = this.images.map(({ path, name, url }) => ({ path, name, url }));
@@ -321,17 +341,17 @@ export class Composer {
     this.changed();
     const view = command && viewForCommand(text, this.api.project?.());
     if (view) return this.api.openView(view.id);
-    if (!this.running) return this.api.submit(text, { images });
+    if (!this.running) return this.api.submit(text, { images, named: !typed });
     if (command) {
       this.enqueue(text);
       return;
     }
-    if (queue || images.length) this.enqueue(text, images);
+    if (queue || images.length) this.enqueue(text, images, !typed);
     else this.api.steer(text);
   }
 
-  enqueue(text, images = []) {
-    this.queue.push({ text, images });
+  enqueue(text, images = [], named = false) {
+    this.queue.push({ text, images, named });
     this.paintQueue();
   }
 
@@ -354,7 +374,7 @@ export class Composer {
 
   /// Messages to send after the turn: `first` (steering that came too late) goes ahead.
   takeNext(first = []) {
-    this.queue = [...first.map((text) => ({ text, images: [] })), ...this.queue];
+    this.queue = [...first.map((text) => ({ text, images: [], named: false })), ...this.queue];
     const next = this.queue.shift();
     this.paintQueue();
     return next;

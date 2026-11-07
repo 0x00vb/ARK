@@ -575,21 +575,60 @@ async fn a_model_that_reads_no_images_is_told_so_and_the_turn_still_lists_the_im
     assert_eq!(turns[0]["images"], json!(["shot.png"]));
 }
 
+/// The folder `name` landed in, found by looking for it under the store.
+fn find(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.file_name().is_some_and(|n| n == name) {
+            return Some(path);
+        }
+        if path.is_dir() && !path.is_symlink() {
+            if let Some(found) = find(&path, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 #[tokio::test]
-async fn images_outside_the_project_or_not_images_are_refused_and_nothing_starts() {
+async fn images_outside_the_project_not_images_or_too_big_are_refused_and_nothing_starts() {
+    use base64::Engine as _;
     let dir = tempfile::tempdir().unwrap();
     let (host, _) = seeing(dir.path(), true).await;
     drop_file(&host, "notes.txt", "aGVsbG8=").await;
-    for images in [
-        json!(["../shot.png"]),
-        json!(["notes.txt"]),
-        json!(["missing.png"]),
-    ] {
+    let root = find(dir.path(), "notes.txt")
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(PIXEL)
+        .unwrap();
+    // A real image one level above the project folder, an absolute path to it, and a link to it.
+    let outside = root.parent().unwrap().join("outside.png");
+    std::fs::write(&outside, &png).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, root.join("link.png")).unwrap();
+    // A PNG over the size limit, with a valid header.
+    let mut big = png.clone();
+    big.resize(3_600_000, 0);
+    std::fs::write(root.join("big.png"), &big).unwrap();
+    let mut refused = vec![
+        ("../outside.png".to_string(), "outside the project folder"),
+        (outside.display().to_string(), "outside the project folder"),
+        ("notes.txt".to_string(), "not a PNG"),
+        ("missing.png".to_string(), ""),
+        ("big.png".to_string(), "larger than 3.5 MB"),
+    ];
+    #[cfg(unix)]
+    refused.push(("link.png".to_string(), "outside the project folder"));
+    for (image, why) in refused {
         let error = host
-            .call("send", json!({ "text": "look", "images": images }))
+            .call("send", json!({ "text": "look", "images": [image] }))
             .await
             .unwrap_err();
-        assert!(!error.to_string().is_empty());
+        assert!(error.to_string().contains(why), "{image}: {error}");
         assert!(!host.is_running(), "a refused message starts no turn");
     }
     let many: Vec<String> = (0..9).map(|i| format!("{i}.png")).collect();
@@ -598,6 +637,18 @@ async fn images_outside_the_project_or_not_images_are_refused_and_nothing_starts
         .await
         .unwrap_err();
     assert!(error.to_string().contains("at most"), "{error}");
+    // Each under the limit, together over it.
+    for i in 0..6 {
+        let mut b = png.clone();
+        b.resize(3_400_000, 0);
+        std::fs::write(root.join(format!("part{i}.png")), &b).unwrap();
+    }
+    let parts: Vec<String> = (0..6).map(|i| format!("part{i}.png")).collect();
+    let error = host
+        .call("send", json!({ "text": "look", "images": parts }))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("together"), "{error}");
 }
 
 #[tokio::test]

@@ -35,14 +35,21 @@ export class Thread {
     // The person's hand on the scroller lets go of the end at once: a snap already queued
     // would otherwise land after the scroll event that says they moved.
     const release = () => { this.stick = false; };
-    scroller.addEventListener("wheel", (e) => { if (e.deltaY < 0 && scroller.scrollTop > 0) release(); }, { passive: true });
+    // A code block or table that scrolls takes its own wheel: the thread does not move.
+    const inner = (el) => {
+      for (let n = el; n && n !== scroller; n = n.parentElement) {
+        if (n.scrollHeight > n.clientHeight + 1 && n.scrollTop > 0 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return true;
+      }
+      return false;
+    };
+    scroller.addEventListener("wheel", (e) => {
+      if (e.deltaY < 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX) && scroller.scrollTop > 0 && !inner(e.target)) release();
+    }, { passive: true });
     scroller.addEventListener("touchmove", () => {
       if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 4) release();
     }, { passive: true });
-    scroller.addEventListener("pointerdown", (e) => { if (e.target === scroller) release(); });
-    scroller.addEventListener("keydown", (e) => {
-      if (["PageUp", "Home", "ArrowUp"].includes(e.key) && e.target === scroller) release();
-    });
+    // A press on the scrollbar (the margins beside the thread are the scroller too).
+    scroller.addEventListener("pointerdown", (e) => { if (e.target === scroller && e.offsetX >= scroller.clientWidth) release(); });
     // Up lets go; back to the bottom (or down to near it) follows again.
     scroller.addEventListener("scroll", () => {
       const s = scroller;

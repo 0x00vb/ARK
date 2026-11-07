@@ -68,9 +68,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-/// Images one message carries, and the most bytes of each (the smallest limit a provider has).
+/// Images one message carries, the most bytes of each and of all. A provider counts an image as
+/// base64 (a third more): Anthropic refuses one over 5 MB and a request over 32 MB, so 3.5 MB each
+/// and 20 MB in all stay under both. The page shrinks a larger image before it sends it.
 const MAX_IMAGES: usize = 8;
-const MAX_IMAGE_BYTES: usize = 5 << 20;
+const MAX_IMAGE_BYTES: usize = 3_500_000;
+const MAX_IMAGES_BYTES: usize = 20_000_000;
 
 mod copying;
 mod held;
@@ -6418,26 +6421,48 @@ impl Host {
         );
         anyhow::ensure!(!conv.is_running(), "the agent is already working");
         let (root, _) = conv.ix.lock().await.workspace()?;
-        let mut pictures = Vec::new();
-        for path in &paths {
-            let (bytes, media_type, _) = ark_files::media(&root, path)?;
-            anyhow::ensure!(
-                matches!(
-                    media_type.as_str(),
-                    "image/png" | "image/jpeg" | "image/gif" | "image/webp"
-                ),
-                "{path} is not a PNG, JPEG, GIF or WebP image"
-            );
-            anyhow::ensure!(
-                bytes.len() <= MAX_IMAGE_BYTES,
-                "{path} is larger than {} MB",
-                MAX_IMAGE_BYTES >> 20
-            );
-            pictures.push(ark_model::Picture {
-                media_type,
-                bytes: Arc::new(bytes),
-            });
-        }
+        let list = paths.clone();
+        // Off the async runtime: the files are read here, whole.
+        let pictures =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ark_model::Picture>> {
+                let mut total = 0;
+                let mut pictures = Vec::new();
+                for path in &list {
+                    // The size first: a refused file is never read.
+                    let size = std::fs::metadata(ark_files::inside(&root, path)?)?.len() as usize;
+                    anyhow::ensure!(
+                        size <= MAX_IMAGE_BYTES,
+                        "{path} is larger than {:.1} MB; make it smaller",
+                        MAX_IMAGE_BYTES as f64 / 1e6
+                    );
+                    total += size;
+                    anyhow::ensure!(
+                        total <= MAX_IMAGES_BYTES,
+                        "the images are larger than {} MB together; send fewer",
+                        MAX_IMAGES_BYTES / 1_000_000
+                    );
+                    let (bytes, media_type, _) = match ark_files::media(&root, path) {
+                        // A text file, a sheet: not a picture.
+                        Err(ark_files::Error::Input(_)) => {
+                            anyhow::bail!("{path} is not a PNG, JPEG, GIF or WebP image")
+                        }
+                        other => other?,
+                    };
+                    anyhow::ensure!(
+                        matches!(
+                            media_type.as_str(),
+                            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                        ),
+                        "{path} is not a PNG, JPEG, GIF or WebP image"
+                    );
+                    pictures.push(ark_model::Picture {
+                        media_type,
+                        bytes: Arc::new(bytes),
+                    });
+                }
+                Ok(pictures)
+            })
+            .await??;
         Ok(ark_interact::Attachments { paths, pictures })
     }
 

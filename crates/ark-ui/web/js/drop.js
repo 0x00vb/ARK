@@ -18,6 +18,10 @@ const TRIES = 3;
 
 /// What the model reads: every provider takes these.
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+/// The most bytes of an image the host sends the model, and the longest side a model reads well.
+/// A larger image is made smaller before it is sent: a screenshot of a large display is.
+const IMAGE_BYTES = 3_500_000;
+const IMAGE_SIDE = 1568;
 const isImage = (file) => /^image\/(png|jpeg|gif|webp)$/.test(file.type) || IMAGE.test(file.name);
 
 /// One set of files on its way at a time, from a drop or a picker.
@@ -144,6 +148,7 @@ function choose(attrs, picked) {
 
 async function addToProject(api, complete, list, progressTarget, attach = false) {
   if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
+  if (attach) await Promise.all(list.filter((f) => !f.path.includes("/") && isImage(f.file)).map(fitImage));
   const pictures = attach ? uniquePictures(list) : [];
   const progress = new Progress(list, "Adding", undefined, progressTarget);
   try {
@@ -159,6 +164,33 @@ async function addToProject(api, complete, list, progressTarget, attach = false)
     api.toast(progress.stopped ? "Stopped. Nothing was added." : `The files were not added: ${e.message}`);
   } finally {
     progress.remove();
+  }
+}
+
+/// An image over the limit becomes a PNG of at most `IMAGE_SIDE` pixels, or a JPEG when that is
+/// still too big. One the browser cannot read stays as it is, and the host says why it refuses it.
+async function fitImage(item) {
+  const { file } = item;
+  if (file.size <= IMAGE_BYTES) return;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return;
+  }
+  const scale = Math.min(1, IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  for (const [type, quality] of [["image/png"], ["image/jpeg", 0.9], ["image/jpeg", 0.7]]) {
+    const blob = await new Promise((done) => canvas.toBlob(done, type, quality));
+    if (!blob || blob.size > IMAGE_BYTES) continue;
+    const name = file.name.replace(/\.[^.]*$/, "") + (type === "image/png" ? ".png" : ".jpg");
+    item.file = new File([blob], name, { type });
+    item.path = name;
+    return;
   }
 }
 

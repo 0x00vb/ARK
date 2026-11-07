@@ -106,3 +106,34 @@ test("scrolling back to the bottom follows the stream again, and a new message a
   assert.ok(await gap(page) < 4, "a new turn scrolls to its start");
   await page.close();
 });
+
+test("a wheel over a code block that scrolls itself does not stop the stream following", async () => {
+  const page = await streaming();
+  // A block at the end of the thread with its own scroll, already scrolled down a little.
+  await page.evaluate(() => {
+    const inner = document.createElement("div");
+    inner.id = "inner";
+    inner.style.cssText = "height:60px;overflow:auto";
+    inner.innerHTML = '<div style="height:600px">code</div>';
+    window.thread.root.append(inner);
+    inner.scrollTop = 100;
+    scroller.scrollTop = scroller.scrollHeight;
+  });
+  await page.waitForFunction(() => window.thread.stick);
+  const box = await page.locator("#inner").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -30);
+  await page.waitForFunction(() => document.querySelector("#inner").scrollTop < 100);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.thread.stick), true, "the thread still follows");
+  await page.close();
+});
+
+test("a click in the margin beside the thread does not stop the stream following", async () => {
+  const page = await streaming();
+  await page.evaluate(() => { document.getElementById("thread").style.maxWidth = "300px"; });
+  await page.mouse.click(20, 200);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.thread.stick), true);
+  await page.close();
+});

@@ -24,7 +24,10 @@ export function thumb(api, { path, url }, { keep = false } = {}) {
   api.call("file_media", { path }).then((m) => {
     const bytes = Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
     show(URL.createObjectURL(new Blob([bytes], { type: m.media_type })), true);
-  }).catch(() => {});
+  }).catch(() => {
+    // A file that is gone or unreadable leaves its tile empty.
+    img.dataset.failed = "true";
+  });
   return img;
 }
 

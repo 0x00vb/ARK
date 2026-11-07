@@ -6402,8 +6402,31 @@ impl Host {
             });
         }
         let host = self.clone();
-        tokio::spawn(async move { host.run_turn(conv, input, ctl).await });
+        tokio::spawn(async move {
+            let turn = tokio::spawn(host.clone().run_turn(conv.clone(), input, ctl));
+            if let Err(e) = turn.await {
+                host.turn_crashed(&conv, &e.to_string());
+            }
+        });
         Ok(())
+    }
+
+    /// A turn whose task died before it could say so: free the chat and end the turn.
+    fn turn_crashed(&self, conv: &Conv, why: &str) {
+        tracing::error!(error = why, "a chat turn crashed");
+        *conv.running.lock().unwrap() = None;
+        self.emit(json!({
+            "kind": "turn_finished",
+            "session": conv.session(),
+            "ok": false,
+            "cancelled": false,
+            "error": format!("The turn stopped unexpectedly: {why}"),
+            "answer": "",
+            "steps": 0,
+            "undelivered": [],
+            "summary": Value::Null,
+        }));
+        self.emit_working();
     }
 
     async fn run_turn(self: Arc<Self>, conv: Arc<Conv>, input: String, ctl: TurnControl) {

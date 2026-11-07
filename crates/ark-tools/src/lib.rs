@@ -428,7 +428,19 @@ impl Registry {
         let adapter = self
             .adapter_for(action)
             .ok_or_else(|| AdapterError::UnknownAction(action.to_string()))?;
-        adapter.run(action, input, ctx).await
+        // A tool that panics fails its own call; the turn goes on and the model sees the failure.
+        futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+            adapter.run(action, input, ctx),
+        ))
+        .await
+        .unwrap_or_else(|panic| {
+            let why = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown cause".into());
+            Err(AdapterError::Tool(format!("`{action}` crashed: {why}")))
+        })
     }
 }
 
@@ -553,6 +565,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.output["echoed"], "hi");
+    }
+
+    struct Crashes;
+
+    #[async_trait]
+    impl Adapter for Crashes {
+        fn name(&self) -> &str {
+            "crash"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            vec![ActionDescriptor::new("crash.now", "panics", RiskTier::Read)]
+        }
+        async fn run(
+            &self,
+            _action: &str,
+            _input: serde_json::Value,
+            _ctx: &RunCtx<'_>,
+        ) -> Result<ActionOutput> {
+            panic!("byte range starts at 1 but ends at 0");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_action_that_panics_returns_an_error() {
+        let reg = Registry::new().with(Arc::new(Crashes));
+        let blobs = NoBlobs;
+        let ctx = RunCtx::new(&blobs);
+        let err = reg
+            .run("crash.now", serde_json::json!({}), &ctx)
+            .await
+            .err()
+            .expect("a crash is an error")
+            .to_string();
+        assert!(err.contains("`crash.now` crashed: byte range"), "{err}");
     }
 
     #[tokio::test]

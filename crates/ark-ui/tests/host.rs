@@ -179,6 +179,7 @@ impl Adapter for Notes {
         vec![
             ActionDescriptor::new("notes.read", "read the notes", RiskTier::Read),
             ActionDescriptor::new("notes.save", "save the notes", RiskTier::Mutate),
+            ActionDescriptor::new("notes.boom", "a tool that panics", RiskTier::Read),
         ]
     }
     async fn run(
@@ -187,6 +188,9 @@ impl Adapter for Notes {
         _i: Value,
         _c: &RunCtx<'_>,
     ) -> ark_tools::Result<ActionOutput> {
+        if action == "notes.boom" {
+            panic!("byte range starts at 1 but ends at 0");
+        }
         if action == "notes.save" {
             self.saves.fetch_add(1, Ordering::SeqCst);
             return Ok(ActionOutput::json(json!({ "saved": true })));
@@ -236,7 +240,7 @@ fn app(dir: &std::path::Path, model: Arc<MockProvider>, saves: Arc<AtomicUsize>)
         .tool(Arc::new(Notes { saves }))
         .profile(
             AgentProfile::builder()
-                .core_actions(["notes.read", "notes.save"])
+                .core_actions(["notes.read", "notes.save", "notes.boom"])
                 .build(),
         )
         .provider(provider)
@@ -376,6 +380,65 @@ async fn denial_cancel_and_late_steering() {
         "the front-end sends it next"
     );
     assert!(!host.is_running());
+}
+
+#[tokio::test]
+async fn a_tool_that_panics_fails_its_call_and_the_turn_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), "notes.boom", Arc::new(AtomicUsize::new(0))).await;
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "open it" }))
+        .await
+        .unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["ok"], true, "{done}");
+    assert!(!host.is_running(), "the chat is free again");
+    host.call("send", json!({ "text": "again" })).await.unwrap();
+    next(&mut rx, "turn_finished").await;
+}
+
+struct Panics;
+
+#[async_trait::async_trait]
+impl ark_model::Provider for Panics {
+    async fn complete(
+        &self,
+        _system: &str,
+        _messages: &[ark_model::Message],
+        _tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        panic!("the model client broke");
+    }
+    fn describe(&self) -> String {
+        "panics".into()
+    }
+}
+
+#[tokio::test]
+async fn a_turn_that_crashes_ends_with_an_error_and_frees_the_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(Panics) as Arc<dyn ark_model::Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (host, _) = ArkUi::new(App::new("Test").ark(ark)).open().await.unwrap();
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "hello" })).await.unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["ok"], false, "{done}");
+    assert!(
+        done["error"]
+            .as_str()
+            .unwrap()
+            .contains("model client broke"),
+        "{done}"
+    );
+    assert!(!host.is_running(), "the chat is free again");
+    host.call("send", json!({ "text": "again" })).await.unwrap();
+    next(&mut rx, "turn_finished").await;
 }
 
 #[tokio::test]

@@ -772,14 +772,14 @@ pub fn runs_markdown(runs: &[(String, bool, bool)]) -> String {
         if t.is_empty() {
             continue;
         }
-        let lead = t.len() - t.trim_start().len();
-        let trail = t.len() - t.trim_end().len();
-        let core = &t[lead..t.len() - trail];
-        out.push_str(&t[..lead]);
+        let core = t.trim();
         if core.is_empty() {
-            out.push_str(&t[lead..]);
+            out.push_str(t);
             continue;
         }
+        let lead = t.len() - t.trim_start().len();
+        let trail = t.len() - t.trim_end().len();
+        out.push_str(&t[..lead]);
         let core = core.replace('*', "\\*");
         match (b, i) {
             (true, true) => out.push_str(&format!("***{core}***")),
@@ -1483,6 +1483,17 @@ mod tests {
             vec![("é".into(), false, true)],
             "marks around a wide character"
         );
+    }
+
+    #[test]
+    fn a_run_of_only_spaces_keeps_its_spaces() {
+        let runs = [
+            ("a".to_string(), true, false),
+            (" ".to_string(), false, false),
+            ("  ".to_string(), true, true),
+            ("b".to_string(), false, false),
+        ];
+        assert_eq!(runs_markdown(&runs), "**a**   b");
     }
 
     #[test]

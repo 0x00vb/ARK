@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A tool that panics fails its own call and the turn goes on. A turn whose task dies ends with an error and frees the chat instead of staying on "working". Before, one panic left the chat stuck for good.
+- Opening a `.docx` with a run of only spaces no longer panics (`byte range starts at 1 but ends at 0`). The spaces are kept.
+
 ## [0.38.0] - 2026-11-06
 
 ### Added

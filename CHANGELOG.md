@@ -5,11 +5,11 @@
 ### Changed
 
 - While the agent works, Enter sends the message into the running turn and ⌘↩ queues it for after. The waiting row reads "Sending". Before, Enter queued and only ⌘↩ sent.
-- A Markdown file has no top bar. The person types into the page: the block under the caret shows its Markdown, the rest stays drawn, and edits save on their own. The raw editor, Edit and Done are gone for `.md`.
+- A Markdown file has no top bar. The person types into the page: the block under the caret shows its Markdown, the rest stays drawn, and edits save on their own. If the file changed elsewhere meanwhile, changes to different lines are merged; changes to the same lines keep the other version and say so. The raw editor, Edit and Done are gone for `.md`.
 
 ### Fixed
 
-- A tool that panics fails its own call and the turn goes on. A turn whose task dies ends with an error and frees the chat instead of staying on "working". Before, one panic left the chat stuck for good.
+- A tool that panics fails its own call, and a turn whose task dies ends with an error, closes its questions and frees the chat. Before, one panic left the chat on "working" for good.
 - Opening a `.docx` with a run of only spaces no longer panics (`byte range starts at 1 but ends at 0`). The spaces are kept.
 
 ## [0.38.0] - 2026-11-06

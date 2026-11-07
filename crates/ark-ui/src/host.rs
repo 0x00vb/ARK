@@ -43,7 +43,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::resource::{
@@ -634,6 +634,8 @@ pub struct UiInfo {
 struct Running {
     ctl: TurnControl,
     input: String,
+    /// Set by the turn once it has said it ended, so a crash after that says nothing more.
+    finished: Arc<AtomicBool>,
 }
 
 /// One live conversation: its interaction, and the turn it runs.
@@ -1255,8 +1257,8 @@ impl Host {
             [
                 ("↩", "send"),
                 ("⇧↩", "new line"),
-                ("↩ while working", "queue the message for after the turn"),
-                ("⌘↩ while working", "send it into the running turn"),
+                ("↩ while working", "send it into the running turn"),
+                ("⌘↩ while working", "queue the message for after the turn"),
                 ("esc", "stop the agent"),
                 ("⌘K", "commands"),
                 ("⌘N", "new session"),
@@ -6391,6 +6393,7 @@ impl Host {
             ask,
             ..TurnControl::new()
         };
+        let finished = Arc::new(AtomicBool::new(false));
         {
             let mut running = conv.running.lock().unwrap();
             if running.is_some() {
@@ -6399,37 +6402,117 @@ impl Host {
             *running = Some(Running {
                 ctl: ctl.clone(),
                 input: input.clone(),
+                finished: finished.clone(),
             });
         }
         let host = self.clone();
         tokio::spawn(async move {
-            let turn = tokio::spawn(host.clone().run_turn(conv.clone(), input, ctl));
+            let turn = tokio::spawn(host.clone().run_turn(
+                conv.clone(),
+                input,
+                ctl.clone(),
+                finished.clone(),
+            ));
             if let Err(e) = turn.await {
-                host.turn_crashed(&conv, &e.to_string());
+                host.turn_crashed(&conv, &ctl, &finished, &e.to_string())
+                    .await;
             }
         });
         Ok(())
     }
 
-    /// A turn whose task died before it could say so: free the chat and end the turn.
-    fn turn_crashed(&self, conv: &Conv, why: &str) {
+    /// A turn whose task died before it said so: end it the way a turn ends, with an error.
+    async fn turn_crashed(
+        &self,
+        conv: &Arc<Conv>,
+        ctl: &TurnControl,
+        finished: &Arc<AtomicBool>,
+        why: &str,
+    ) {
         tracing::error!(error = why, "a chat turn crashed");
-        *conv.running.lock().unwrap() = None;
+        if finished.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let session = conv.session();
+        {
+            // Free the chat, unless a new turn has already taken it.
+            let mut running = conv
+                .running
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if running
+                .as_ref()
+                .is_some_and(|r| Arc::ptr_eq(&r.finished, finished))
+            {
+                *running = None;
+            }
+        }
+        if let Err(error) = ctl.cancel.wait_for_commit().await {
+            tracing::error!(%error, "could not finish the crashed turn's pending changes");
+        }
+        if !self.is_current(conv) {
+            self.release_background(conv);
+        }
+        self.close_turn_approvals(&session);
         self.emit(json!({
             "kind": "turn_finished",
-            "session": conv.session(),
+            "session": session,
             "ok": false,
             "cancelled": false,
             "error": format!("The turn stopped unexpectedly: {why}"),
             "answer": "",
             "steps": 0,
-            "undelivered": [],
+            "undelivered": ctl.steer.take_undelivered(),
             "summary": Value::Null,
         }));
         self.emit_working();
     }
 
-    async fn run_turn(self: Arc<Self>, conv: Arc<Conv>, input: String, ctl: TurnControl) {
+    /// A chat in the background, or held here for another runtime, ends with its turn; its
+    /// session is stored and opens again when called.
+    fn release_background(&self, conv: &Arc<Conv>) {
+        self.background
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|c| !Arc::ptr_eq(c, conv));
+        self.addressed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, c| !Arc::ptr_eq(c, conv));
+    }
+
+    /// No question outlives its turn; close them before saying the turn ended. Questions from
+    /// orchestrated agents belong to their tasks, not to this turn.
+    fn close_turn_approvals(&self, session: &str) {
+        let open: Vec<u64> = {
+            let mut approvals = self
+                .approvals
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let ids: Vec<u64> = approvals
+                .iter()
+                .filter(|(_, (shown, _))| {
+                    shown["request"]["agent"].is_null() && shown["session"] == json!(session)
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            for id in &ids {
+                approvals.remove(id);
+            }
+            ids
+        };
+        for id in open {
+            self.emit(json!({ "kind": "approval_closed", "id": id }));
+        }
+    }
+
+    async fn run_turn(
+        self: Arc<Self>,
+        conv: Arc<Conv>,
+        input: String,
+        ctl: TurnControl,
+        finished: Arc<AtomicBool>,
+    ) {
         let session = conv.session();
         self.emit(json!({ "kind": "turn_started", "input": input, "session": session }));
         self.emit_working();
@@ -6479,38 +6562,11 @@ impl Host {
             self.refresh_with(&ix).await;
         }
         *conv.running.lock().unwrap() = None;
-        // A chat in the background, or held here for another runtime, ends with its turn; its
-        // session is stored and opens again when called.
         if !current {
-            self.background
-                .lock()
-                .unwrap()
-                .retain(|c| !Arc::ptr_eq(c, &conv));
-            self.addressed
-                .lock()
-                .unwrap()
-                .retain(|_, c| !Arc::ptr_eq(c, &conv));
+            self.release_background(&conv);
         }
         drop(one);
-        // No question outlives its turn; close them before saying the turn ended. Questions
-        // from orchestrated agents belong to their tasks, not to this turn.
-        let open: Vec<u64> = {
-            let mut approvals = self.approvals.lock().unwrap();
-            let ids: Vec<u64> = approvals
-                .iter()
-                .filter(|(_, (shown, _))| {
-                    shown["request"]["agent"].is_null() && shown["session"] == json!(session)
-                })
-                .map(|(id, _)| *id)
-                .collect();
-            for id in &ids {
-                approvals.remove(id);
-            }
-            ids
-        };
-        for id in open {
-            self.emit(json!({ "kind": "approval_closed", "id": id }));
-        }
+        self.close_turn_approvals(&session);
         if !cancelled {
             if self
                 .notifier
@@ -6522,7 +6578,7 @@ impl Host {
             }
             self.notify_soon();
         }
-        self.emit(json!({
+        let event = json!({
             "kind": "turn_finished",
             "session": session,
             "ok": ok,
@@ -6538,7 +6594,9 @@ impl Host {
             "elapsed_ms": end.elapsed_ms,
             "undelivered": end.undelivered,
             "summary": current.then(|| self.summary()),
-        }));
+        });
+        finished.store(true, Ordering::SeqCst);
+        self.emit(event);
         self.emit_working();
     }
 }

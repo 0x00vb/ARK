@@ -8,7 +8,7 @@
 // `ctx.save(edits)` saves and answers the file as saved; `ctx.status(state)` shows saving.
 
 import { h, icon, clear } from "./dom.js";
-import { inlineEditor } from "./md-inline.js";
+import { inlineEditor, mergeText } from "./md-inline.js";
 import { sheetView } from "./sheet.js";
 import { documentView } from "./document.js";
 import { highlight, languageOf, MAX_CHARS } from "./highlight.js";
@@ -109,6 +109,7 @@ export function fileView(el, path, ark, params) {
     accept: async (meta) => (await ark.call('file_probe', { path: s.path })).change === meta.change,
     loaded: (meta) => { s.version = meta.version; s.change = meta.change; queueMicrotask(check); },
     status: show,
+    refresh: () => check(),
     // A view that saves on its own path (text) tells which version it wrote.
     saved: (version) => (s.version = version),
     focusChanged: () => ark.reportFocus(),
@@ -328,13 +329,23 @@ function goToLine(area, n) {
 /// itself: the block under the caret shows its source (md-inline.js).
 function markdownView(el, file, ctx) {
   const { ark } = ctx;
+  // What the file said when this page last read or wrote it: the base of a merge.
   let version = file.version;
+  let base = file.text;
   ctx.tools.remove();
   const page = h("div.prose.md-page");
   el.append(page);
+  const write = async (text) => {
+    const r = await ark.call("file_write", { path: file.path, text, base: version });
+    version = r.version;
+    base = text;
+    ctx.saved(r.version);
+    return text;
+  };
   const editor = inlineEditor(page, {
     text: file.text,
     readOnly: !!file.read_only,
+    idle: () => ctx.refresh(),
     drawn(root) {
       for (const img of root.querySelectorAll("img[data-file]")) {
         media(ark, near(file.path, img.dataset.file))
@@ -347,9 +358,26 @@ function markdownView(el, file, ctx) {
     },
     async save(text) {
       try {
-        const r = await ark.call("file_write", { path: file.path, text, base: version });
-        version = r.version;
-        ctx.saved(r.version);
+        return await write(text);
+      } catch (e) {
+        if (!/changed since it was read/.test(e.message)) {
+          ark.toast(e.message);
+          throw e;
+        }
+      }
+      // The file changed under the edit: keep both changes when they touch different lines.
+      try {
+        const latest = await ark.call("file_read", { path: file.path });
+        const merged = mergeText(base, text, latest.text);
+        version = latest.version;
+        base = latest.text;
+        ctx.saved(latest.version);
+        if (merged == null) {
+          ark.toast("Changed elsewhere. Your last edit was not saved");
+          return latest.text;
+        }
+        ark.toast("Merged with changes made elsewhere");
+        return await write(merged);
       } catch (e) {
         ark.toast(e.message);
         throw e;
@@ -364,8 +392,9 @@ function markdownView(el, file, ctx) {
     },
     flush: () => editor.flush(),
     update(f) {
+      if (!editor.set(f.text)) return;
       version = f.version;
-      editor.set(f.text);
+      base = f.text;
     },
     dispose() {
       editor.dispose();

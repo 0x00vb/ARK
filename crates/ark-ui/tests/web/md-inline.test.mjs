@@ -22,11 +22,11 @@ before(async () => {
       res.end(`<!doctype html><link rel="stylesheet" href="/app.css"><body><div id="page" class="prose md-page" style="height:600px;width:520px"></div>
 <script type="module">
 import { inlineEditor } from "/js/md-inline.js";
-window.openEditor = (text, { fail = false } = {}) => {
+window.openEditor = (text, { fail = false, answer = null } = {}) => {
   const saves = [];
   const page = document.getElementById("page");
   page.innerHTML = "";
-  const editor = inlineEditor(page, { text, readOnly: false, drawn() {}, async save(t) { if (fail) throw Error("no"); saves.push(t); } });
+  const editor = inlineEditor(page, { text, readOnly: false, drawn() {}, async save(t) { if (fail) throw Error("no"); saves.push(t); return answer ?? t; } });
   window.editor = editor; window.saves = saves;
 };
 </script>`);
@@ -137,5 +137,81 @@ test("a failed save keeps the text unsaved", async () => {
   await page.evaluate(() => window.editor.flush());
   assert.equal(await page.evaluate(() => window.editor.dirty()), true);
   assert.equal(await page.evaluate(() => window.editor.content()), "keep me!\n");
+  await page.close();
+});
+
+test("leaving by a click elsewhere saves, and an outside update waits for the open block", async () => {
+  const page = await open("alpha\n\nbeta\n");
+  await page.locator("p", { hasText: "alpha" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("!");
+  assert.equal(await page.evaluate(() => window.editor.dirty()), true, "an open block counts as dirty");
+  assert.equal(await page.evaluate(() => window.editor.set("other\n")), false, "an update is refused while it is open");
+  assert.equal(await page.evaluate(() => window.editor.content()), "alpha!\n\nbeta\n");
+  await page.mouse.click(10, 760);
+  await page.waitForFunction(() => window.saves.length === 1);
+  assert.equal(await page.evaluate(() => window.saves[0]), "alpha!\n\nbeta\n");
+  assert.equal(await page.evaluate(() => window.editor.set("other\n")), true);
+  assert.equal(await page.locator("p").innerText(), "other");
+  await page.close();
+});
+
+test("shift and the arrows select, they do not leave the block", async () => {
+  const page = await open("alpha\n\nbeta\n");
+  await page.locator("p", { hasText: "alpha" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Shift+ArrowDown");
+  assert.equal(await page.locator("textarea.md-edit").inputValue(), "alpha");
+  await page.close();
+});
+
+test("a block emptied of its text goes, with one blank line", async () => {
+  const page = await open("a\n\nb\n\nc\n");
+  await page.locator("p", { hasText: "b" }).click();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.evaluate(() => window.editor.content()), "a\n\nc\n");
+  assert.equal(await page.locator("p").count(), 2);
+  await page.close();
+});
+
+test("a fence typed into a block draws the blocks it swallows as code", async () => {
+  const page = await open("a\n\nb\n");
+  await page.locator("p", { hasText: "a" }).first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("```");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("pre.md-code").count(), 1);
+  assert.match(await page.locator("pre.md-code").innerText(), /b/);
+  await page.close();
+});
+
+test("two changes to different lines merge, to the same lines they do not", async () => {
+  const page = await open("x\n");
+  const merged = await page.evaluate(async () => {
+    const { mergeText } = await import("/js/md-inline.js");
+    return [
+      mergeText("a\nb\nc", "a\nB\nc", "a\nb\nC"),
+      mergeText("a\nb\nc", "a\nB\nc", "a\nbee\nc"),
+      mergeText("a\r\nb\r\nc", "A\r\nb\r\nc", "a\nb\nC"),
+      mergeText("a\nb", "a\nb\nours", "a\nb\ntheirs"),
+    ];
+  });
+  assert.deepEqual(merged, ["a\nB\nC", null, "A\r\nb\r\nC", null]);
+  await page.close();
+});
+
+test("a save that merged another change shows the merged page and keeps the block open", async () => {
+  const page = await open("one\n\ntwo\n", { answer: "one!\n\ntwo, changed elsewhere\n" });
+  await page.locator("p", { hasText: "one" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("!");
+  await page.waitForFunction(() => window.saves.length === 1);
+  await page.locator("p", { hasText: "changed elsewhere" }).waitFor();
+  assert.equal(await page.locator("textarea.md-edit").inputValue(), "one!");
+  assert.equal(await page.evaluate(() => window.editor.content()), "one!\n\ntwo, changed elsewhere\n");
   await page.close();
 });

@@ -810,7 +810,14 @@ class SecondaryChat {
     this.api.dictationRoute = () => ({ place: chat.summary?.place?.name || "", session: chat.session, runtime: chat.summary?.location?.runtime });
     this.api.submit = (text) => chat.submit(text);
     this.api.send = this.api.submit;
-    this.api.steer = (text) => transport.call("chat_steer", { session: chat.session, text });
+    this.api.steer = async (text) => {
+      try {
+        await transport.call("chat_steer", { session: chat.session, text });
+        chat.composer.steering(text);
+      } catch {
+        chat.composer.enqueue(text);
+      }
+    };
     this.api.cancel = () => transport.call("chat_cancel", { session: chat.session }).catch(() => {});
     this.api.loadEarlier = async (before) => {
       const read = await transport.call("chat_read", { session: chat.session, model: chat.summary.model, before, limit: 30 });

@@ -721,6 +721,14 @@ const scenarios = {
       await page.keyboard.press("Enter");
       await page.locator(".queued.steer").waitFor();
       assert.equal(await page.locator(".queued.steer .queued-k").innerText(), "Sending");
+      // ⌘↩ queues for after the turn instead; removing it keeps the thread as it was.
+      await page.locator("#input").fill("Later, please.");
+      await page.keyboard.press("Meta+Enter");
+      const later = page.locator(".queued:not(.steer)");
+      await later.waitFor();
+      assert.equal(await later.locator(".queued-k").innerText(), "Queued");
+      await later.locator("button[title=Remove]").click();
+      assert.equal(await later.count(), 0);
       // Streaming continues in one piece while the message waits.
       assert.equal(await page.locator(".turn .agent .steered").count(), 0);
     });

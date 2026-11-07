@@ -1,3 +1,13 @@
+# Core 0.40.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.40.0 (2026-11-07), over v0.39.0 (6e59609). Every chat starts in Auto (ADR 0107); an image is a picture in the composer and goes with the message (ADR 0106); a streaming reply can be scrolled up |
+| Change | Auto runs every action that does not ask at every call (`ask_each_time`, `person_only`); with nobody to ask it runs only `auto_eligible`. A chat nobody chose a mode for (revision 0) is Auto, old ones too; the page's switch-to-Auto step is gone. `send` and `chat_send` take `images` (3.5 MB each, 20 MB in all, eight at most); the model is shown them; the page shrinks a larger one; `Turn::images` and `TranscriptTurn::images` keep them; Anthropic and OpenAI send a person's images. `upload_add` answers `as`. The thread lets go of the end at a wheel, touch or scrollbar |
+| Found from | The owner: chats stopped on permission questions; a dropped screenshot was only named in the draft and never seen; a streaming reply could not be scrolled up |
+| Checks | Two vstack runs (images, Auto) with one and two independent reviews; blockers fixed with tests that fail without them (split chats lost images; older chats went back to Manual after a message). Gates in the table below |
+| Not verified | A live model reading a real image; the native Desktop window; touch; a chat placed on another computer whose project copy is skipped |
+
 # Core 0.39.0 release
 
 | Release state | Value |

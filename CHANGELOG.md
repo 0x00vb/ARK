@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-07
+
 ### Changed
 
 - Every chat starts in Auto, and Auto runs every state-changing action without a question, except what asks at every call: image generation (it spends money), Computer (the person's own screen), installing or connecting a capability, standing work set up by a schedule, and `mode.set`. A chat nobody chose a mode for (revision 0) is Auto, including older ones; a mode someone asked for in words (revision above 0) stays. Before, Auto skipped questions only for file writes and edits, a new chat started in Manual, and only the page switched it to Auto once. The page no longer does that step (ADR 0107). `ActionDescriptor::auto_eligible` now only decides what an automation, or a one-shot client with nobody to ask, may run unattended. Sending mail or posting through a connected service now runs without a question; connecting the service still asks.

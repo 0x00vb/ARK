@@ -29,9 +29,26 @@ export class Thread {
     this.inspect = inspect;
     this.live = null;
     this.stick = true;
+    this.queued = false;
+    let top = scroller.scrollTop;
+    // The person's hand on the scroller lets go of the end at once: a snap already queued
+    // would otherwise land after the scroll event that says they moved.
+    const release = () => { this.stick = false; };
+    scroller.addEventListener("wheel", (e) => { if (e.deltaY < 0 && scroller.scrollTop > 0) release(); }, { passive: true });
+    scroller.addEventListener("touchmove", () => {
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 4) release();
+    }, { passive: true });
+    scroller.addEventListener("pointerdown", (e) => { if (e.target === scroller) release(); });
+    scroller.addEventListener("keydown", (e) => {
+      if (["PageUp", "Home", "ArrowUp"].includes(e.key) && e.target === scroller) release();
+    });
+    // Up lets go; back to the bottom (or down to near it) follows again.
     scroller.addEventListener("scroll", () => {
       const s = scroller;
-      this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 80;
+      const gap = s.scrollHeight - s.scrollTop - s.clientHeight;
+      if (gap < 4 || (s.scrollTop > top && gap < 80)) this.stick = true;
+      else if (s.scrollTop < top) this.stick = false;
+      top = s.scrollTop;
     });
     root.addEventListener("click", (e) => {
       const a = e.target.closest("a.cite");
@@ -49,9 +66,13 @@ export class Thread {
   }
 
   scroll(force) {
-    if (force || this.stick) {
-      requestAnimationFrame(() => (this.scroller.scrollTop = this.scroller.scrollHeight));
-    }
+    if (force) this.stick = true;
+    if (!this.stick || this.queued) return;
+    this.queued = true;
+    requestAnimationFrame(() => {
+      this.queued = false;
+      if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+    });
   }
 
   isEmpty() {

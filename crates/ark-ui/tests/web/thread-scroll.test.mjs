@@ -63,7 +63,7 @@ async function streaming() {
   await page.waitForFunction(() => window.ready);
   await page.evaluate(() => window.stream());
   // Live and following: several chunks in, the page sits on the end.
-  await page.waitForFunction(() => window.chunks > 5 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 4);
+  await page.waitForFunction(() => window.chunks > 5 && window.thread.stick && scroller.scrollTop > 1000);
   await page.mouse.move(300, 200);
   return page;
 }

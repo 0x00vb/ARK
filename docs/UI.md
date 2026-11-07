@@ -350,7 +350,7 @@ account. There are no Work or Automations pages: an agent makes and runs them wh
 
 | Part | Behavior |
 |---|---|
-| Composer | Images dropped, pasted or chosen wait as small pictures above the text, each with a remove button, and go with the message (ADR 0106). Attach and dictation on the left, Send alone on the right. The model chip shows while no model is chosen. There is no mode control and no Shift+Tab: the person asks in words and the chat calls `mode.set` (ADR 0104). A new chat with no turns and no chosen mode (revision 0, Manual) is set to Auto once with the `chat_execution_mode` call, and its first send waits for it |
+| Composer | Images dropped, pasted or chosen wait as small pictures above the text, each with a remove button, and go with the message (ADR 0106). Attach and dictation on the left, Send alone on the right. The model chip shows while no model is chosen. There is no mode control and no Shift+Tab: the person asks in words and the chat calls `mode.set` (ADR 0104). A chat nobody chose a mode for (revision 0) is Auto, and Auto asks only what asks at every call (ADR 0107) |
 | Title bar | A chip with the chat's face and name opens the details in the side pane: face, name, description, model row (the app's picker, with the provider's mark when `modelPicker.mark` exists). An app view supplies it with `identity()` on its controller |
 | Empty chat | Nothing, then a typing mark for one second, then one line from `greeting.js`, with the first word of `ark.profile()` when there is one. Not sent to the model, not stored. A chat already greeted in this window shows its line at once |
 

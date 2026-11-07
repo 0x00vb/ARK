@@ -167,7 +167,8 @@ impl SessionRecord {
             compactions: 0,
             policy,
             posts_read: 0,
-            execution_mode: ExecutionMode::Manual,
+            // Nobody has chosen: Auto, until a person asks for Plan or Manual in words.
+            execution_mode: ExecutionMode::Auto,
             execution_mode_revision: 0,
         }
     }
@@ -779,9 +780,14 @@ impl Session {
 
     fn load(
         engine: &Engine,
-        record: SessionRecord,
+        mut record: SessionRecord,
         close_interrupted: bool,
     ) -> Result<Session, AgentError> {
+        // A chat nobody chose a mode for (revision 0) is Auto, whichever mode an older version
+        // stored for it. A person's choice has a revision above 0 and stays.
+        if record.execution_mode_revision == 0 {
+            record.execution_mode = ExecutionMode::Auto;
+        }
         // Turns already folded into gists are excluded from the window; a turn at or past
         // `turn_count` was begun and never recorded.
         let close_interrupted = close_interrupted && !record.execution_managed;
@@ -1942,9 +1948,11 @@ mod tests {
     #[test]
     fn execution_mode_is_revisioned_persisted_and_frozen_on_the_turn() {
         let (_dir, engine, mut session) = chat();
-        assert_eq!(session.execution_mode(), ExecutionMode::Manual);
+        // Nobody has chosen: Auto, revision 0.
+        assert_eq!(session.execution_mode(), ExecutionMode::Auto);
+        assert_eq!(session.execution_mode_revision(), 0);
         session
-            .set_execution_mode(&engine, 0, ExecutionMode::Auto)
+            .set_execution_mode(&engine, 0, ExecutionMode::Manual)
             .unwrap();
         assert_eq!(session.execution_mode_revision(), 1);
         assert!(matches!(
@@ -1959,12 +1967,32 @@ mod tests {
             .record_turn(&engine, "update the project", &outcome("done"))
             .unwrap();
         let turns = Session::read_turns(&engine, session.id(), None).unwrap();
-        assert_eq!(turns[0].execution_mode, ExecutionMode::Auto);
+        assert_eq!(turns[0].execution_mode, ExecutionMode::Manual);
         let reopened = Session::open(&engine, session.id().as_str())
             .unwrap()
             .unwrap();
         assert_eq!(reopened.execution_mode(), ExecutionMode::Plan);
         assert_eq!(reopened.execution_mode_revision(), 2);
+    }
+
+    #[test]
+    fn a_chat_nobody_chose_a_mode_for_is_auto_and_a_choice_stays() {
+        let (_dir, engine, mut session) = chat();
+        // What an older version stored for a chat nobody chose: Manual, revision 0.
+        session.record.execution_mode = ExecutionMode::Manual;
+        session.save(&engine).unwrap();
+        let id = session.id().as_str().to_string();
+        let reopened = Session::open(&engine, &id).unwrap().unwrap();
+        assert_eq!(reopened.execution_mode(), ExecutionMode::Auto);
+        assert_eq!(reopened.execution_mode_revision(), 0);
+        // A person asked for Manual: revision 1, kept.
+        let mut chosen = reopened;
+        chosen
+            .set_execution_mode(&engine, 0, ExecutionMode::Manual)
+            .unwrap();
+        let again = Session::open(&engine, &id).unwrap().unwrap();
+        assert_eq!(again.execution_mode(), ExecutionMode::Manual);
+        assert_eq!(again.execution_mode_revision(), 1);
     }
 
     /// A turn that fails, continuing whatever came before it.

@@ -1219,9 +1219,11 @@ impl Harness {
                     input: call.arguments.clone(),
                 });
 
+                // Auto asks nothing, but what asks at every call (`person_only` implies it). With
+                // nobody to ask (a one-shot client, `ask: false`) it runs only what is contained.
                 let auto = self.execution_mode == ExecutionMode::Auto
-                    && desc.auto_eligible
-                    && !desc.ask_each_time;
+                    && !desc.ask_each_time
+                    && (self.approvals.is_some() || desc.auto_eligible);
                 let mut pending_invocation = None;
                 let mut approved = match &guarded {
                     Some(verdict) => {

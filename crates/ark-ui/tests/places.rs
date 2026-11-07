@@ -446,12 +446,16 @@ async fn a_held_chat_cannot_read_or_change_this_computers_ambient_context() {
 async fn questions_from_both_computers_are_told_apart() {
     let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let (saves_a, saves_b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-    let (_b, port, token) = server(dir_b.path(), saves_b.clone()).await;
+    let (b, port, token) = server(dir_b.path(), saves_b.clone()).await;
     let a = linked(dir_a.path(), port, &token, saves_a.clone()).await;
     let seen = record(&a);
 
     // A's own chat asks first: its question is A's #1.
     let mine = session_of(&a).await;
+    // The person asked for questions (a chat starts in Auto, ADR 0107).
+    a.call("execution_mode", json!({ "mode": "manual", "revision": 0 }))
+        .await
+        .unwrap();
     a.call("send", json!({ "text": "file the notes" }))
         .await
         .unwrap();
@@ -468,6 +472,13 @@ async fn questions_from_both_computers_are_told_apart() {
         .await
         .unwrap();
     let s = placed["session"]["id"].as_str().unwrap().to_string();
+    // The person asked for questions on that computer (a chat starts in Auto, ADR 0107).
+    b.call(
+        "chat_execution_mode",
+        json!({ "session": s, "mode": "manual", "revision": 0 }),
+    )
+    .await
+    .unwrap();
     a.call("send", json!({ "text": "file the notes" }))
         .await
         .unwrap();
@@ -2164,7 +2175,7 @@ async fn a_held_chat_keeps_its_model_after_a_turn() {
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_computer_takes_its_chat_and_questions_away() {
     let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (_b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
     let (a, _) = ArkUi::new(app(dir_a.path(), "A", Arc::new(AtomicUsize::new(0))))
         .computers(ark_ui::computers::ComputerSetup {
             contract: Arc::new(NoProgram),
@@ -2188,6 +2199,13 @@ async fn removing_a_computer_takes_its_chat_and_questions_away() {
         .as_str()
         .unwrap()
         .to_string();
+    // The person asked for questions on that computer (a chat starts in Auto, ADR 0107).
+    b.call(
+        "chat_execution_mode",
+        json!({ "session": s, "mode": "manual", "revision": 0 }),
+    )
+    .await
+    .unwrap();
     a.call("send", json!({ "text": "file the notes" }))
         .await
         .unwrap();

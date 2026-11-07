@@ -929,6 +929,9 @@ async fn an_agent_asks_for_mail_mid_task_and_sends_once_it_is_connected() {
         .open(&Start::default(), Arc::new(approver))
         .unwrap()
         .interaction;
+    // These tests are about questions: the person asked for them (a chat starts in Auto, ADR 0107).
+    ix.set_execution_mode(0, ark_sdk::prelude::ark_core::ExecutionMode::Manual)
+        .unwrap();
 
     let end = ix
         .run_turn(
@@ -1034,12 +1037,17 @@ async fn an_always_grant_lasts_until_removed_with_grants() {
         .open(&Start::default(), Arc::new(approver))
         .unwrap()
         .interaction;
+    // These tests are about questions: the person asked for them (a chat starts in Auto, ADR 0107).
+    ix.set_execution_mode(0, ark_sdk::prelude::ark_core::ExecutionMode::Manual)
+        .unwrap();
     let n = || asked.load(std::sync::atomic::Ordering::SeqCst);
 
     ix.run_turn("save the draft", &TurnControl::new(), |_, _| {})
         .await;
     assert_eq!(n(), 1);
     ix.execute("/new").await;
+    ix.set_execution_mode(0, ark_sdk::prelude::ark_core::ExecutionMode::Manual)
+        .unwrap();
     ix.run_turn("save it again", &TurnControl::new(), |_, _| {})
         .await;
     assert_eq!(n(), 1, "a new session of the project did not ask");

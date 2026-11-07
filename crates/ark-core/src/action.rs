@@ -14,7 +14,10 @@ pub enum ExecutionMode {
     /// Ask before state-changing actions that no existing grant covers.
     #[default]
     Manual,
-    /// Run only explicitly project-bound mutations without asking.
+    /// Run state-changing actions without asking, except those that ask at every call
+    /// ([`ActionDescriptor::ask_each_time`]: spending money, the person's own screen, installing,
+    /// standing work) and those only the person may decide ([`ActionDescriptor::person_only`]).
+    /// With nobody to ask (no approval gate) it runs only [`ActionDescriptor::auto_eligible`].
     Auto,
 }
 
@@ -100,8 +103,9 @@ pub struct ActionDescriptor {
     /// one app). See [`GrantKey`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<GrantKey>,
-    /// This mutation is constrained to the selected project or contained runtime and may run
-    /// without a question in [`ExecutionMode::Auto`]. False is the safe default.
+    /// This mutation is constrained to the selected project or contained runtime, so an
+    /// automation may run it with nobody there to ask. False is the safe default. A chat in
+    /// [`ExecutionMode::Auto`] does not need it: the person is there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_eligible: bool,
     /// Offered and runnable in [`ExecutionMode::Plan`] although it is `Mutate`. For an action

@@ -8,7 +8,7 @@ use ark_sdk::prelude::ark_core::ExecutionMode;
 use ark_sdk::prelude::ark_model::{Completion, MockProvider, ToolCall, Usage};
 use ark_sdk::prelude::*;
 
-/// A write that Auto may run without asking.
+/// A write that changes state and is not marked `auto_eligible`: a chat in Auto runs it anyway.
 struct Notes;
 #[async_trait::async_trait]
 impl Adapter for Notes {
@@ -16,9 +16,11 @@ impl Adapter for Notes {
         "notes"
     }
     fn actions(&self) -> Vec<ActionDescriptor> {
-        let mut write = ActionDescriptor::new("notes.write", "write a note", RiskTier::Mutate);
-        write.auto_eligible = true;
-        vec![write]
+        vec![ActionDescriptor::new(
+            "notes.write",
+            "write a note",
+            RiskTier::Mutate,
+        )]
     }
     async fn run(
         &self,
@@ -105,7 +107,7 @@ async fn a_mode_asked_for_applies_after_the_turn_not_during_it() {
     let (mut ix, model, asked, _) = open(
         dir.path(),
         vec![
-            set("auto"),
+            set("manual"),
             call("notes.write", serde_json::json!({})),
             answer("Done."),
             call("notes.write", serde_json::json!({})),
@@ -113,12 +115,13 @@ async fn a_mode_asked_for_applies_after_the_turn_not_during_it() {
         ],
         ApprovalDecision::AllowOnce,
     );
-    assert_eq!(mode_of(&ix), (ExecutionMode::Manual, 0));
+    // Nobody has chosen: Auto.
+    assert_eq!(mode_of(&ix), (ExecutionMode::Auto, 0));
 
-    say(&mut ix, "go auto, then write a note").await;
-    // The turn kept Manual: the write asked even after the mode was approved.
-    assert_eq!(*asked.lock().unwrap(), ["mode.set", "notes.write"]);
-    assert_eq!(mode_of(&ix), (ExecutionMode::Auto, 1));
+    say(&mut ix, "ask me before changes, then write a note").await;
+    // The turn kept Auto: only the mode change asked, the write after it did not.
+    assert_eq!(*asked.lock().unwrap(), ["mode.set"]);
+    assert_eq!(mode_of(&ix), (ExecutionMode::Manual, 1));
     let said = model.recorded()[1]
         .messages
         .iter()
@@ -126,15 +129,15 @@ async fn a_mode_asked_for_applies_after_the_turn_not_during_it() {
         .map(|m| m.content.clone())
         .unwrap();
     assert!(
-        said.contains("next message") && said.contains("keeps manual"),
+        said.contains("next message") && said.contains("keeps auto"),
         "{said}"
     );
 
     say(&mut ix, "write another").await;
     assert_eq!(
-        asked.lock().unwrap().len(),
-        2,
-        "the next turn ran in Auto without asking"
+        *asked.lock().unwrap(),
+        ["mode.set", "notes.write"],
+        "the next turn ran in Manual and asked"
     );
 }
 
@@ -143,12 +146,12 @@ async fn a_denied_change_leaves_the_mode_alone() {
     let dir = tempfile::tempdir().unwrap();
     let (mut ix, _, asked, _) = open(
         dir.path(),
-        vec![set("auto"), answer("Staying as is.")],
+        vec![set("manual"), answer("Staying as is.")],
         ApprovalDecision::Deny,
     );
-    say(&mut ix, "go auto").await;
+    say(&mut ix, "ask me before changes").await;
     assert_eq!(*asked.lock().unwrap(), ["mode.set"]);
-    assert_eq!(mode_of(&ix), (ExecutionMode::Manual, 0));
+    assert_eq!(mode_of(&ix), (ExecutionMode::Auto, 0));
 }
 
 #[tokio::test]
@@ -156,10 +159,10 @@ async fn every_change_asks_even_after_always() {
     let dir = tempfile::tempdir().unwrap();
     let (mut ix, _, asked, _) = open(
         dir.path(),
-        vec![set("auto"), answer("ok"), set("plan"), answer("ok")],
+        vec![set("manual"), answer("ok"), set("plan"), answer("ok")],
         ApprovalDecision::AllowAlways,
     );
-    say(&mut ix, "go auto").await;
+    say(&mut ix, "ask me before changes").await;
     say(&mut ix, "now plan").await;
     assert_eq!(*asked.lock().unwrap(), ["mode.set", "mode.set"]);
     assert_eq!(mode_of(&ix), (ExecutionMode::Plan, 2));
@@ -191,7 +194,7 @@ async fn a_mode_another_client_set_meanwhile_wins() {
     let dir = tempfile::tempdir().unwrap();
     let (mut ix, _, _, engine) = open(
         dir.path(),
-        vec![set("auto"), answer("ok")],
+        vec![set("manual"), answer("ok")],
         ApprovalDecision::AllowOnce,
     );
     let id = ix.summary().session.id;
@@ -203,7 +206,7 @@ async fn a_mode_another_client_set_meanwhile_wins() {
         .set_execution_mode(&engine, 0, ExecutionMode::Plan)
         .unwrap();
 
-    say(&mut ix, "go auto").await;
+    say(&mut ix, "ask me before changes").await;
     assert_eq!(mode_of(&ix), (ExecutionMode::Plan, 1));
 }
 
@@ -212,9 +215,9 @@ async fn asking_for_the_mode_it_has_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let (mut ix, _, _, _) = open(
         dir.path(),
-        vec![set("manual"), answer("It already was.")],
+        vec![set("auto"), answer("It already was.")],
         ApprovalDecision::AllowOnce,
     );
-    say(&mut ix, "ask me before changes").await;
-    assert_eq!(mode_of(&ix), (ExecutionMode::Manual, 0));
+    say(&mut ix, "go auto").await;
+    assert_eq!(mode_of(&ix), (ExecutionMode::Auto, 0));
 }

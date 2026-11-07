@@ -205,6 +205,10 @@ async fn a_window_creates_agents_and_tasks_and_answers_their_questions() {
     let agent_ask = ask["id"].as_u64().unwrap();
 
     // A conversation turn asks its own question and ends; the agent's question stays open.
+    // The person's own chat asks too, because they asked it to (a chat starts in Auto, ADR 0107).
+    host.call("execution_mode", json!({ "mode": "manual", "revision": 0 }))
+        .await
+        .unwrap();
     host.call("send", json!({ "text": "save mine too" }))
         .await
         .unwrap();

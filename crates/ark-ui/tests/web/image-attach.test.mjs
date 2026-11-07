@@ -17,7 +17,7 @@ async function fixture(run) {
   const project = { id: "a", name: "Notes", workspace: "/notes" };
   const chats = [{ id: "chat-a", title: "First draft", project: "a" }, { id: "chat-b", title: "Second draft", project: "a" }];
   let current = chats[0];
-  const summary = (chat = current) => ({ name: "Notes", tagline: "", model: "mock", grants: [], project, session: { ...chat, turns: 0 }, location: { runtime: "fixture", project: "a", session: chat.id }, execution_mode: "manual", execution_mode_revision: 0 });
+  const summary = (chat = current) => ({ name: "Notes", tagline: "", model: "mock", grants: [], project, session: { ...chat, turns: 0 }, location: { runtime: "fixture", project: "a", session: chat.id }, execution_mode: "auto", execution_mode_revision: 0 });
   const errors = [], calls = [], uploads = new Map(), events = new Set();
   let pending = 0;
   const rpc = async (method, params) => {

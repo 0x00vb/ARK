@@ -653,6 +653,31 @@ async fn manual_without_an_approval_gate_refuses_mutation() {
     assert_eq!(needs_approval, 1);
 }
 
+#[tokio::test]
+async fn auto_with_nobody_to_ask_refuses_what_is_not_contained() {
+    // A one-shot client (`ask: false`) has no approval gate: Auto runs only `auto_eligible`.
+    let saves = Arc::new(AtomicUsize::new(0));
+    let (_d, engine, project) = setup(saves.clone());
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(
+        "m",
+        tools_then(vec![call("c1", "notes.save")], "Approval is needed."),
+    ));
+    let mut needs_approval = 0;
+    Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .execution_mode(ExecutionMode::Auto)
+        .ask(&engine, &profile(), &project, "save the notes", |event| {
+            if matches!(event, HarnessEvent::NeedsApproval { .. }) {
+                needs_approval += 1;
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(saves.load(Ordering::SeqCst), 0, "the change did not run");
+    assert_eq!(needs_approval, 1);
+}
+
 struct AlwaysAskNotes(Notes);
 
 #[async_trait::async_trait]
@@ -678,7 +703,8 @@ impl Adapter for AlwaysAskNotes {
 }
 
 #[tokio::test]
-async fn auto_asks_for_ineligible_and_always_ask_mutations() {
+async fn auto_asks_only_for_what_asks_at_every_call() {
+    // `auto_eligible` is for unattended runs: a chat in Auto does not need it.
     for always_ask in [false, true] {
         let saves = Arc::new(AtomicUsize::new(0));
         let dir = tempfile::tempdir().unwrap();
@@ -708,7 +734,16 @@ async fn auto_asks_for_ineligible_and_always_ask_mutations() {
             .ask(&engine, &profile(), &project.id, "save the notes", |_| {})
             .await
             .unwrap();
-        assert_eq!(asked.load(Ordering::SeqCst), 1, "always_ask={always_ask}");
-        assert_eq!(saves.load(Ordering::SeqCst), 0, "always_ask={always_ask}");
+        let (asks, runs) = if always_ask { (1, 0) } else { (0, 1) };
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            asks,
+            "always_ask={always_ask}"
+        );
+        assert_eq!(
+            saves.load(Ordering::SeqCst),
+            runs,
+            "always_ask={always_ask}"
+        );
     }
 }

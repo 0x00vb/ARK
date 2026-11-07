@@ -271,6 +271,13 @@ async fn open(dir: &std::path::Path, action: &'static str, saves: Arc<AtomicUsiz
         .0
 }
 
+/// A chat where the person asked to be asked before changes (a new chat is Auto, ADR 0107).
+async fn manual(host: &Arc<Host>) {
+    host.call("execution_mode", json!({ "mode": "manual", "revision": 0 }))
+        .await
+        .unwrap();
+}
+
 async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow::Result<Value> {
     let location = host.call("summary", json!({})).await?["location"].clone();
     host.call(
@@ -284,10 +291,42 @@ async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow
 }
 
 #[tokio::test]
+async fn a_new_chat_is_auto_and_runs_a_change_without_asking() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let host = open(dir.path(), "notes.save", saves.clone()).await;
+    let summary = host.call("summary", json!({})).await.unwrap();
+    assert_eq!(summary["execution_mode"], "auto");
+    assert_eq!(summary["execution_mode_revision"], 0);
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "save the notes" }))
+        .await
+        .unwrap();
+    // `notes.save` changes state and is not marked auto_eligible: no question comes.
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(saves.load(Ordering::SeqCst), 1, "the change ran");
+    assert!(
+        host.call("hello", json!({})).await.unwrap()["approvals"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "and nothing waits on the person"
+    );
+    // Asking in words for questions brings them back, from the next message.
+    manual(&host).await;
+    host.call("send", json!({ "text": "save again" }))
+        .await
+        .unwrap();
+    next(&mut rx, "approval").await;
+}
+
+#[tokio::test]
 async fn approvals_travel_through_the_protocol() {
     let dir = tempfile::tempdir().unwrap();
     let saves = Arc::new(AtomicUsize::new(0));
     let host = open(dir.path(), "notes.save", saves.clone()).await;
+    manual(&host).await;
     let mut rx = host.subscribe();
     host.call("send", json!({ "text": "save the notes" }))
         .await
@@ -349,6 +388,7 @@ async fn denial_cancel_and_late_steering() {
     let dir = tempfile::tempdir().unwrap();
     let saves = Arc::new(AtomicUsize::new(0));
     let host = open(dir.path(), "notes.save", saves.clone()).await;
+    manual(&host).await;
     let mut rx = host.subscribe();
 
     host.call("send", json!({ "text": "save it" }))
@@ -954,6 +994,7 @@ async fn a_chat_keeps_working_while_the_window_moves_to_another() {
     let dir = tempfile::tempdir().unwrap();
     let saves = Arc::new(AtomicUsize::new(0));
     let host = open(dir.path(), "notes.save", saves.clone()).await;
+    manual(&host).await;
     let mut rx = host.subscribe();
     host.call("send", json!({ "text": "save the notes" }))
         .await
@@ -1007,6 +1048,7 @@ async fn a_chat_keeps_working_while_the_window_moves_to_another() {
     host.call("open_session", json!({ "id": second }))
         .await
         .unwrap();
+    manual(&host).await;
     host.call("send", json!({ "text": "save the other notes" }))
         .await
         .unwrap();
@@ -1597,6 +1639,13 @@ async fn work_questions_keep_their_conversation_and_reads_do_not_interrupt_the_t
         .unwrap();
     assert_eq!(pending["item"]["start_receipt"], receipt["id"]);
     let mut rx = host.subscribe();
+    // The work's own conversation asks before changes (a conversation is Auto unless chosen).
+    host.call(
+        "chat_execution_mode",
+        json!({"session": receipt["conversation"], "mode": "manual", "revision": 0}),
+    )
+    .await
+    .unwrap();
     project_call(&host, "work_execute", json!({"receipt":receipt["id"]}))
         .await
         .unwrap();
@@ -2447,6 +2496,7 @@ async fn overlapping_stops_and_new_turn_wait_for_a_held_commit() {
         .await
         .unwrap()
         .0;
+    manual(&host).await;
     let mut events = host.subscribe();
     host.call("send", json!({"text":"write"})).await.unwrap();
     let ask = next(&mut events, "approval").await;

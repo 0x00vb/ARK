@@ -469,6 +469,8 @@ fn a_chat_turn_killed_after_a_save_continues_without_saving_again() {
         .as_str()
         .unwrap()
         .to_string();
+    // This test is about a question: the person asked for it (a chat starts in Auto, ADR 0107).
+    first.rpc("execution_mode", json!({ "mode": "manual", "revision": 0 }));
     first.rpc("send", json!({ "text": "save chapter one" }));
     allow_once(&first, 30);
     let saved = until("the save, then the next model call", 30, || {

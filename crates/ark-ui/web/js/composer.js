@@ -289,7 +289,7 @@ export class Composer {
 
   /// The chat's authority as its summary says it. Not drawn: the person changes it in words.
   setExecutionMode(mode, revision = 0) {
-    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "manual";
+    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "auto";
     this.executionModeRevision = revision;
   }
 

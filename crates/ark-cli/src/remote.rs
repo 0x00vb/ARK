@@ -502,11 +502,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tokens = Tokens::in_store(dir.path());
         let token = tokens.create("terminal").unwrap();
-        let (_host, served) = ArkUi::new(app(dir.path()))
+        let (host, served) = ArkUi::new(app(dir.path()))
             .access(Access::Tokens(tokens))
             .serve_background("127.0.0.1:0")
             .await
             .unwrap();
+        // These tests are about questions: the person asked for them (a chat starts in Auto,
+        // ADR 0107).
+        host.call(
+            "execution_mode",
+            serde_json::json!({ "mode": "manual", "revision": 0 }),
+        )
+        .await
+        .unwrap();
         (dir, format!("http://127.0.0.1:{}", served.port), token)
     }
 

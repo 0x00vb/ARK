@@ -16,7 +16,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
   const projects = [{ id: "a", name: "Notes", workspace: "/notes" }, { id: "b", name: "Writing", workspace: "/writing" }];
   const chats = [{ id: "chat-a", title: "First draft", project: "a" }, { id: "chat-b", title: "Second draft", project: "a" }, { id: "chat-c", title: "Other project", project: "b" }];
   let current = chats[0];
-  const summary = (chat = current) => ({ name: "Notes", tagline: "", model: "mock", grants: [], project: projects.find(p => p.id === chat.project), session: { ...chat, turns: 0 }, location: { runtime: "fixture", project: chat.project, session: chat.id }, execution_mode: "manual", execution_mode_revision: 0 });
+  const summary = (chat = current) => ({ name: "Notes", tagline: "", model: "mock", grants: [], project: projects.find(p => p.id === chat.project), session: { ...chat, turns: 0 }, location: { runtime: "fixture", project: chat.project, session: chat.id }, execution_mode: "auto", execution_mode_revision: 0 });
   const events = new Set(), errors = [], calls = [], files = [];
   let release, started, pending = 0;
   const waiting = new Promise(resolve => { started = resolve; });

@@ -15,19 +15,13 @@ chips in every composer, and a hero with suggestions in an empty chat.
 |---|---|
 | Rail | Chat, the app's views, what the app pinned (`ark.rail`), the account. Work and Automations are removed from the page |
 | Work and automations | The runtime keeps them. Agents create and run them when asked; there is no page for them. `work.js`, `schedules.js` and `automations.js` are deleted; the board view stays |
-| Composer | The model chip shows only while no model is chosen. The mode chip shows for any mode but Auto (Plan or Manual). Shift+Tab still cycles it. A new chat with no turns and no chosen mode (revision 0, Manual) is set to Auto once with the `chat_execution_mode` call; the first send waits for it |
+| Composer | The model chip shows only while no model is chosen. The mode chip shows for any mode but Auto (Plan or Manual). Shift+Tab still cycles it. A chat nobody chose a mode for is Auto (ADR 0107) |
 | Who the chat is with | A chip in the title bar (face and name) opens the details in the side pane: face, name, description, model. An app view supplies it with `identity()` on its controller; a plain chat is with ARK |
 | Empty chat | Nothing, then a typing mark for one second, then one line from a fixed list (`greeting.js`). The line is not sent to the model and not stored |
 
 ## Auto as the default
 
-The owner chose Auto as the default for chats. Auto runs only actions marked `auto_eligible` (project-bound
-mutations) that the guard allows. It never runs `person_only` actions and never skips an
-`ask_each_time` action. Plan and Manual stay reachable with Shift+Tab, and a chat in either shows
-its chip, so a person always sees a mode that is not Auto. The runtime and SDK default stays
-Manual; only this page changes the mode, through the host's existing call, and only for a new chat
-with no turns. An older chat keeps the authority it has, with its chip showing. The first send waits
-for the call, so the host and page agree. If that call fails the chat stays in Manual with its chip showing.
+Superseded by [0107](0107-every-chat-starts-in-auto.md): every chat starts in Auto at the runtime, with no page step, and Auto asks only what asks at every call.
 
 ## Consequences
 

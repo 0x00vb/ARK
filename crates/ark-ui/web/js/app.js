@@ -332,26 +332,8 @@ const RESOURCE_METHODS = {
   picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
 };
 
-/// A new chat nobody has written in and nobody chose a mode for (revision 0, Manual, no turns) is
-/// set to Auto once, through the call a chosen mode uses, so the host and the page agree before
-/// the first message. An older chat keeps the authority it has. A failure leaves the chat in
-/// Manual with its chip showing, and is tried again after a few seconds.
-const adopted = new Set();
 /// Pictures waiting in a chat's composer while another chat is shown, by chat.
 const imageStash = new Map();
-const adopting = new Map();
-function adoptAuto(summary, set) {
-  const id = summary?.session?.id;
-  if (!id || summary.session.turns || summary.execution_mode_revision || summary.execution_mode !== "manual" || adopted.has(id)) return;
-  adopted.add(id);
-  const pending = set()
-    .catch((error) => {
-      console.error("Could not set Auto", error);
-      setTimeout(() => adopted.delete(id), 5000);
-    })
-    .finally(() => adopting.delete(id));
-  adopting.set(id, pending);
-}
 
 function activeSummary() {
   return secondaryChats.get(activeSession)?.summary || state.summary;
@@ -874,11 +856,7 @@ class SecondaryChat {
   applySummary(summary) {
     this.summary = summary;
     this.composer.setModel(summary.model);
-    this.composer.setExecutionMode(summary.execution_mode || "manual", summary.execution_mode_revision || 0);
-    adoptAuto(summary, async () => {
-      const adoptedSummary = await transport.call("chat_execution_mode", { session: this.session, mode: "auto", revision: 0, model: summary.model });
-      if (secondaryChats.get(this.session) === this) this.applySummary(adoptedSummary);
-    });
+    this.composer.setExecutionMode(summary.execution_mode || "auto", summary.execution_mode_revision || 0);
     chatTabs.titles.set(this.session, summary.session.title || "Untitled chat");
     if (detachedWindow && activeSession === this.session) {
       state.summary = summary;
@@ -900,8 +878,6 @@ class SecondaryChat {
     if (!text) return;
     // The agent began meanwhile: the message waits for it, pictures with it.
     if (this.running) return this.composer.enqueue(text, images);
-    await adopting.get(this.session);
-    if (this.running) return this.composer.enqueue(text, images);
     this.thread.begin(text, { images }).local = true;
     this.setRunning(true);
     try {
@@ -910,7 +886,7 @@ class SecondaryChat {
         text,
         images: images.map(i => i.path),
         model: this.summary.model,
-        execution_mode: this.composer.executionMode || "manual",
+        execution_mode: this.composer.executionMode || "auto",
         execution_mode_revision: this.composer.executionModeRevision || 0,
       });
     } catch (error) {
@@ -1411,14 +1387,13 @@ async function submit(text, { images = [], named = false } = {}) {
       return toast(e.message || String(e));
     }
   }
-  await adopting.get(state.sessionId);
   thread.begin(text, { images }).local = true;
   setRunning(true);
   try {
     await transport.call("send", {
       text,
       images: images.map(i => i.path),
-      execution_mode: composer.executionMode || "manual",
+      execution_mode: composer.executionMode || "auto",
       execution_mode_revision: composer.executionModeRevision || 0,
     });
   } catch (e) {
@@ -1538,11 +1513,7 @@ function applySummary(s) {
     else if (view?.projectScoped) views.get(state.view)?.ctl?.update?.({ project: s.project });
   }
   composer.setModel(s.model);
-  composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
-  adoptAuto(s, async () => {
-    const summary = await transport.call("chat_execution_mode", { session: s.session.id, mode: "auto", revision: 0, model: s.model });
-    if (state.sessionId === s.session.id) applySummary(summary);
-  });
+  composer.setExecutionMode(s.execution_mode || "auto", s.execution_mode_revision || 0);
   showTitle();
   rememberTab(s);
   if (changed) {

@@ -27,7 +27,7 @@ Add three execution modes:
 | Manual | Current behavior. State-changing actions use session and project grants, then ask. |
 | Auto | Actions explicitly marked as routine and project-bound run without asking. Every other state-changing action follows Manual. |
 
-Manual is the default for existing and new chats. The selected mode belongs to a chat and has a
+Manual is the default for existing and new chats. (Amended by ADR 0107: a chat nobody chose a mode for is Auto, and Auto runs everything that does not ask at every call.) The selected mode belongs to a chat and has a
 revision. Submit carries the mode and revision shown by its initiating composer. The runtime
 atomically compares them with the chat, binds them to immutable turn authority and returns the
 effective mode with the turn. A mismatch refuses submission and refreshes the control instead of

@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- The Anthropic and OpenAI providers send the images of a person's message: Anthropic sent only a tool result's images (a person's would have been dropped), and OpenAI labelled them "The picture from the last result".
 - The chat can be scrolled up while a reply streams. Before, a scroll up was pulled back to the bottom at the next chunk: a snap already queued ran after the person moved, and anything within 80 px of the end counted as the end. A wheel, touch, key or scrollbar press now lets go of the end at once, and scrolling back near the bottom follows the stream again.
 
 ## [0.39.0] - 2026-11-07

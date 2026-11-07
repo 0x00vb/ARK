@@ -132,6 +132,16 @@ fn role_str(r: Role) -> &'static str {
 /// One message on the wire, and a tool result's pictures after it: a `tool` message takes only
 /// text, so the pictures go in a `user` message that says where they come from.
 fn to_wire(m: &Message) -> Vec<Value> {
+    // A person's message with images is one message: its text, then the images.
+    if m.role == Role::User && !m.pictures.is_empty() {
+        let mut parts = vec![json!({ "type": "text", "text": m.content })];
+        parts.extend(
+            m.pictures
+                .iter()
+                .map(|p| json!({ "type": "image_url", "image_url": { "url": p.data_url() } })),
+        );
+        return vec![json!({ "role": "user", "content": parts })];
+    }
     let mut out = vec![to_wire_message(m)];
     if !m.pictures.is_empty() {
         let mut parts = vec![json!({
@@ -429,6 +439,22 @@ mod tests {
         );
         // Without a picture, one message as before.
         assert_eq!(to_wire(&Message::tool_result(&call, "x")).len(), 1);
+    }
+
+    #[test]
+    fn a_persons_message_is_one_message_with_its_images() {
+        let pic = Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(b"png".to_vec()),
+        };
+        let w = to_wire(&Message::user("what is this?").with_pictures(vec![pic]));
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0]["role"], "user");
+        assert_eq!(w[0]["content"][0]["text"], "what is this?");
+        assert_eq!(
+            w[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,cG5n"
+        );
     }
 
     #[test]

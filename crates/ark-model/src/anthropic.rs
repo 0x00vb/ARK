@@ -79,6 +79,17 @@ fn blocks(m: &Message) -> (&'static str, Vec<Value>) {
                 ],
             )
         }
+        // A person's message with images: its text, then the images, as in the Messages API.
+        Role::User if !m.pictures.is_empty() => {
+            let mut b = Vec::new();
+            if !m.content.is_empty() {
+                b.push(json!({ "type": "text", "text": m.content }));
+            }
+            b.extend(m.pictures.iter().map(|p| {
+                json!({ "type": "image", "source": { "type": "base64", "media_type": p.media_type, "data": p.base64() } })
+            }));
+            ("user", b)
+        }
         Role::Tool => (
             "user",
             vec![
@@ -446,5 +457,18 @@ mod picture_tests {
         assert_eq!(content[1]["type"], "image");
         assert_eq!(content[1]["source"]["media_type"], "image/png");
         assert_eq!(content[1]["source"]["data"], "cG5n");
+    }
+
+    #[test]
+    fn a_persons_message_sends_its_text_then_its_images() {
+        let pic = Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(b"png".to_vec()),
+        };
+        let w = wire_messages(&[Message::user("what is this?").with_pictures(vec![pic])]);
+        assert_eq!(w[0]["role"], "user");
+        assert_eq!(w[0]["content"][0]["text"], "what is this?");
+        assert_eq!(w[0]["content"][1]["type"], "image");
+        assert_eq!(w[0]["content"][1]["source"]["data"], "cG5n");
     }
 }

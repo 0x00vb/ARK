@@ -716,10 +716,11 @@ const scenarios = {
     await finished(page, async () => {
       await page.locator("#input").fill("What do the notes say?");
       await page.keyboard.press("Enter");
-      await page.locator(".prose.streaming").waitFor();
+      await page.locator(".prose.streaming").first().waitFor();
       await page.locator("#input").fill("Also check for a key.");
-      await page.keyboard.press("Meta+Enter");
+      await page.keyboard.press("Enter");
       await page.locator(".queued.steer").waitFor();
+      assert.equal(await page.locator(".queued.steer .queued-k").innerText(), "Sending");
       // Streaming continues in one piece while the message waits.
       assert.equal(await page.locator(".turn .agent .steered").count(), 0);
     });
@@ -1297,6 +1298,24 @@ async function analysis(page) {
   await page.locator(".md-page h2").waitFor();
   assert.equal(await page.locator(".md-page h2").innerText(), "Sales");
   await page.waitForFunction(() => document.querySelector(".md-page img.md-img")?.naturalWidth > 0);
+  // The page has no bar of its own. The person types into it: the block shows its source, the
+  // rest stays drawn, and what they type is saved without a button.
+  const reading = page.locator(".fv:has(.md-page)");
+  assert.equal(await reading.locator(".wb-bar, .fv-tools").count(), 0, "a Markdown page has no top bar");
+  assert.equal(await reading.locator("button", { hasText: "Edit" }).count(), 0);
+  await page.locator(".md-page p", { hasText: "North led" }).click();
+  const area = page.locator(".md-page textarea.md-edit");
+  await area.waitFor();
+  assert.equal(await area.inputValue(), "North led with 120.");
+  await area.press("End");
+  await page.keyboard.type(" South followed.");
+  const report = () => page.evaluate(async () => (await window.ark.call("file_read", { path: "report.md" })).text);
+  for (let i = 0; i < 50 && !(await report()).includes("South followed."); i++) await page.waitForTimeout(100);
+  assert.equal(await report(), "# Sales\n\nNorth led with 120. South followed.\n\n![Sales by region](chart.svg)\n");
+  await page.keyboard.press("Escape");
+  await area.waitFor({ state: "detached" });
+  assert.match(await page.locator(".md-page p").first().innerText(), /North led with 120\. South followed\./);
+  assert.equal(await page.locator(".md-page img.md-img").evaluate((i) => i.naturalWidth > 0), true, "untouched blocks are not drawn again");
 
   // The table opens as a sheet.
   await page.locator(".file-card", { hasText: "table.csv" }).click();

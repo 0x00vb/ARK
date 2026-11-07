@@ -7,6 +7,11 @@ import { esc } from "./dom.js";
 
 /// Set while rendering a document that may show the project's images (`markdown(src, { files: true })`).
 let fileImages = false;
+/// Set while rendering a page that is edited in place: each block names its source lines.
+let blockLines = false;
+
+/// ` data-lines="a:b"` for the block drawn from source lines `a` to `b` (end exclusive).
+const at = (a, b) => (blockLines ? ` data-lines="${a}:${b}"` : "");
 
 function inline(s) {
   let out = esc(s);
@@ -35,24 +40,26 @@ function inline(s) {
     .replace(/\u0001(\d+)\u0001/g, (_, i) => images[Number(i)]);
 }
 
-function table(rows) {
+function table(rows, range) {
   // A table still streaming in may have its header and no complete separator row yet.
-  if (rows.length < 2) return `<p>${inline(rows[0] || "")}</p>`;
+  if (rows.length < 2) return `<p${range}>${inline(rows[0] || "")}</p>`;
   const cells = (r) => r.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
   const head = cells(rows[0]);
   const aligns = cells(rows[1]).map((c) => (c.endsWith(":") ? (c.startsWith(":") ? "center" : "right") : ""));
   const td = (tag, c, i) => `<${tag}${aligns[i] ? ` style="text-align:${aligns[i]}"` : ""}>${inline(c)}</${tag}>`;
-  let html = `<div class="md-table"><table><thead><tr>${head.map((c, i) => td("th", c, i)).join("")}</tr></thead><tbody>`;
+  let html = `<div class="md-table"${range}><table><thead><tr>${head.map((c, i) => td("th", c, i)).join("")}</tr></thead><tbody>`;
   for (const r of rows.slice(2)) html += `<tr>${cells(r).map((c, i) => td("td", c, i)).join("")}</tr>`;
   return html + "</tbody></table></div>";
 }
 
-export function markdown(src, { files = false } = {}) {
+export function markdown(src, { files = false, lines = false } = {}) {
   fileImages = files;
+  blockLines = lines;
   try {
     return render(src);
   } finally {
     fileImages = false;
+    blockLines = false;
   }
 }
 
@@ -60,16 +67,20 @@ function render(src) {
   const lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
   let html = "";
   let para = [];
-  let list = null; // { type, items: [] }
+  let paraFrom = 0;
+  let list = null; // { type, items: [], from }
+  // A paragraph or list ends at the line being read.
+  let now = 0;
   const flushPara = () => {
-    if (para.length) html += `<p>${inline(para.join(" "))}</p>`;
+    if (para.length) html += `<p${at(paraFrom, now)}>${inline(para.join(" "))}</p>`;
     para = [];
   };
   const flushList = () => {
-    if (list) html += `<${list.type}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.type}>`;
+    if (list) html += `<${list.type}${at(list.from, now)}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.type}>`;
     list = null;
   };
   for (let i = 0; i < lines.length; i++) {
+    now = i;
     const raw = lines[i];
     const line = raw.trim();
     const fence = line.match(/^```\s*([\w+-]*)/);
@@ -78,9 +89,10 @@ function render(src) {
       flushList();
       const lang = fence[1];
       const body = [];
+      const from = i;
       i++;
       while (i < lines.length && !lines[i].trim().startsWith("```")) body.push(lines[i++]);
-      html += `<pre class="md-code"${lang ? ` data-lang="${esc(lang)}"` : ""}><code>${esc(body.join("\n"))}</code></pre>`;
+      html += `<pre class="md-code"${lang ? ` data-lang="${esc(lang)}"` : ""}${at(from, Math.min(i + 1, lines.length))}><code>${esc(body.join("\n"))}</code></pre>`;
       continue;
     }
     if (!line) {
@@ -92,9 +104,10 @@ function render(src) {
       flushPara();
       flushList();
       const rows = [];
+      const from = i;
       while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) rows.push(lines[i++].trim());
       i--;
-      html += table(rows);
+      html += table(rows, at(from, i + 1));
       continue;
     }
     const heading = line.match(/^(#{1,4})\s+(.*)/);
@@ -102,19 +115,19 @@ function render(src) {
       flushPara();
       flushList();
       const n = Math.min(heading[1].length + 1, 5);
-      html += `<h${n}>${inline(heading[2])}</h${n}>`;
+      html += `<h${n}${at(i, i + 1)}>${inline(heading[2])}</h${n}>`;
       continue;
     }
     if (/^(-{3,}|\*{3,})$/.test(line)) {
       flushPara();
       flushList();
-      html += "<hr />";
+      html += `<hr${at(i, i + 1)} />`;
       continue;
     }
     if (line.startsWith(">")) {
       flushPara();
       flushList();
-      html += `<blockquote>${inline(line.replace(/^>\s?/, ""))}</blockquote>`;
+      html += `<blockquote${at(i, i + 1)}>${inline(line.replace(/^>\s?/, ""))}</blockquote>`;
       continue;
     }
     const ul = line.match(/^[-*•]\s+(.*)/);
@@ -123,7 +136,7 @@ function render(src) {
       flushPara();
       const type = ul ? "ul" : "ol";
       if (list && list.type !== type) flushList();
-      if (!list) list = { type, items: [] };
+      if (!list) list = { type, items: [], from: i };
       list.items.push((ul || ol)[1]);
       continue;
     }
@@ -132,8 +145,10 @@ function render(src) {
       continue;
     }
     flushList();
+    if (!para.length) paraFrom = i;
     para.push(line);
   }
+  now = lines.length;
   flushPara();
   flushList();
   return html;

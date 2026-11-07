@@ -1736,6 +1736,13 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 
 /* Markdown as a page; PDFs and images as themselves. */
 .md-page { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px 40px; animation: none; }
+.md-edit {
+  display: block; width: 100%; box-sizing: border-box; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: 2px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 6%, transparent); caret-color: var(--accent);
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.md-page > [data-lines] { outline: 0; }
 .md-page .md-img { display: block; max-width: 100%; height: auto; margin: 0.4em 0 1em; border-radius: 6px; box-shadow: 0 0 0 1px var(--hair); }
 .md-missing { color: var(--text-3); font-size: 13px; }
 .media-body { flex: 1; min-height: 0; display: flex; overflow: auto; background: var(--sunken); }

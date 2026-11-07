@@ -8,7 +8,7 @@
 // `ctx.save(edits)` saves and answers the file as saved; `ctx.status(state)` shows saving.
 
 import { h, icon, clear } from "./dom.js";
-import { markdown } from "./md.js";
+import { inlineEditor } from "./md-inline.js";
 import { sheetView } from "./sheet.js";
 import { documentView } from "./document.js";
 import { highlight, languageOf, MAX_CHARS } from "./highlight.js";
@@ -324,54 +324,53 @@ function goToLine(area, n) {
 
 // ---- Markdown ----------------------------------------------------------------------------------
 
-/// Markdown as a page, with the project's images it links to; Edit shows the text to change.
-function markdownView(el, file, ctx, params) {
-  let edit = null;
-  let page = null;
-  let current = file;
-  const show = () => {
-    revokeAll(el);
-    clear(el);
-    edit = null;
-    const toggle = h("button.btn.small", { type: "button", onclick: () => editing() }, "Edit");
-    page = h("div.prose.md-page");
-    el.append(h("div.wb-bar", h("span.wb-file-name", current.path), h("span.spacer"), toggle, ctx.tools), page);
-    page.innerHTML = markdown(current.text, { files: true });
-    for (const img of page.querySelectorAll("img[data-file]")) {
-      media(ctx.ark, near(current.path, img.dataset.file))
-        .then((m) => {
-          keep(el, m.url);
-          img.src = m.url;
-        })
-        .catch(() => img.replaceWith(h("span.md-missing", img.alt || img.dataset.file)));
-    }
-  };
-  const editing = () => {
-    clear(el);
-    const box = h("div.fv-body");
-    el.append(box);
-    edit = textView(box, current, ctx, params);
-    const bar = box.querySelector(".wb-bar");
-    bar?.insertBefore(h("button.btn.small", { type: "button", onclick: () => done() }, "Done"), bar.querySelector(".wb-save"));
-  };
-  // Back to the page, as the file now is (the person may have saved).
-  const done = async () => {
-    if (edit?.dirty?.()) return ctx.ark.toast("Save or undo your changes first");
-    try {
-      current = await ctx.ark.call("file_read", { path: current.path });
-    } catch {}
-    show();
-  };
-  show();
-  return {
-    dirty: () => !!edit?.dirty?.(),
-    focus: () => edit?.focus?.() || null,
-    update(f) {
-      current = f;
-      if (edit) edit.update(f);
-      else show();
+/// Markdown as a page, with the project's images it links to. The person types into the page
+/// itself: the block under the caret shows its source (md-inline.js).
+function markdownView(el, file, ctx) {
+  const { ark } = ctx;
+  let version = file.version;
+  ctx.tools.remove();
+  const page = h("div.prose.md-page");
+  el.append(page);
+  const editor = inlineEditor(page, {
+    text: file.text,
+    readOnly: !!file.read_only,
+    drawn(root) {
+      for (const img of root.querySelectorAll("img[data-file]")) {
+        media(ark, near(file.path, img.dataset.file))
+          .then((m) => {
+            keep(el, m.url);
+            img.src = m.url;
+          })
+          .catch(() => img.replaceWith(h("span.md-missing", img.alt || img.dataset.file)));
+      }
     },
-    dispose: () => revokeAll(el),
+    async save(text) {
+      try {
+        const r = await ark.call("file_write", { path: file.path, text, base: version });
+        version = r.version;
+        ctx.saved(r.version);
+      } catch (e) {
+        ark.toast(e.message);
+        throw e;
+      }
+    },
+  });
+  return {
+    dirty: () => editor.dirty(),
+    focus: () => {
+      const line = editor.line();
+      return line ? { selection: { line } } : null;
+    },
+    flush: () => editor.flush(),
+    update(f) {
+      version = f.version;
+      editor.set(f.text);
+    },
+    dispose() {
+      editor.dispose();
+      revokeAll(el);
+    },
   };
 }
 

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- While the agent works, Enter sends the message into the running turn and ⌘↩ queues it for after. The waiting row reads "Sending". Before, Enter queued and only ⌘↩ sent.
+- A Markdown file has no top bar. The person types into the page: the block under the caret shows its Markdown, the rest stays drawn, and edits save on their own. The raw editor, Edit and Done are gone for `.md`.
+
 ### Fixed
 
 - A tool that panics fails its own call and the turn goes on. A turn whose task dies ends with an error and frees the chat instead of staying on "working". Before, one panic left the chat stuck for good.

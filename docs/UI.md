@@ -82,8 +82,8 @@ link or a selection.
 
 | Key | Action |
 |---|---|
-| ↩ | Send. While the agent works: queue for the next turn |
-| ⌘↩ | While the agent works: steer (the message reaches the agent at its next step) |
+| ↩ | Send. While the agent works: the message reaches the agent at its next step |
+| ⌘↩ | While the agent works: queue the message for the next turn |
 | ⇧↩ | New line |
 | esc | Close the palette, else deny a pending approval, else stop the turn, else close the pane |
 | ⌘K | Command palette |
@@ -95,7 +95,7 @@ link or a selection.
 | ⌘T | Browser (in the window; a browser keeps ⌘T for itself) |
 | ⌘P | Files |
 
-A steered message waits above the composer as "Next step" and joins the conversation where
+A message sent while the agent works waits above the composer as "Sending" and joins the conversation where
 the agent read it. A steer that arrives after the agent's last step becomes the next prompt.
 
 ## Approvals, cancel, sessions

@@ -1,6 +1,6 @@
 // The composer. Idle: ↩ sends, ⇧↩ adds a line, `/` completes commands. While the agent works:
-// ↩ queues the message for after the turn, ⌘↩ sends it into the running turn (it reaches the
-// model at its next step), esc stops. Queued messages wait above the composer and can be sent
+// ↩ sends the message into the running turn (it reaches the model at its next step), ⌘↩ queues
+// it for after the turn, esc stops. Queued messages wait above the composer and can be sent
 // in early or removed.
 
 import { h, icon, clear, clip, touch, $ } from "./dom.js";
@@ -173,7 +173,7 @@ export class Composer {
     this.running = on;
     this.form.dataset.running = String(on);
     this.send.setAttribute("aria-label", on ? "Stop" : "Send");
-    this.input.placeholder = on ? (touch() ? "Queue a message" : label("Queue a message · ⌘↩ sends it now")) : this.placeholder || "Ask anything";
+    this.input.placeholder = on ? (touch() ? "Message the agent" : label("Message the agent · ⌘↩ queues it")) : this.placeholder || "Ask anything";
   }
 
   /// Name the model on its button: the app's words when it draws the picker. With nothing
@@ -247,7 +247,7 @@ export class Composer {
     }
   }
 
-  submit(now) {
+  submit(queue) {
     const text = this.input.value.trim();
     if (!text) return;
     this.input.value = "";
@@ -259,8 +259,8 @@ export class Composer {
       this.enqueue(text);
       return;
     }
-    if (now) this.api.steer(text);
-    else this.enqueue(text);
+    if (queue) this.enqueue(text);
+    else this.api.steer(text);
   }
 
   enqueue(text) {
@@ -297,7 +297,7 @@ export class Composer {
     clear(this.queueEl);
     for (const [i, q] of (this.steers || []).entries()) {
       this.queueEl.append(h("div.queued.steer", { style: { "--i": i } },
-        h("span.queued-k", "Next step"),
+        h("span.queued-k", "Sending"),
         h("span.queued-t", clip(q, 120))));
     }
     this.queue.forEach((q, i) => {

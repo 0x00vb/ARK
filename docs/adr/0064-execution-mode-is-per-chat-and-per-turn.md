@@ -25,7 +25,7 @@ Add three execution modes:
 |---|---|
 | Plan | The catalog omits state-changing actions. The turn may inspect and answer with a plan. |
 | Manual | Current behavior. State-changing actions use session and project grants, then ask. |
-| Auto | Actions explicitly marked as routine and project-bound run without asking. Every other state-changing action follows Manual. |
+| Auto | Amended by ADR 0107: every state-changing action runs without asking except what asks at every call. (First version: only actions marked routine and project-bound ran without asking.) |
 
 Manual is the default for existing and new chats. (Amended by ADR 0107: a chat nobody chose a mode for is Auto, and Auto runs everything that does not ask at every call.) The selected mode belongs to a chat and has a
 revision. Submit carries the mode and revision shown by its initiating composer. The runtime

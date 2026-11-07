@@ -7,7 +7,7 @@ Status: Accepted. Date: 2026-11-06. Amends ADR 0064 (the composer control) and f
 ADR 0103 left the Plan and Manual chip and Shift+Tab on the page and said an agent could not
 change the mode: raising its own authority needs a person-only approval. The window now drops
 the chip and Shift+Tab. The person must still be able to say "work in plan mode", "ask me
-before changes" or "go auto", and a chat nobody has set is already Auto (ADR 0103).
+before changes" or "go auto", and a chat nobody has set is already Auto (ADR 0107).
 
 ## Decision
 
@@ -34,7 +34,7 @@ or flip it to Plan. A person sees the request in the normal approval card.
 
 There is no chip. The person sees a mode in two ways: the model says it after `mode.set`
 ("From your next message this chat asks before changes"), and the approval card names the
-change. Auto is the page's default and needs no signal. The host's summary still carries
+change. Auto is every chat's default (ADR 0107) and needs no signal. The host's summary still carries
 `execution_mode` and `execution_mode_revision` for any client that draws it.
 
 ## Consequences

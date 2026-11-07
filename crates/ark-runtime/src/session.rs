@@ -143,6 +143,17 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
+    /// A chat nobody chose a mode for (revision 0) is Auto, whichever mode an older version
+    /// stored for it. A person's choice has a revision above 0 and stays. Applied wherever a
+    /// stored record becomes the live one, so the stored copy is settled the next time it is
+    /// written.
+    fn settled(mut self) -> Self {
+        if self.execution_mode_revision == 0 {
+            self.execution_mode = ExecutionMode::Auto;
+        }
+        self
+    }
+
     pub fn empty(
         id: SessionId,
         project: ProjectId,
@@ -780,14 +791,10 @@ impl Session {
 
     fn load(
         engine: &Engine,
-        mut record: SessionRecord,
+        record: SessionRecord,
         close_interrupted: bool,
     ) -> Result<Session, AgentError> {
-        // A chat nobody chose a mode for (revision 0) is Auto, whichever mode an older version
-        // stored for it. A person's choice has a revision above 0 and stays.
-        if record.execution_mode_revision == 0 {
-            record.execution_mode = ExecutionMode::Auto;
-        }
+        let record = record.settled();
         // Turns already folded into gists are excluded from the window; a turn at or past
         // `turn_count` was begun and never recorded.
         let close_interrupted = close_interrupted && !record.execution_managed;
@@ -1383,14 +1390,15 @@ impl Session {
         engine
             .store
             .transact_records::<_, AgentError>(self.record.project.as_str(), |tx| {
-                let current: SessionRecord = serde_json::from_value(
+                let current = serde_json::from_value::<SessionRecord>(
                     tx.get_session(self.record.id.as_str())?.ok_or_else(|| {
                         std::io::Error::new(
                             std::io::ErrorKind::NotFound,
                             "conversation was deleted",
                         )
                     })?,
-                )?;
+                )?
+                .settled();
                 if current.turn_count != turn.index {
                     let existing = tx.get_session_turn(self.record.id.as_str(), turn.index)?;
                     let same = existing.as_ref().is_some_and(|existing| {
@@ -1993,6 +2001,31 @@ mod tests {
         let again = Session::open(&engine, &id).unwrap().unwrap();
         assert_eq!(again.execution_mode(), ExecutionMode::Manual);
         assert_eq!(again.execution_mode_revision(), 1);
+    }
+
+    #[test]
+    fn an_older_chat_stays_auto_after_its_first_message() {
+        let (_dir, engine, mut session) = chat();
+        // Stored by an older version: Manual, nobody chose.
+        session.record.execution_mode = ExecutionMode::Manual;
+        session.save(&engine).unwrap();
+        let id = session.id().as_str().to_string();
+        let mut open = Session::open(&engine, &id).unwrap().unwrap();
+        assert_eq!(open.execution_mode(), ExecutionMode::Auto);
+        open.begin_turn(&engine, "hello").unwrap();
+        open.record_turn(&engine, "hello", &outcome("hi")).unwrap();
+        // Recording a turn copies the stored mode back: it must not undo Auto.
+        assert_eq!(open.execution_mode(), ExecutionMode::Auto);
+        assert_eq!(open.execution_mode_revision(), 0);
+        let again = Session::open(&engine, &id).unwrap().unwrap();
+        assert_eq!(again.execution_mode(), ExecutionMode::Auto);
+        let stored: SessionRecord =
+            serde_json::from_value(engine.store.get_session(&id).unwrap().unwrap()).unwrap();
+        assert_eq!(
+            stored.execution_mode,
+            ExecutionMode::Auto,
+            "and it is stored so"
+        );
     }
 
     /// A turn that fails, continuing whatever came before it.

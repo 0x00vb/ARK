@@ -3,6 +3,10 @@
 // computer uses (ADR 0030). The composer then names them, so the message the person sends tells
 // the agent. A folder chosen from the sidebar becomes a new project the same way. Works the same
 // with a runtime on this computer or elsewhere.
+//
+// Images are the exception: the composer shows each as a small picture and sends it with the
+// message (`attachImages` on the origin says the composer can). They still go into the project
+// folder the same way, so the conversation and the agent find them there.
 
 import { h, icon, $ } from "./dom.js";
 
@@ -11,6 +15,10 @@ const CALL = 2 * 1024 * 1024;
 const CALL_FILES = 200;
 /// Tries of one call when the connection fails; every upload call can be sent again.
 const TRIES = 3;
+
+/// What the model reads: every provider takes these.
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+const isImage = (file) => /^image\/(png|jpeg|gif|webp)$/.test(file.type) || IMAGE.test(file.name);
 
 /// One set of files on its way at a time, from a drop or a picker.
 let busy = null;
@@ -53,34 +61,40 @@ export function acceptDrops(api, captureDraft, zone, { accepts, captureOrigin } 
     // read through them: then the files as dropped.
     const plain = () => files.map((file) => ({ path: file.name, file }));
     const target = captureOrigin ? null : api.at(api.summary().location);
-    const origin = captureOrigin ? captureOrigin() : { uploadApi: target, appendDraft: captureDraft(target.location) };
+    const origin = captureOrigin ? captureOrigin() : { uploadApi: target, appendDraft: captureDraft(target.location), attachImages: true };
     if (!origin) return;
     once(origin.uploadApi, async () => {
       origin.started?.();
       try {
         await addToProject(origin.uploadApi, origin.appendDraft,
-          entries.length ? await walkAll(entries).catch(plain) : plain(), origin.progressTarget);
+          entries.length ? await walkAll(entries).catch(plain) : plain(), origin.progressTarget, origin.attachImages);
       } finally { origin.finished?.(); }
     });
   });
 }
 
 /// The system's file chooser (a phone has no drag and drop): the files go into the project.
-export function chooseFiles(api, captureDraft, { captureOrigin, progressTarget } = {}) {
+export function chooseFiles(api, captureDraft, options = {}) {
+  choose({ multiple: true }, (files) => addFiles(api, captureDraft, files, options));
+}
+
+/// Files the person already holds (chosen, pasted): into the project, then named in the
+/// composer, images as pictures.
+export function addFiles(api, captureDraft, files, { captureOrigin, progressTarget } = {}) {
   const target = captureOrigin ? null : api.at(api.summary().location);
   const origin = captureOrigin ? captureOrigin() : {
     uploadApi: target,
     appendDraft: captureDraft(target.location),
     progressTarget,
+    attachImages: true,
   };
-  choose({ multiple: true }, (files) => {
-    once(origin.uploadApi, async () => {
-      origin.started?.();
-      try {
-        await addToProject(origin.uploadApi, origin.appendDraft,
-          files.map((file) => ({ path: file.name, file })), origin.progressTarget);
-      } finally { origin.finished?.(); }
-    });
+  if (!origin) return;
+  once(origin.uploadApi, async () => {
+    origin.started?.();
+    try {
+      await addToProject(origin.uploadApi, origin.appendDraft,
+        files.map((file) => ({ path: file.name, file })), origin.progressTarget, origin.attachImages);
+    } finally { origin.finished?.(); }
   });
 }
 
@@ -128,17 +142,40 @@ function choose(attrs, picked) {
   input.click();
 }
 
-async function addToProject(api, complete, list, progressTarget) {
+async function addToProject(api, complete, list, progressTarget, attach = false) {
   if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
+  const pictures = attach ? uniquePictures(list) : [];
   const progress = new Progress(list, "Adding", undefined, progressTarget);
   try {
-    const { added } = await send(api, list, progress, { method: "upload_add", params: {} });
-    complete(`Added to the project: ${added.join(", ")}`);
+    const { added, as } = await send(api, list, progress, { method: "upload_add", params: {} });
+    // `as` says which dropped name became which path (a name in use gets a number). An older
+    // runtime does not say: its files are named in the draft, as before.
+    const shown = as ? pictures.filter((p) => as[p.path]) : [];
+    const images = shown.map((p) => ({ path: as[p.path], name: p.path, url: URL.createObjectURL(p.file) }));
+    const named = added.filter((path) => !images.some((i) => i.path === path));
+    if (!images.length) complete(`Added to the project: ${added.join(", ")}`);
+    else complete(named.length ? `Added to the project: ${named.join(", ")}` : "", images);
   } catch (e) {
     api.toast(progress.stopped ? "Stopped. Nothing was added." : `The files were not added: ${e.message}`);
   } finally {
     progress.remove();
   }
+}
+
+/// The images among `list`: files at the top of the drop. Two with one name (screenshots pasted
+/// one after the other are all `image.png`) get a number, so each is its own file.
+function uniquePictures(list) {
+  const taken = new Set(list.filter((f) => f.path.includes("/") || !isImage(f.file)).map((f) => f.path.split("/")[0]));
+  const out = [];
+  for (const item of list) {
+    if (item.path.includes("/") || !isImage(item.file)) continue;
+    let path = item.path;
+    for (let n = 2; taken.has(path); n++) path = item.path.replace(/(\.[^.]*)?$/, ` ${n}$1`);
+    taken.add(path);
+    item.path = path;
+    out.push(item);
+  }
+  return out;
 }
 
 /// Send `list` in calls of at most `CALL` bytes (a part of a large file, or many small ones),

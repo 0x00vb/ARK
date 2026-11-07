@@ -68,6 +68,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+/// Images one message carries, and the most bytes of each (the smallest limit a provider has).
+const MAX_IMAGES: usize = 8;
+const MAX_IMAGE_BYTES: usize = 5 << 20;
+
 mod copying;
 mod held;
 
@@ -4724,7 +4728,9 @@ impl Host {
                         "the execution mode changed; review it and send again"
                     );
                 }
-                self.start_turn(text, ask)?;
+                let conv = self.cur();
+                let attachments = self.attachments(&conv, &params).await?;
+                self.start_turn_with(conv, text, ask, attachments)?;
                 Ok(json!({ "started": true }))
             }
             // `session` names a chat working in the background; default the current one.
@@ -6066,7 +6072,8 @@ impl Host {
                         "the execution mode changed; review it and send again"
                     );
                 }
-                self.start_turn_on(conv, text, ask)?;
+                let attachments = self.attachments(&conv, params).await?;
+                self.start_turn_with(conv, text, ask, attachments)?;
                 Ok(json!({ "started": true }))
             }
             "chat_steer" | "chat_cancel" => {
@@ -6383,6 +6390,64 @@ impl Host {
         input: String,
         ask: bool,
     ) -> anyhow::Result<()> {
+        self.start_turn_with(conv, input, ask, ark_interact::Attachments::default())
+    }
+
+    /// The images a message carries (`images`: project files). They are read now, so a file
+    /// changed later does not change what the model was shown. Only PNG, JPEG, GIF and WebP,
+    /// which every provider takes.
+    async fn attachments(
+        &self,
+        conv: &Arc<Conv>,
+        params: &Value,
+    ) -> anyhow::Result<ark_interact::Attachments> {
+        let paths: Vec<String> = params["images"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if paths.is_empty() {
+            return Ok(ark_interact::Attachments::default());
+        }
+        anyhow::ensure!(
+            paths.len() <= MAX_IMAGES,
+            "at most {MAX_IMAGES} images go with one message"
+        );
+        anyhow::ensure!(!conv.is_running(), "the agent is already working");
+        let (root, _) = conv.ix.lock().await.workspace()?;
+        let mut pictures = Vec::new();
+        for path in &paths {
+            let (bytes, media_type, _) = ark_files::media(&root, path)?;
+            anyhow::ensure!(
+                matches!(
+                    media_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                ),
+                "{path} is not a PNG, JPEG, GIF or WebP image"
+            );
+            anyhow::ensure!(
+                bytes.len() <= MAX_IMAGE_BYTES,
+                "{path} is larger than {} MB",
+                MAX_IMAGE_BYTES >> 20
+            );
+            pictures.push(ark_model::Picture {
+                media_type,
+                bytes: Arc::new(bytes),
+            });
+        }
+        Ok(ark_interact::Attachments { paths, pictures })
+    }
+
+    fn start_turn_with(
+        self: &Arc<Self>,
+        conv: Arc<Conv>,
+        input: String,
+        ask: bool,
+        attachments: ark_interact::Attachments,
+    ) -> anyhow::Result<()> {
         {
             let about = conv.about.lock().unwrap();
             if let Some(o) = &about.orch {
@@ -6391,6 +6456,7 @@ impl Host {
         }
         let ctl = TurnControl {
             ask,
+            attachments,
             ..TurnControl::new()
         };
         let finished = Arc::new(AtomicBool::new(false));

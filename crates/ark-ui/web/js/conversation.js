@@ -11,6 +11,7 @@ import { renderReport } from "./report.js";
 import { registry } from "./ext.js";
 import { kindOf, kindNoun, KIND_ICON } from "./file.js";
 import { greetingFor } from "./greeting.js";
+import { thumb, baseName } from "./thumbs.js";
 
 const GREETING_DELAY = 1000;
 /// Chats whose line was already typed in this window.
@@ -124,7 +125,7 @@ export class Thread {
 
   /// A stored turn. An app's turn (`ark.chatView`) may add `note`, `working`, `status`, `after`.
   storedTurnView(t) {
-    const turn = new TurnView(this, t.input, t.index, t.note);
+    const turn = new TurnView(this, t.input, t.index, t.note, (t.images || []).map((path) => ({ path })));
     turn.el.classList.add("stored");
     // Activity replays in order: narration where it was written, steering where it was read.
     // Turns stored before traces were kept only have the steered list.
@@ -163,10 +164,10 @@ export class Thread {
 
   // ---- the live turn -------------------------------------------------------------------------
 
-  begin(input) {
+  begin(input, { images = [] } = {}) {
     this.dropWelcome();
     for (const b of this.root.querySelectorAll(".resume")) b.remove();
-    this.live = new TurnView(this, input, null);
+    this.live = new TurnView(this, input, null, undefined, images);
     this.live.live = true;
     this.live.working("Thinking");
     this.root.append(this.live.el);
@@ -245,7 +246,8 @@ function postView(p) {
 }
 
 class TurnView {
-  constructor(thread, input, index, note) {
+  /// `images`: what the person attached, `{ path, url? }`, drawn above the message.
+  constructor(thread, input, index, note, images = []) {
     this.thread = thread;
     this.api = thread.api;
     const location = this.api.location || this.api.summary?.()?.location;
@@ -261,8 +263,15 @@ class TurnView {
     /// Files the turn changed or removed: the version from before its first change (ADR 0034).
     this.before = new Map();
     this.started = performance.now();
+    // A picture sent alone has its file name for text: the pictures say it already.
+    const said = input === images.map((i) => baseName(i.path)).join(", ") ? null : input;
     this.el = h("article.turn",
-      h(`div.user${note ? ".noted" : ""}`, h("div.bubble", input), note ? h("div.user-note", note) : null),
+      h(`div.user${note || images.length ? ".noted" : ""}`,
+        images.length ? h("div.user-images", images.map((image) => {
+          const open = h("button.user-image", { type: "button", title: baseName(image.path), "aria-label": `Open ${baseName(image.path)}`, onclick: () => this.api.openFile?.(image.path) }, thumb(this.api, image));
+          return open;
+        })) : null,
+        said === null ? null : h("div.bubble", said), note ? h("div.user-note", note) : null),
       (this.agent = h("div.agent")),
     );
   }

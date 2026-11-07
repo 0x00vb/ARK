@@ -262,6 +262,8 @@ pub struct Harness {
     planner: bool,
     critic: bool,
     focus: Option<Focus>,
+    /// Images the person attached to this turn's message, shown to a model that reads them.
+    pictures: Vec<ark_model::Picture>,
     conversation: Option<String>,
     approvals: Option<Arc<ApprovalGate>>,
     guard: Option<Arc<dyn crate::guard::CallGuard>>,
@@ -357,6 +359,7 @@ impl Harness {
             planner: false,
             critic: true,
             focus: None,
+            pictures: Vec::new(),
             conversation: None,
             approvals: None,
             guard: None,
@@ -438,6 +441,33 @@ impl Harness {
         {
             Some(path) => format!("{task} {path}"),
             None => task.to_string(),
+        }
+    }
+
+    /// Images the person attached to the message. They ride on the task frame; a model that
+    /// does not read images is told so in words.
+    pub fn pictures(mut self, pictures: Vec<ark_model::Picture>) -> Self {
+        self.pictures = pictures;
+        self
+    }
+
+    /// The task frame as a message: with the attached images when the model reads them.
+    fn task_message(&self, mut text: String) -> Message {
+        if self.pictures.is_empty() {
+            return Message::user(text);
+        }
+        if self.router.provider(Role::Reason).reads_pictures() {
+            return Message::user(text).with_pictures(self.pictures.clone());
+        }
+        text.push_str("\n(an image was attached, but this model is not sent images)");
+        Message::user(text)
+    }
+
+    fn picture_tokens(&self) -> u32 {
+        if self.router.provider(Role::Reason).reads_pictures() {
+            self.pictures.len() as u32 * ark_model::PICTURE_TOKENS
+        } else {
+            0
         }
     }
 
@@ -698,7 +728,7 @@ impl Harness {
         // The first message is the task frame: pinned, so no number of steps drops the task
         // (ADR 0050).
         let mut ws = WorkingSet::new(budget);
-        ws.pin(Message::user(first_text));
+        ws.pin(self.task_message(first_text));
         // Tokens of retrieval results (evidence lookups, knowledge search) per round, aligned
         // with the working set's rounds, so the context report can show them apart.
         let mut retrieved: Vec<u32> = Vec::new();
@@ -800,8 +830,8 @@ impl Harness {
 
             first.memory = crate::memory::recall(&engine.store, project, &goal_text, budget)?;
             let refreshed = first.render();
-            let first_tokens = estimate_tokens(&refreshed) + 4;
-            ws.pin(Message::user(refreshed));
+            let first_tokens = estimate_tokens(&refreshed) + 4 + self.picture_tokens();
+            ws.pin(self.task_message(refreshed));
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
             let tail = state_message_with(&state_digest, &steered);
             let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
@@ -1389,8 +1419,8 @@ impl Harness {
             }
             first.memory = crate::memory::recall(&engine.store, project, &goal_text, budget)?;
             let refreshed = first.render();
-            let first_tokens = estimate_tokens(&refreshed) + 4;
-            ws.pin(Message::user(refreshed));
+            let first_tokens = estimate_tokens(&refreshed) + 4 + self.picture_tokens();
+            ws.pin(self.task_message(refreshed));
             match self
                 .force_answer(
                     profile,
@@ -1569,9 +1599,9 @@ impl Harness {
             task: self.task_text(task, self.request_budget()),
         };
         let first_text = first.render();
-        let first_tokens = estimate_tokens(&first_text) + 4;
+        let first_tokens = estimate_tokens(&first_text) + 4 + self.picture_tokens();
         let mut ws = WorkingSet::new(self.request_budget());
-        ws.pin(Message::user(first_text));
+        ws.pin(self.task_message(first_text));
         let state_digest = state.digest(STATE_DIGEST_ITEMS);
         let tail = state_message(&state_digest);
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));

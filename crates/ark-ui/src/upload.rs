@@ -158,7 +158,8 @@ pub(crate) fn finish(engine: &Engine, id: &str, name: &str) -> anyhow::Result<Va
 
 /// The upload's files go into the project folder `dir`. Each file or folder at the top of the
 /// upload keeps its name, or gets a number when the name is taken there (`sales 2.xlsx`); nothing
-/// is overwritten. Answers `{added: [paths]}`, the same when asked again.
+/// is overwritten. Answers `{added: [paths], as: {name: path}}` (`as` says which name became
+/// which path), the same when asked again.
 pub(crate) fn add(store: &Path, id: &str, dir: &Path) -> anyhow::Result<Value> {
     let up = folder(store, id)?;
     let done = done_file(&up);
@@ -179,13 +180,15 @@ pub(crate) fn add(store: &Path, id: &str, dir: &Path) -> anyhow::Result<Value> {
         .collect();
     names.sort();
     let mut added = Vec::new();
+    let mut named = serde_json::Map::new();
     for name in names {
         let free = free_name(dir, &name);
         let target = ark_files::inside(dir, &free)?;
         move_entry(&up.join(&name), &target)?;
+        named.insert(name, json!(free));
         added.push(free);
     }
-    let answer = json!({ "added": added });
+    let answer = json!({ "added": added, "as": named });
     std::fs::write(&done, answer.to_string())?;
     let _ = std::fs::remove_dir_all(&up);
     Ok(answer)
@@ -333,7 +336,10 @@ mod tests {
         let answer = add(s, id, dir).unwrap();
         assert_eq!(
             answer,
-            json!({ "added": ["README", "exports 2", "sales 2.xlsx"] })
+            json!({
+                "added": ["README", "exports 2", "sales 2.xlsx"],
+                "as": { "README": "README", "exports": "exports 2", "sales.xlsx": "sales 2.xlsx" }
+            })
         );
         assert_eq!(std::fs::read(dir.join("sales.xlsx")).unwrap(), b"theirs");
         assert_eq!(std::fs::read(dir.join("sales 2.xlsx")).unwrap(), b"mine");

@@ -871,6 +871,16 @@ pub struct TurnControl {
     /// Ask the approval gate before state-changing actions. Off for runs where nobody can
     /// answer: those actions are then refused, and the model is told why.
     pub ask: bool,
+    /// Images attached to the message that starts the turn.
+    pub attachments: Attachments,
+}
+
+/// Images the person attached to a message: the project files they are stored as, and what
+/// the model is shown.
+#[derive(Clone, Default)]
+pub struct Attachments {
+    pub paths: Vec<String>,
+    pub pictures: Vec<ark_sdk::prelude::ark_model::Picture>,
 }
 
 impl Default for TurnControl {
@@ -880,6 +890,7 @@ impl Default for TurnControl {
             steer: Steering::new(),
             recorder: TurnRecorder::shared(),
             ask: true,
+            attachments: Attachments::default(),
         }
     }
 }
@@ -1550,6 +1561,8 @@ impl Interaction {
             present: self.present,
             tools,
             execution_mode: self.session.execution_mode(),
+            pictures: ctl.attachments.pictures.clone(),
+            images: ctl.attachments.paths.clone(),
         };
         let work_orchestrator = self.orchestrator.clone();
         let context = self.session.refresh_context(self.ark.engine());

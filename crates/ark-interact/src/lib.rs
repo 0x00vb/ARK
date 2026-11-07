@@ -46,8 +46,8 @@ pub use builtins::{call_report, trace_report, SESSION_GROUP};
 pub use command::{Command, CommandInfo, Effect, Reply};
 pub use inspect::Pricing;
 pub use interaction::{
-    App, Interaction, Opened, OrchestratorSet, OutOfCredit, Siblings, Start, Summary, TurnControl,
-    TurnEnd,
+    App, Attachments, Interaction, Opened, OrchestratorSet, OutOfCredit, Siblings, Start, Summary,
+    TurnControl, TurnEnd,
 };
 pub use labels::{default_label, ActivityLabels, Labels, ToolLabeler};
 pub use report::{Block, Report, Tone};

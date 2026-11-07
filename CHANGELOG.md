@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- An image dropped on the chat, pasted into the composer or chosen with the plus button is a small picture above the text, with a remove button, and goes with the message. Before, the composer got the line `Added to the project: Screenshot.png` and no picture. Other files keep that line. A message may carry up to 8 images of up to 5 MB (ADR 0106).
+- `send` and `chat_send` take `images`, project paths. The model is shown them with the message; a model that does not read images is told so. The stored turn lists them (`Turn::images`, `TranscriptTurn::images`) and the conversation draws them, also after a reload. `upload_add` also answers `as`, the dropped name for each path. **Breaking for code that builds `ark_runtime::session::Turn` by hand:** add `images`.
+
 ### Fixed
 
 - The chat can be scrolled up while a reply streams. Before, a scroll up was pulled back to the bottom at the next chunk: a snap already queued ran after the person moved, and anything within 80 px of the end counted as the end. A wheel, touch, key or scrollbar press now lets go of the end at once, and scrolling back near the bottom follows the stream again.

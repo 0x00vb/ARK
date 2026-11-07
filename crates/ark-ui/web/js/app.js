@@ -119,12 +119,13 @@ const api = {
   project: () => activeSummary()?.project,
   send: (text) => submit(text),
   // Put text in the composer, unsent, with the conversation in view.
-  compose: async (text, { append = false } = {}) => {
+  compose: async (text, { append = false, images = [] } = {}) => {
     const draft = append ? composer.input.value : "";
     if (!await showConversation()) return;
     composer.set(draft ? `${draft}\n\n${text}` : text);
+    if (images.length) composer.addImages(images);
   },
-  submit: (text) => submit(text),
+  submit: (text, options) => submit(text, options),
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
@@ -503,10 +504,17 @@ function savedDraft(session, runtime = state.runtime) {
 
 function captureDraft(location) {
   const runtime = state.runtime;
-  return text => {
+  return (text, images = []) => {
     const key = locationKey(location);
     const target = locationKey(state.summary?.location) === key ? composer
       : [...secondaryChats.values()].find(chat => locationKey(chat.summary.location) === key)?.composer;
+    if (images.length && target) target.addImages(images);
+    else if (images.length) {
+      // No window shows this chat: the files are named in its draft instead.
+      text = [text, `Added to the project: ${images.map(i => i.path).join(", ")}`].filter(Boolean).join("\n");
+      for (const image of images) URL.revokeObjectURL(image.url);
+    }
+    if (!text) return;
     if (target) {
       target.addLine(text, { focus: false });
       saveDraft(location.session, target.input.value, runtime);
@@ -883,17 +891,18 @@ class SecondaryChat {
     this.composer.setRunning(running);
   }
 
-  async submit(text) {
+  async submit(text, { images = [] } = {}) {
     text = String(text || "").trim();
     if (!text || this.running) return;
     await adopting.get(this.session);
     if (this.running) return;
-    this.thread.begin(text).local = true;
+    this.thread.begin(text, { images }).local = true;
     this.setRunning(true);
     try {
       await transport.call("chat_send", {
         session: this.session,
         text,
+        images: images.map(i => i.path),
         model: this.summary.model,
         execution_mode: this.composer.executionMode || "manual",
         execution_mode_revision: this.composer.executionModeRevision || 0,
@@ -902,6 +911,7 @@ class SecondaryChat {
       this.thread.finish({ ok: false, error: error.message });
       this.setRunning(false);
       this.composer.set(text);
+      this.composer.addImages(images.map(({ path, name }) => ({ path, name })));
       toast(error.message);
     }
   }
@@ -937,7 +947,7 @@ class SecondaryChat {
         if (message.summary) this.applySummary(message.summary);
         this.composer.clearSteering();
         const next = this.composer.takeNext(message.undelivered || []);
-        if (next) setTimeout(() => this.submit(next), 120);
+        if (next) setTimeout(() => this.submit(next.text, { images: next.images }), 120);
         break;
       }
       default: return false;
@@ -1370,20 +1380,21 @@ function popover(anchor, children, { above = false, end = false, onClose } = {})
 
 // ---- actions --------------------------------------------------------------------------------
 
-async function submit(text) {
+async function submit(text, { images = [] } = {}) {
   text = String(text || "").trim();
   if (!text) return;
   // A slash word that is not a command in this chat is ordinary message text. In particular,
   // selecting another computer must never make a hidden command mutate the local empty chat.
   if (text.startsWith("/") && (viewForCommand(text, api.project()) || composer.commandAvailable(text))) return runCommand(text);
-  if (state.running) return composer.enqueue(text);
+  if (state.running) return composer.enqueue(text, images);
   // No model chosen yet: the text waits in the composer while the person picks one.
   if (composer.missing) {
     composer.set(text);
+    composer.addImages(images);
     return composer.modelMenu();
   }
   // The first message of a chat placed on another computer starts it there.
-  if (await places.beforeSend(text)) return;
+  if (await places.beforeSend(text, images)) return;
   for (const hook of registry.submitHooks) {
     try {
       if (await hook(text)) return;
@@ -1392,11 +1403,12 @@ async function submit(text) {
     }
   }
   await adopting.get(state.sessionId);
-  thread.begin(text).local = true;
+  thread.begin(text, { images }).local = true;
   setRunning(true);
   try {
     await transport.call("send", {
       text,
+      images: images.map(i => i.path),
       execution_mode: composer.executionMode || "manual",
       execution_mode_revision: composer.executionModeRevision || 0,
     });
@@ -1405,6 +1417,7 @@ async function submit(text) {
     thread.finish({ ok: false, error: e.message });
     setRunning(false);
     composer.set(text);
+    composer.addImages(images.map(({ path, name }) => ({ path, name })));
   }
 }
 
@@ -1745,7 +1758,7 @@ function onEvent(msg) {
       refreshRing();
       composer.clearSteering();
       const next = composer.takeNext(msg.undelivered || []);
-      if (next) setTimeout(() => submit(next), 120);
+      if (next) setTimeout(() => submit(next.text, { images: next.images }), 120);
       break;
     }
     case "summary":
@@ -2579,7 +2592,7 @@ async function start() {
     captureOrigin: () => {
       if (state.view) return views.get(state.view)?.ctl?.captureUploadOrigin?.();
       const target = api.at(currentLocation());
-      return { uploadApi: target, appendDraft: captureDraft(target.location) };
+      return { uploadApi: target, appendDraft: captureDraft(target.location), attachImages: true };
     },
   });
   sidebar = new Sidebar(api);
@@ -2600,7 +2613,7 @@ async function start() {
       mount: root => acceptDrops(api, captureDraft, root, {
         accepts: () => !state.view || !!views.get(state.view)?.ctl?.captureUploadOrigin,
         captureOrigin: () => state.view ? views.get(state.view)?.ctl?.captureUploadOrigin?.()
-          : { uploadApi: api.at(currentLocation()), appendDraft: captureDraft(currentLocation()) },
+          : { uploadApi: api.at(currentLocation()), appendDraft: captureDraft(currentLocation()), attachImages: true },
       }),
     };
   } });

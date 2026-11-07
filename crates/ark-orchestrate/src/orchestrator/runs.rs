@@ -1699,6 +1699,7 @@ impl Inner {
                     cited: vec![],
                     cancelled: false,
                     steered: vec![],
+                    images: vec![],
                     metrics: Default::default(),
                     at: time::OffsetDateTime::now_utc(),
                     incomplete: false,

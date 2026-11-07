@@ -633,6 +633,9 @@ pub struct TranscriptTurn {
     pub answer: String,
     #[serde(default)]
     pub steered: Vec<String>,
+    /// Images attached to the message: project files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
     pub cancelled: bool,
     /// Why the turn did not finish, in a sentence: the app stopped while it ran, or it failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -665,6 +668,7 @@ impl TranscriptTurn {
             input: t.input.clone(),
             answer: t.answer.clone(),
             steered: t.steered.clone(),
+            images: t.images.clone(),
             cancelled: t.cancelled,
             unfinished: t.incomplete.then(|| match t.error.as_deref() {
                 Some(INTERRUPTED) => crate::activity::INTERRUPTED.to_string(),

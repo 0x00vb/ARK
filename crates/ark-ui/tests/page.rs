@@ -242,7 +242,11 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
                 .unwrap(),
         );
     }
-    if scenario == "files" || scenario == "drop" || scenario == "upload-drafts" {
+    if scenario == "files"
+        || scenario == "drop"
+        || scenario == "upload-drafts"
+        || scenario == "image-attach"
+    {
         builder = builder.files(true);
     }
     if scenario == "analysis" || scenario == "image-failure" || scenario == "restore" {
@@ -1223,6 +1227,16 @@ async fn the_model_menu_lists_backends_and_switches() {
     std::env::set_var("ARK_CLAUDE_BIN", &claude);
     std::env::set_var("ARK_CODEX_BIN", bin.path().join("no-codex"));
     drive("models", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_image_goes_with_the_message_and_stays_in_the_conversation() {
+    drive(
+        "image-attach",
+        vec![say("It is a gradient.", false)],
+        Duration::ZERO,
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

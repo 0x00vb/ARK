@@ -441,6 +441,165 @@ async fn a_turn_that_crashes_ends_with_an_error_and_frees_the_chat() {
     next(&mut rx, "turn_finished").await;
 }
 
+/// A model that reads images and answers at once, so a test sees what it was sent.
+struct Sees(Arc<MockProvider>);
+
+#[async_trait::async_trait]
+impl ark_model::Provider for Sees {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        self.0.complete(system, messages, tools).await
+    }
+    fn describe(&self) -> String {
+        "sees".into()
+    }
+    fn reads_pictures(&self) -> bool {
+        true
+    }
+}
+
+/// A 1x1 PNG.
+const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/// A host over a model that answers at once; `reads` says whether it reads images.
+async fn seeing(dir: &std::path::Path, reads: bool) -> (Arc<Host>, Arc<MockProvider>) {
+    let model = Arc::new(
+        MockProvider::new("m", vec![]).with_fallback(|_| Completion {
+            content: "It is one pixel.".into(),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        }),
+    );
+    let provider: Arc<dyn ark_model::Provider> = if reads {
+        Arc::new(Sees(model.clone()))
+    } else {
+        model.clone()
+    };
+    let ark = Ark::builder()
+        .store_root(dir)
+        .provider(provider)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (host, _) = ArkUi::new(App::new("Test").ark(ark)).open().await.unwrap();
+    (host, model)
+}
+
+/// What the page does for a dropped file: send it in parts, then add it to the project.
+async fn drop_file(host: &Arc<Host>, name: &str, data: &str) -> Value {
+    let location = host.call("summary", json!({})).await.unwrap()["location"].clone();
+    let call = |operation: &'static str, input: Value| {
+        host.call(
+            "resource",
+            json!({
+                "ref": { "location": location, "kind": "file", "id": "" },
+                "operation": { "kind": operation, "input": input },
+            }),
+        )
+    };
+    let upload = format!("drop-{name}");
+    call(
+        "upload_parts",
+        json!({ "upload": upload, "parts": [{ "path": name, "offset": 0, "data": data }] }),
+    )
+    .await
+    .unwrap();
+    call("upload_add", json!({ "upload": upload }))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_attached_image_reaches_a_model_that_reads_images_and_stays_with_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, model) = seeing(dir.path(), true).await;
+    let mut rx = host.subscribe();
+    let added = drop_file(&host, "shot.png", PIXEL).await;
+    assert_eq!(added["as"]["shot.png"], "shot.png");
+    host.call(
+        "send",
+        json!({ "text": "what is this", "images": ["shot.png"] }),
+    )
+    .await
+    .unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["ok"], true, "{done}");
+    let sent: Vec<_> = model
+        .recorded()
+        .into_iter()
+        .flat_map(|r| r.messages)
+        .flat_map(|m| m.pictures)
+        .collect();
+    assert!(!sent.is_empty(), "the model was shown the image");
+    assert!(sent.iter().all(|p| p.media_type == "image/png"));
+    let turns = host.call("transcript", json!({})).await.unwrap();
+    assert_eq!(turns[0]["images"], json!(["shot.png"]));
+    assert_eq!(turns[0]["input"], "what is this");
+    // The next message carries none, and its stored turn lists none.
+    host.call("send", json!({ "text": "and now" }))
+        .await
+        .unwrap();
+    next(&mut rx, "turn_finished").await;
+    let turns = host.call("transcript", json!({})).await.unwrap();
+    assert!(turns[1].get("images").is_none(), "{}", turns[1]);
+}
+
+#[tokio::test]
+async fn a_model_that_reads_no_images_is_told_so_and_the_turn_still_lists_the_image() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, model) = seeing(dir.path(), false).await;
+    let mut rx = host.subscribe();
+    drop_file(&host, "shot.png", PIXEL).await;
+    host.call(
+        "send",
+        json!({ "text": "what is this", "images": ["shot.png"] }),
+    )
+    .await
+    .unwrap();
+    next(&mut rx, "turn_finished").await;
+    let calls = model.recorded();
+    assert!(calls
+        .iter()
+        .flat_map(|r| &r.messages)
+        .all(|m| m.pictures.is_empty()));
+    assert!(calls
+        .iter()
+        .flat_map(|r| &r.messages)
+        .any(|m| m.content.contains("this model is not sent images")));
+    let turns = host.call("transcript", json!({})).await.unwrap();
+    assert_eq!(turns[0]["images"], json!(["shot.png"]));
+}
+
+#[tokio::test]
+async fn images_outside_the_project_or_not_images_are_refused_and_nothing_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, _) = seeing(dir.path(), true).await;
+    drop_file(&host, "notes.txt", "aGVsbG8=").await;
+    for images in [
+        json!(["../shot.png"]),
+        json!(["notes.txt"]),
+        json!(["missing.png"]),
+    ] {
+        let error = host
+            .call("send", json!({ "text": "look", "images": images }))
+            .await
+            .unwrap_err();
+        assert!(!error.to_string().is_empty());
+        assert!(!host.is_running(), "a refused message starts no turn");
+    }
+    let many: Vec<String> = (0..9).map(|i| format!("{i}.png")).collect();
+    let error = host
+        .call("send", json!({ "text": "look", "images": many }))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("at most"), "{error}");
+}
+
 #[tokio::test]
 async fn sessions_commands_and_rename() {
     let dir = tempfile::tempdir().unwrap();

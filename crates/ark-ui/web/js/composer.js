@@ -1,16 +1,22 @@
 // The composer. Idle: ↩ sends, ⇧↩ adds a line, `/` completes commands. While the agent works:
 // ↩ sends the message into the running turn (it reaches the model at its next step), ⌘↩ queues
 // it for after the turn, esc stops. Queued messages wait above the composer and can be sent
-// in early or removed.
+// in early or removed. Images the person drops, pastes or chooses wait as small pictures above
+// the text and go with the message; one sent while the agent works is queued (steering carries
+// text only).
 
 import { h, icon, clear, clip, touch, $ } from "./dom.js";
 import { registry, viewForCommand } from "./ext.js";
-import { chooseFiles } from "./drop.js";
+import { addFiles, chooseFiles } from "./drop.js";
+import { thumb, baseName } from "./thumbs.js";
 import { label } from "./keys.js";
 import { programSheet } from "./places.js";
 import { DictationController } from "./dictation.js";
 
 let composerNumber = 0;
+
+/// The most images one message carries (the host refuses more).
+const MAX_IMAGES = 8;
 
 const REMOTE_COMMANDS = new Set(["new", "resume", "project", "sessions", "help", "waiting"]);
 
@@ -33,6 +39,10 @@ export class Composer {
     if (!this.mic.isConnected) this.attach ? this.attach.after(this.mic) : this.form.querySelector(".composer-bar").prepend(this.mic);
     if (!this.dictationStatus.isConnected) this.input.after(this.dictationStatus);
     this.queue = [];
+    /// Images waiting for the next message: `{ path, name, url, el }`.
+    this.images = [];
+    this.strip = h("div.composer-images", { hidden: true });
+    this.form.prepend(this.strip);
     this.running = false;
     this.commands = [];
     this.slashIndex = 0;
@@ -42,14 +52,21 @@ export class Composer {
     this.input.addEventListener("input", () => this.changed());
     for (const event of ["input", "select", "keyup", "pointerup", "focus"]) this.input.addEventListener(event, () => { this.caret = this.input.selectionEnd ?? this.input.value.length; });
     this.input.addEventListener("keydown", (e) => this.key(e));
+    this.fileOptions = { captureOrigin: elements.captureOrigin, progressTarget: elements.uploads };
+    this.input.addEventListener("paste", (e) => {
+      const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+      if (!files.length || !elements.captureDraft || !this.attach) return;
+      e.preventDefault();
+      addFiles(api, elements.captureDraft, files, this.fileOptions);
+    });
     this.form.addEventListener("submit", (e) => {
       e.preventDefault();
       if (this.dictation.beforeSubmit()) return;
-      if (this.running && !this.input.value.trim()) api.cancel();
+      if (this.running && !this.input.value.trim() && !this.images.length) api.cancel();
       else this.submit(false);
     });
     this.model?.addEventListener("click", () => elements.modelOpen ? elements.modelOpen(this.model, () => this.focus()) : this.modelMenu());
-    this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft, { captureOrigin: elements.captureOrigin, progressTarget: elements.uploads }));
+    this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft, this.fileOptions));
     this.dictation = new DictationController({
       api,
       button: this.mic,
@@ -165,8 +182,48 @@ export class Composer {
     const i = this.input;
     i.style.height = "auto";
     i.style.height = `${Math.min(i.scrollHeight, 240)}px`;
-    this.form.dataset.empty = String(!i.value.trim());
+    this.form.dataset.empty = String(!i.value.trim() && !this.images?.length);
     this.updateSlash();
+  }
+
+  // ---- images --------------------------------------------------------------------------------
+
+  /// Pictures above the text, each with a remove button. `url` shows the picture at once; an
+  /// image put back after a failed send has none and is read from the project.
+  addImages(items) {
+    for (const item of items) {
+      if (this.images.length >= MAX_IMAGES) {
+        if (item.url) URL.revokeObjectURL(item.url);
+        this.api.toast(`At most ${MAX_IMAGES} images go with one message.`);
+        continue;
+      }
+      const image = { ...item };
+      const remove = h("button.thumb-x", { type: "button", title: "Remove", "aria-label": `Remove ${item.name || baseName(item.path)}`, onclick: () => this.removeImage(image) }, icon("x"));
+      image.el = h("div.thumb-chip", { title: item.name || baseName(item.path) }, thumb(this.api, item, { keep: true }), remove);
+      this.images.push(image);
+      this.strip.append(image.el);
+    }
+    this.strip.hidden = !this.images.length;
+    this.changed();
+  }
+
+  removeImage(image) {
+    this.images = this.images.filter((i) => i !== image);
+    if (image.url) URL.revokeObjectURL(image.url);
+    image.el.remove();
+    this.strip.hidden = !this.images.length;
+    this.changed();
+    this.focus();
+  }
+
+  /// The images go with the message: their pictures move to it, and the composer is clear.
+  takeImages() {
+    const taken = this.images.map(({ path, name, url }) => ({ path, name, url }));
+    for (const image of this.images) image.el.remove();
+    this.images = [];
+    this.strip.hidden = true;
+    this.changed();
+    return taken;
   }
 
   setRunning(on) {
@@ -245,26 +302,36 @@ export class Composer {
       if (this.dictation.beforeSubmit()) return;
       this.submit(e.metaKey || e.ctrlKey);
     }
+    // Backspace in an empty line takes the last picture back.
+    if (e.key === "Backspace" && !e.isComposing && this.images.length && !this.input.value && this.input.selectionStart === 0) {
+      e.preventDefault();
+      this.removeImage(this.images.at(-1));
+    }
   }
 
   submit(queue) {
-    const text = this.input.value.trim();
-    if (!text) return;
+    const typed = this.input.value.trim();
+    if (!typed && !this.images.length) return;
+    const command = typed.startsWith("/");
+    // A command takes no pictures: they stay for the next message.
+    const images = command ? [] : this.takeImages();
+    // A picture alone says its file name, which also names the chat.
+    const text = typed || images.map((i) => baseName(i.path)).join(", ");
     this.input.value = "";
     this.changed();
-    const view = text.startsWith("/") && viewForCommand(text, this.api.project?.());
+    const view = command && viewForCommand(text, this.api.project?.());
     if (view) return this.api.openView(view.id);
-    if (!this.running) return this.api.submit(text);
-    if (text.startsWith("/")) {
+    if (!this.running) return this.api.submit(text, { images });
+    if (command) {
       this.enqueue(text);
       return;
     }
-    if (queue) this.enqueue(text);
+    if (queue || images.length) this.enqueue(text, images);
     else this.api.steer(text);
   }
 
-  enqueue(text) {
-    this.queue.push(text);
+  enqueue(text, images = []) {
+    this.queue.push({ text, images });
     this.paintQueue();
   }
 
@@ -287,7 +354,7 @@ export class Composer {
 
   /// Messages to send after the turn: `first` (steering that came too late) goes ahead.
   takeNext(first = []) {
-    this.queue = [...first, ...this.queue];
+    this.queue = [...first.map((text) => ({ text, images: [] })), ...this.queue];
     const next = this.queue.shift();
     this.paintQueue();
     return next;
@@ -301,13 +368,19 @@ export class Composer {
         h("span.queued-t", clip(q, 120))));
     }
     this.queue.forEach((q, i) => {
+      const drop = () => {
+        this.queue.splice(i, 1);
+        for (const image of q.images) if (image.url) URL.revokeObjectURL(image.url);
+        this.paintQueue();
+      };
       const item = h("div.queued", { style: { "--i": i } },
         h("span.queued-k", "Queued"),
-        h("span.queued-t", clip(q, 120)),
-        !q.startsWith("/") && this.running
-          ? h("button.link", { title: "Send into the running turn", onclick: () => { this.queue.splice(i, 1); this.paintQueue(); this.api.steer(q); } }, "Send now")
+        ...q.images.map((image) => h("span.queued-thumb", thumb(this.api, image, { keep: true }))),
+        h("span.queued-t", clip(q.text, 120)),
+        !q.text.startsWith("/") && !q.images.length && this.running
+          ? h("button.link", { title: "Send into the running turn", onclick: () => { this.queue.splice(i, 1); this.paintQueue(); this.api.steer(q.text); } }, "Send now")
           : null,
-        h("button.icon-btn.small", { title: "Remove", "aria-label": "Remove", onclick: () => { this.queue.splice(i, 1); this.paintQueue(); } }, icon("x")));
+        h("button.icon-btn.small", { title: "Remove", "aria-label": "Remove", onclick: drop }, icon("x")));
       this.queueEl.append(item);
     });
   }

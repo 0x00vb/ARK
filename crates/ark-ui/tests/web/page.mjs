@@ -1462,6 +1462,37 @@ async function drop(page) {
 }
 scenarios.drop = drop;
 
+// ADR 0106: a dropped image is a small picture in the composer, goes with the message, and the
+// conversation shows it again after a reload (read back from the project).
+async function imageAttach(page) {
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 96;
+    const g = canvas.getContext("2d");
+    g.fillStyle = "#5b8def";
+    g.fillRect(0, 0, 96, 96);
+    const file = new File([await new Promise((ok) => canvas.toBlob(ok, "image/png"))], "shot.png", { type: "image/png" });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const at = document.querySelector("#thread");
+    for (const type of ["dragenter", "dragover", "drop"]) at.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.locator("#composer .thumb-chip img").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#input").inputValue(), "", "no line in the draft");
+  await page.locator("#input").fill("what is this?");
+  await page.keyboard.press("Enter");
+  await page.locator(".thread .user-image img").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.querySelector(".thread .answer")?.textContent.includes("It is a gradient."));
+  const turns = await page.evaluate(() => window.ark.call("transcript", {}));
+  assert.deepEqual(turns[0].images, ["shot.png"]);
+  // The window loads again: the picture is read from the project.
+  await page.reload();
+  await page.locator(".thread .user-image img").waitFor({ state: "visible" });
+  assert.ok(await page.evaluate(() => document.querySelector(".thread .user-image img").naturalWidth) > 0);
+  assert.equal(await page.locator("#composer .thumb-chip").count(), 0);
+}
+scenarios["image-attach"] = imageAttach;
+
 async function uploadDrafts(page) {
   const input = page.locator("#input");
   const origin = await page.evaluate(() => window.ark.summary().location);

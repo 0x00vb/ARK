@@ -108,7 +108,7 @@ export class Places {
 
   /// Before the first message of an empty chat placed elsewhere: start the chat there, then
   /// send. True when this took the message.
-  async beforeSend(text) {
+  async beforeSend(text, images = []) {
     if (!this.pending || !this.open) return false;
     const place = this.pending;
     this.setBusy(place);
@@ -118,7 +118,7 @@ export class Places {
       if (r.ask) {
         this.setBusy(null);
         if (!(await this.askSize(place, r.ask))) {
-          this.api.compose(text);
+          this.api.compose(text, { images });
           return true;
         }
         this.setBusy(place);
@@ -129,10 +129,10 @@ export class Places {
       const copy = r.copy || {};
       if (copy.busy) this.api.toast(`Work runs in this project on ${place}: ${this.here}'s changes go with the next chat`);
       else if (copy.kept_back?.length) this.api.toast(`${files(copy.kept_back.length)} changed on ${place} too: kept as they are there`);
-      await this.api.call("send", { text });
+      await this.api.call("send", { text, images: images.map((i) => i.path) });
     } catch (e) {
       this.api.toast(e.message || String(e));
-      this.api.compose(text);
+      this.api.compose(text, { images });
     } finally {
       this.setBusy(null);
     }

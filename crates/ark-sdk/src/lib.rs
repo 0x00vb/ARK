@@ -237,6 +237,10 @@ pub struct TurnOptions {
     pub tools: Vec<TurnTools>,
     /// Authority frozen for this turn.
     pub execution_mode: ark_core::ExecutionMode,
+    /// Images the person attached to the message, for a model that reads them.
+    pub pictures: Vec<ark_model::Picture>,
+    /// Those images as project files, stored with the turn so the conversation shows them.
+    pub images: Vec<String>,
 }
 
 /// Tools a front-end adds to one turn, such as an orchestrator's for the person's own
@@ -578,10 +582,11 @@ impl Ark {
             .steering(opts.steer)
             .presentation(opts.present)
             .focus(opts.focus)
+            .pictures(opts.pictures)
             .execution_mode(opts.execution_mode)
             .rules(rules)
             .skills(catalog);
-        session.begin_turn_with_goal(&self.engine, input, goal)?;
+        session.begin_turn_with(&self.engine, input, goal, opts.images)?;
         let mut on_event = on_event;
         let result = {
             let stored = &mut *session;

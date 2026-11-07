@@ -368,6 +368,9 @@ pub struct Turn {
     /// Messages the user sent while this turn ran that reached the model.
     #[serde(default)]
     pub steered: Vec<String>,
+    /// Images the person attached: project files, in the order shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
     #[serde(default)]
     pub metrics: Metrics,
     #[serde(with = "time::serde::rfc3339")]
@@ -508,6 +511,7 @@ impl Turn {
             cited: Vec::new(),
             cancelled: false,
             steered: Vec::new(),
+            images: Vec::new(),
             metrics: Metrics::default(),
             at: OffsetDateTime::now_utc(),
             incomplete: true,
@@ -662,6 +666,8 @@ pub struct Session {
     /// What the person said while the turn under way ran ([`Session::steered_now`]), kept
     /// with it however it ends.
     steered: Vec<String>,
+    /// The images of the turn under way, stored with it however it ends.
+    images: Vec<String>,
     /// Authority copied into the begun turn. A later mode change cannot alter it.
     turn_execution_mode: Option<ExecutionMode>,
 }
@@ -712,6 +718,7 @@ impl Session {
             unread: Vec::new(),
             goal: None,
             steered: Vec::new(),
+            images: Vec::new(),
             turn_execution_mode: None,
         };
         engine.store.create_session(
@@ -804,6 +811,7 @@ impl Session {
             unread: Vec::new(),
             goal: None,
             steered: Vec::new(),
+            images: Vec::new(),
             turn_execution_mode: None,
         };
         if let Some(mut t) = begun {
@@ -1207,10 +1215,24 @@ impl Session {
         input: &str,
         goal: Option<Goal>,
     ) -> Result<(), AgentError> {
+        self.begin_turn_with(engine, input, goal, Vec::new())
+    }
+
+    /// [`begin_turn_with_goal`](Session::begin_turn_with_goal) for a message with attached
+    /// images (project files): they are stored with the turn.
+    pub fn begin_turn_with(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        goal: Option<Goal>,
+        images: Vec<String>,
+    ) -> Result<(), AgentError> {
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.execution_mode = self.record.execution_mode;
         t.goal = goal.clone();
+        t.images = images.clone();
         self.goal = goal;
+        self.images = images;
         self.steered.clear();
         self.turn_execution_mode = Some(t.execution_mode);
         engine.store.put_session_turn(
@@ -1268,6 +1290,7 @@ impl Session {
                 .collect(),
             cancelled: outcome.cancelled && !interrupted,
             steered: outcome.steered.clone(),
+            images: self.images.clone(),
             metrics: outcome.metrics.clone(),
             at: OffsetDateTime::now_utc(),
             incomplete: interrupted,
@@ -1301,6 +1324,7 @@ impl Session {
         t.goal = self.goal.clone();
         // What the person said while it ran stays with it: the next turn's goal has it.
         t.steered = self.steered.clone();
+        t.images = self.images.clone();
         self.push_turn(engine, t, &Metrics::default())
     }
 
@@ -1313,6 +1337,7 @@ impl Session {
         let mut next = self.clone();
         next.turn_execution_mode = None;
         next.goal = None;
+        next.images.clear();
         if next.record.title.is_empty() {
             next.record.title = clip(&turn.input, 60);
         }

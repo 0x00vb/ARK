@@ -2287,7 +2287,7 @@ scenarios.capabilities = capabilities;
 
 // An agent asks for Mail mid-task: the card names the need and offers Connect or Not now;
 // connecting signs in (the test plays the browser) and the turn goes on to the send, which
-// asks as usual, then answers.
+// asks nothing in Auto (a chat starts there, ADR 0107), then answers.
 async function connectMidTask(page) {
   await page.locator("#input").fill("Email Bob that the report is ready");
   await page.keyboard.press("Enter");
@@ -2298,25 +2298,16 @@ async function connectMidTask(page) {
   const buttons = (await card.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
   assert.deepEqual(buttons, ["Connect", "Not now"]);
   await card.locator('button[data-decision="allow_once"]').click();
-  const send = page.locator(".approval:not(.decided)");
-  try {
-    await send.waitFor({ timeout: 15000 });
-  } catch (error) {
-    const thread = await page.locator("#thread").innerText();
-    const approvals = await page.locator(".approval").evaluateAll((rows) =>
-      rows.map((row) => ({ className: row.className, text: row.innerText })),
-    );
-    throw new Error(`${error.message}\nthread:\n${thread}\napprovals:\n${JSON.stringify(approvals, null, 2)}`);
-  }
-  assert.match(await send.locator(".approval-line").innerText(), /mail\.send|Send|bob@example\.com/i);
-  await send.locator('button[data-decision="allow_once"]').click();
+  // Connecting asks at every call; the send after it does not.
   await page.locator(".agent", { hasText: "Sent the report to Bob." }).waitFor({ timeout: 15000 });
+  assert.equal(await page.locator(".approval:not(.decided)").count(), 0, "the send asked nothing");
 }
 scenarios["connect-mid-task"] = connectMidTask;
 
 // An approval offers "Always in this project". After it, the same action runs without a card,
 // Settings › Permissions lists the grant, and removing it brings the card back.
 async function grants(page) {
+  await manual(page);
   const ask = (text) => page.locator("#input").fill(text).then(() => page.keyboard.press("Enter"));
   await finished(page, async () => {
     await ask("Save the notes");
@@ -2649,6 +2640,7 @@ scenarios.dictation = async (page) => {
 // is there when the person goes back.
 async function background(page) {
   await page.locator("#app.ready").waitFor();
+  await manual(page);
   await page.locator("#input").fill("Save the notes for later, please");
   await page.locator("#input").press("Enter");
   const question = page.locator("#thread .approval");
@@ -3280,6 +3272,7 @@ scenarios["detached-chat-window"] = detachedChatWindow;
 // ADR 0041: a process start asks with its command and where, then runs beside the chat: the
 // Processes panel shows its output, its page opens in the Browser once ready, Stop ends it.
 async function processes(page) {
+  await manual(page);
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
   await page.locator("#input").fill("Run the app and show me the home page");
   await page.keyboard.press("Enter");

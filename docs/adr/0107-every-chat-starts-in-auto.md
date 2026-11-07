@@ -39,6 +39,7 @@ To stop asking for one of these, drop `ask_each_time` from its descriptor. That 
 ## Consequences
 
 - A chat the person never set asks nothing but the list above. A prompt injection in a file or page can now make the chat change files and run code in the project without a question. That is what Auto meant to the owner, and the sandbox, the project folder and the list above stay the limits.
+- Actions that reach outside the project and are not on the list now run without a question: sending mail or posting through a connected service, starting a process that runs as the person. Connecting the service still asks once. This is what "never ask" means; adding `ask_each_time` to a descriptor puts one back.
 - A person who wants questions says so ("ask me before changes"). The mode is stored with revision 1 and every state-changing action asks again.
 - Older chats opened after this change are Auto if nobody chose, so they stop asking too.
 - `chat_execution_mode` stays as a call for other clients. The page does not use it.

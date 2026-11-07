@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-07
+
 ### Changed
 
 - While the agent works, Enter sends the message into the running turn and ⌘↩ queues it for after. The waiting row reads "Sending". Before, Enter queued and only ⌘↩ sent.

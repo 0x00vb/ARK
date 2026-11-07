@@ -1,3 +1,13 @@
+# Core 0.39.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.39.0 (2026-11-07), over v0.38.0 (d9869a0). A panic no longer strands a chat; Enter steers a running turn; Markdown edits in place |
+| Change | `Registry::run` turns a tool panic into a failed call. The host supervises each turn task: a dead turn ends with an error, closes its questions and frees the chat. Enter sends into the running turn (row reads Sending), ⌘↩ queues, split chats do the same. A `.md` file has no top bar; the block under the caret shows its Markdown (`md-inline.js`), saves on its own and merges a conflicting save by lines. A docx run of only spaces no longer panics |
+| Found from | The owner opened a docx in Desktop: `task 394 panicked with message "byte range starts at 1 but ends at 0"` (`runs_markdown`), then the next turn never ended (trace `live`, the turn task was dead, `turn_finished` never sent) |
+| Checks | fmt, protocol, version, macOS 11 check, clippy `-D warnings`, release build, simulated benchmark (no delta). Rust 1425 pass, 5 fail: the 5 `ark-browser` Chrome-start tests (as on v0.38.0). Web fixtures pass, including `md-inline.test.mjs` (12). Real-host page suite 61 of 67 in the full run; its one new failure, `the_plus_menu_opens_files_and_a_terminal_in_the_project_folder`, clicked the removed Markdown Edit button, was updated and passes alone. The other 5 failures are on the v0.36.0 to v0.38.0 list (`an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`, `streamed_text_keeps_its_last_chunk_and_answers_once`, `text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once`, `the_window_on_a_runtime_elsewhere_has_its_controls_and_a_way_back`); `steering_lands_where_it_was_read_and_replays_the_same` passes now. Two independent reviews (default model, opus) found 2 data-loss blockers and 4 majors, all fixed with tests |
+| Not verified | The native Desktop window; touch; long documents; mixed line endings are rewritten to the first-seen style |
+
 # Core 0.38.0 release
 
 | Release state | Value |

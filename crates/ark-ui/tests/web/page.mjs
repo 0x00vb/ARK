@@ -1546,16 +1546,19 @@ async function workbench(page) {
   }
   await assert.rejects(page.evaluate(() => window.ark.call("file_read", { path: "../outside" })));
 
-  // Markdown opens as a page; Edit shows its text, and Done the page as saved.
+  // Markdown opens as a page and is edited in it: the block shows its text, and what is typed
+  // is saved without a button.
   await page.evaluate(() => window.ark.call("file_write", { path: "notes.md", text: "# Plan\n\nShip it." }));
   await page.evaluate(() => window.ark.openFile("notes.md"));
   await page.locator(".md-page h2", { hasText: "Plan" }).waitFor();
-  await page.locator(".btn", { hasText: "Edit" }).click();
-  const md = page.locator(".fv").filter({ has: page.locator('textarea[aria-label="notes.md"]') });
-  await md.locator(".wb-editor").fill("# Plan\n\nShip it today.");
-  await md.locator(".wb-save").click();
-  await md.locator(".btn", { hasText: "Done" }).click();
+  await page.locator(".md-page p", { hasText: "Ship it." }).click();
+  await page.locator(".md-page textarea.md-edit").fill("Ship it today.");
+  await page.keyboard.press("Escape");
   await page.locator(".md-page p", { hasText: "Ship it today." }).waitFor();
+  for (let i = 0; (await page.evaluate(() => window.ark.call("file_read", { path: "notes.md" }))).text !== "# Plan\n\nShip it today."; i++) {
+    assert.ok(i < 50, "notes.md was not saved as typed");
+    await page.waitForTimeout(100);
+  }
 
   // Code is coloured behind the editor, with the same text, font and scroll; typing and Save
   // keep the exact text. Plain text has no colours and wraps as before.

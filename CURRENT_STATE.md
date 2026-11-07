@@ -1,3 +1,13 @@
+# Core 0.38.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.38.0 (2026-11-06), over v0.37.0 (49c5dfd). Dictation shows words while the person talks (ADR 0105) |
+| Change | `dictation_preview` call, `TranscriptionProvider::segments` (default method), audio uploads while recording, no dictation labels except the model download and failures, Send closes the composer row through a spacer |
+| Found from | The owner's screenshot of Desktop 0.11.0 (Core v0.36.0): `.composer-bar:has(.mode-chip)` zeroed Send's auto margin while the mode chip was hidden, so Send sat beside the microphone. v0.37.0 removed the chip. `composer-layout.test.mjs` fails on v0.36.0 (Send ends at 462 of 1020) and passes now |
+| Checks | fmt, protocol, version, clippy `-D warnings`, release build, simulated benchmark (no delta). Rust 1485 pass, 11 fail: the 5 `ark-browser` Chrome-start timeouts (also on v0.37.0). Web fixtures 103 of 103 (one `work-state` failure under load passed alone and on rerun). Real-host page suite 61 of 67 with the same 6 failures as v0.36.0 and v0.37.0; the dictation scenario passes. New: `dictation_live.rs` (2), `composer-layout.test.mjs` (4, fails on v0.36.0). Independent QA found 6 defects in the first build (silence stalled previews, final text kept `[BLANK_AUDIO]`, others); all fixed, silence case fails without its fix. Not run: live Whisper on a real microphone, live benchmark |
+| Not verified | Streaming dictation with real speech and the real model; native Desktop |
+
 # Core 0.37.0 release
 
 | Release state | Value |

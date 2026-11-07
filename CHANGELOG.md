@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-06
+
 ### Added
 
 - Dictation shows the words while the person talks (ADR 0105). New call `dictation_preview` and `TranscriptionProvider::segments` (a default method, so existing providers keep working and show their words at Stop). Audio uploads while recording; a preview reads at most 30 s.

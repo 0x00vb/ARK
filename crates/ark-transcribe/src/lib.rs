@@ -158,7 +158,8 @@ impl TranscriptionProvider for LocalWhisper {
     }
 
     async fn transcribe(&self, pcm: Vec<i16>, language: Option<String>) -> anyhow::Result<String> {
-        let segments = self.read(pcm, language, false).await?;
+        let mut segments = self.read(pcm, language, false).await?;
+        segments.retain(|segment| !is_marker(&segment.text));
         Ok(segments
             .iter()
             .map(|segment| segment.text.as_str())
@@ -283,7 +284,7 @@ impl LocalWhisper {
                 let mut slot = loaded.lock().unwrap();
                 if slot
                     .as_ref()
-                    .map_or(true, |entry| entry.used.elapsed() >= KEEP_LOADED)
+                    .is_none_or(|entry| entry.used.elapsed() >= KEEP_LOADED)
                 {
                     *slot = None;
                     releasing.store(false, Ordering::SeqCst);

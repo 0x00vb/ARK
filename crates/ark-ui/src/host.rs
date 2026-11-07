@@ -94,6 +94,21 @@ struct DictationUpload {
     previewing: bool,
 }
 
+/// Clears a recording's `previewing` mark when the call ends, including when it is dropped
+/// because the client left or the link timed out.
+struct Previewing<'a> {
+    uploads: &'a Mutex<HashMap<String, DictationUpload>>,
+    id: String,
+}
+
+impl Drop for Previewing<'_> {
+    fn drop(&mut self) {
+        if let Some(upload) = self.uploads.lock().unwrap().get_mut(&self.id) {
+            upload.previewing = false;
+        }
+    }
+}
+
 fn join_words(first: &str, second: &str) -> String {
     let (first, second) = (first.trim(), second.trim());
     match (first.is_empty(), second.is_empty()) {
@@ -1099,7 +1114,7 @@ impl Host {
         provider.prepare().await?;
         let text = if settled == 0 {
             provider.transcribe(pcm, language).await?
-        } else if pcm.len() < PREVIEW_MIN_SAMPLES / 4 {
+        } else if pcm.is_empty() {
             String::new()
         } else {
             provider
@@ -1155,13 +1170,15 @@ impl Host {
                 }
             }
         };
-        let result = provider.segments(pcm, language).await;
+        let _previewing = Previewing {
+            uploads: &self.dictations,
+            id: id.to_string(),
+        };
+        let segments = provider.segments(pcm, language).await?;
         let mut uploads = self.dictations.lock().unwrap();
         let Some(upload) = uploads.get_mut(id) else {
             return Ok(json!({ "text": "" }));
         };
-        upload.previewing = false;
-        let segments = result?;
         let window_ms = window as u64 * 1000 / 16_000;
         if window_ms >= SETTLE_AFTER_MS {
             let limit = window_ms - SETTLE_KEEP_MS;
@@ -1169,12 +1186,18 @@ impl Host {
                 .iter()
                 .take_while(|segment| segment.end_ms <= limit)
                 .count();
-            if let Some(last) = segments[..count].last() {
+            // Speech that ended before the limit is settled. A window with no speech at all
+            // (silence, music) moves forward as a whole, or it would outgrow what a preview reads.
+            let settled_to = match segments[..count].last() {
+                Some(last) => Some(last.end_ms),
+                None if segments.is_empty() => Some(limit),
+                None => None,
+            };
+            if let Some(end_ms) = settled_to {
                 for segment in &segments[..count] {
                     upload.settled_text = join_words(&upload.settled_text, &segment.text);
                 }
-                upload.settled =
-                    (upload.settled + (last.end_ms * 16) as usize).min(upload.bytes / 2);
+                upload.settled = (upload.settled + (end_ms * 16) as usize).min(upload.bytes / 2);
             }
             let tail = segments[count..]
                 .iter()

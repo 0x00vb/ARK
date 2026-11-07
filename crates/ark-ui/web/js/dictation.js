@@ -203,16 +203,23 @@ export class DictationController {
   /// While recording, ask for the words so far and show them where the transcript will land.
   /// A computer that cannot preview (an older ARK there) leaves the words to Stop.
   async preview_loop(token, call) {
-    while (token === this.token && this.phase !== "finishing") {
+    let failures = 0;
+    while (token === this.token && ["requesting", "recording"].includes(this.phase)) {
       await new Promise((resolve) => setTimeout(resolve, PREVIEW_MS));
       const upload = await this.uploadPromise;
       if (!upload || token !== this.token || this.phase !== "recording" || !this.preview) continue;
       if (this.sent < MIN_PREVIEW) continue;
       try {
         const result = await call("dictation_preview", { id: upload.id });
+        failures = 0;
         if (token === this.token && this.phase === "recording" && typeof result?.text === "string") this.options.live?.(result.text);
       } catch (error) {
-        if (token === this.token) this.preview = false;
+        // An older computer refuses the call; a slow link may fail once. Either way the words
+        // come at Stop, and the draft is editable again.
+        if (token === this.token && (++failures >= 3 || /does not cross|unknown|not supported/i.test(error?.message || ""))) {
+          this.preview = false;
+          this.options.endLive?.();
+        }
       }
     }
   }

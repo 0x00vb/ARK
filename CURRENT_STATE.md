@@ -1,3 +1,13 @@
+# Core 0.41.0 release
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.41.0 (2026-11-08), over v0.40.0 (6c5d9f4). Fixes from the owner's real Desktop traces (ADR 0108) |
+| Change | `files.read` attaches png, jpeg, gif, webp up to 3.5 MB; `browser.screenshot` (Observe); one check nudge after an unchecked successful change whose namespace has an Observe action (a volatile Mutate call such as `computer.look` counts as a look), with the reply held so nothing flickers; `self_check` reads `changed N; checked after: yes/no`; `== THIS SESSION ==` line in the first message; `research_state` keyed by project and session (old rows to `#legacy`); secrets scrubbed in stored turns, traces, working state and notes; HTTP 410 is `ProviderError::Retired` and hides the model |
+| Found from | 71 traced turns in `~/.ark-desktop/meta.db` (2026-10-03 to 2026-11-07). Evidence and plan: `../board/evidence/ark-trace-fixes-20261108/` |
+| Checks | Plan, implementation and mutation reviews (Haiku); every fix has a test that fails without it (10 mutations caught). Gate results below |
+| Not verified | A live model run (owner OK needed); the native Desktop window |
+
 # Core 0.40.0 release
 
 | Release state | Value |

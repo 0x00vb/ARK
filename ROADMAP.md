@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.40.0**: every chat starts in Auto and Auto asks only what asks at every call (money, the person's own screen, installing or connecting, standing work, mode changes), an image dropped, pasted or chosen is a picture in the composer that goes with the message and that the model sees (ADR 0106), and a streaming reply can be scrolled up. Before: v0.39.0, a panic ends with an error, Enter steers, Markdown edits in place. |
-| Consumers | ARK Desktop 0.12.x release train; the next Desktop pins v0.40.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
+| Stable release | **v0.41.0**: an agent sees pictures (`files.read` attaches images, `browser.screenshot` shows the browser view), gets one nudge to check a change it made before answering, states what its session has, keeps working state per chat, stores no pasted secret, and says plainly when a model was retired (ADR 0108). Before: v0.40.0, every chat starts in Auto and images go with the message. |
+| Consumers | ARK Desktop 0.12.x release train; the next Desktop pins v0.41.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

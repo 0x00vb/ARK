@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-08
+
+Found in the owner's ARK Desktop traces, 71 turns from 2026-10-03 to 2026-11-07 (ADR 0108).
+
+### Added
+
+- `files.read` attaches a png, jpeg, gif or webp of up to 3.5 MB as a picture the model sees. A larger file says it is not attached and why. Before, the model was told pictures are not readable, so a screenshot the person added could not be seen.
+- `browser.screenshot` (Observe) returns the browser view as a JPEG, so the agent can see the page it opened. What is on screen, a signed-in page included, goes to the model provider, as `browser.read` text already does.
+- The first message of a turn says what the session has: `== THIS SESSION ==` with terminal, local pages, pictures and Computer. It is built from every registered action, so a preloaded action withheld from the first request (ADR 0102) is still stated. Before, the agent guessed and said "no terminal" one turn before starting a server.
+
+### Changed
+
+- An agent that changed something it can check (a Mutate call that succeeded, in a namespace that has an Observe action, such as the browser, a process or the computer; a file write is not nudged; a volatile call such as `computer.look` counts as a look) and answers without looking again gets one round asking it to check the change or say plainly it is unchecked. Never twice in a turn. While that round is still possible the reply is held, so an answer that gets it is never shown and taken back. `self_check` reads `changed N; checked after: yes|no` and fails when the change stayed unchecked or the turn ran out of steps; that failure does not start the critic. Before, `self_check` passed whenever any evidence was cited (61 of 62 traced answers), including answers the person then said did not work. Scripted tests that change something in such a namespace and then answer need one more scripted answer.
+- Working state (`research_state`) belongs to a chat: the table is keyed by project and session, and a migration moves old rows to the session `#legacy`, which nothing reads. Orchestrated work without a chat uses its task id, an automation run its run id, a CLI one-shot `""`. `Store::get_research_state` and `put_research_state` take the session; `Harness::chat` sets it. **Breaking for code that calls these directly:** pass the chat id, or `""` for a one-shot run. Before, one chat's working state reached every chat of the project (a "hello" was answered with another chat's Rust program).
+- A turn's input and answer, every text in its trace, its working state and its notes are stored with secrets replaced by `[redacted]`: URL passwords, `NAME=value` (or JSON `"name": "value"`) where the name ends in KEY, TOKEN, SECRET or PASSWORD, or has it before `_` or `-`, and `sk-`, `ghp_`, `github_pat_` and `AKIA` keys. The running turn still has the real text. Files and tool call records are not changed.
+- A model a provider answers 410 for fails with "<model> was retired by <provider>. Pick another model." and leaves the model list for the rest of the process (`x` and `x:latest` are the same model). New `ProviderError::Retired`. **Breaking for exhaustive matches on `ProviderError`:** add an arm.
+
 ## [0.40.0] - 2026-11-07
 
 ### Changed

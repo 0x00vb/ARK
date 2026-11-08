@@ -372,16 +372,22 @@ fn decode(rel: &str, bytes: &[u8]) -> Result<(&'static str, Content), Error> {
 
 /// Read a file of the project folder.
 pub fn open(root: &Path, rel: &str) -> Result<File, Error> {
+    open_with_bytes(root, rel).map(|(file, _)| file)
+}
+
+/// Read a file of the project folder, with the bytes it was decoded from.
+pub fn open_with_bytes(root: &Path, rel: &str) -> Result<(File, Vec<u8>), Error> {
     let path = inside(root, rel)?;
     let bytes = read_bytes(&path, rel)?;
     let (format, content) = decode(rel, &bytes)?;
-    Ok(File {
+    let file = File {
         path: relative(root, &path),
         format,
         version: version_of(&bytes),
         size: bytes.len() as u64,
         content,
-    })
+    };
+    Ok((file, bytes))
 }
 
 /// The editable source of a text-based format, even when the format is currently invalid.

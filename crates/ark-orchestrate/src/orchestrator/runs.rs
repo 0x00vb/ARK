@@ -1585,6 +1585,7 @@ impl Inner {
             .critic(self.critic)
             .guard(guard.clone())
             .done_before(done)
+            .chat(run.id.as_str())
             .approvals(Some(gate))
             .cancel(Some(cancel))
             .stopping(Some(engine.stopping()));

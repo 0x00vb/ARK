@@ -68,6 +68,45 @@ pub struct Backend {
     pub step: Option<&'static str>,
 }
 
+fn bare(model: &str) -> &str {
+    model.strip_suffix(":latest").unwrap_or(model)
+}
+
+static RETIRED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Remember, for the rest of the process, that a provider answered 410 for this model.
+pub(crate) fn retire(provider: &str, model: &str) {
+    let mut set = RETIRED.lock().unwrap_or_else(|e| e.into_inner());
+    if !set
+        .iter()
+        .any(|(p, m)| p == provider && bare(m) == bare(model))
+    {
+        set.push((provider.to_string(), model.to_string()));
+    }
+}
+
+fn without_retired(backends: &mut [Backend]) {
+    let set = RETIRED.lock().unwrap_or_else(|e| e.into_inner());
+    if set.is_empty() {
+        return;
+    }
+    for b in backends {
+        let gone = |m: &str| {
+            set.iter()
+                .any(|(p, r)| *p == b.provider && bare(r) == bare(m))
+        };
+        let kept: Vec<String> = b.models.iter().filter(|m| !gone(m)).cloned().collect();
+        b.models = kept;
+        let kept: Vec<_> = b
+            .model_options
+            .iter()
+            .filter(|o| !gone(&o.id))
+            .cloned()
+            .collect();
+        b.model_options = kept;
+    }
+}
+
 /// Check every backend. Runs the checks at once; a slow or missing one costs at most a few
 /// seconds and never fails the listing.
 pub async fn catalog() -> Vec<Backend> {
@@ -204,6 +243,7 @@ pub async fn catalog() -> Vec<Backend> {
         }
         Err(error) => tracing::warn!(error = %error, "model accounts could not be listed"),
     }
+    without_retired(&mut out);
     out
 }
 

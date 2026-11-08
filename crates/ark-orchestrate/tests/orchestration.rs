@@ -282,11 +282,20 @@ async fn a_coordinator_delegates_in_parallel_and_synthesizes() {
     let scope_a = ProjectId(o.agent("reader-a").unwrap().scope);
     let scope_lead = ProjectId(o.agent("lead").unwrap().scope);
     assert_ne!(scope_a, scope_lead);
+    let reader_a_task = done
+        .children
+        .iter()
+        .find(|id| {
+            o.task(id)
+                .is_some_and(|t| t.objective.contains("Summarize part A"))
+        })
+        .unwrap()
+        .clone();
     let st = f
         .ark
         .engine()
         .store
-        .get_research_state(&scope_a)
+        .get_research_state(&scope_a, &reader_a_task)
         .unwrap()
         .unwrap();
     assert!(st.goal.contains("Summarize part A"), "{}", st.goal);
@@ -294,7 +303,7 @@ async fn a_coordinator_delegates_in_parallel_and_synthesizes() {
         .ark
         .engine()
         .store
-        .get_research_state(&scope_lead)
+        .get_research_state(&scope_lead, &done.id)
         .unwrap()
         .unwrap()
         .goal

@@ -274,7 +274,7 @@ async fn cancellation_stops_mid_stream_and_saves_state() {
     assert_eq!(
         engine
             .store
-            .get_research_state(&project)
+            .get_research_state(&project, "")
             .unwrap()
             .unwrap()
             .goal,

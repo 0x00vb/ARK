@@ -35,6 +35,7 @@ pub const READ: &str = "browser.read";
 pub const CLICK: &str = "browser.click";
 pub const TYPE: &str = "browser.type";
 pub const BACK: &str = "browser.back";
+pub const SCREENSHOT: &str = "browser.screenshot";
 pub const ACTIONS: [&str; 5] = [OPEN, READ, CLICK, TYPE, BACK];
 
 /// How long the signed-in browser stays with an agent after its last use, while another waits.
@@ -884,6 +885,40 @@ impl Browser {
         Ok(ActionOutput::json(snap))
     }
 
+    async fn screenshot(&self, workspace: Option<&Path>) -> Result<ActionOutput> {
+        use base64::Engine;
+        let signed = {
+            let st = self.svc.state.lock().await;
+            st.owners.get(&self.owner).is_some_and(|p| p.on_signed)
+        };
+        let page = self.svc.current(&self.owner).await.map_err(tool)?;
+        let state = page
+            .eval("({url: location.href, title: document.title})")
+            .await
+            .map_err(tool)?;
+        let url = state["url"].as_str().unwrap_or("").to_string();
+        if let Some(why) = self.landed(&url, signed, workspace).await {
+            let _ = page.navigate("about:blank").await;
+            return Err(tool(why));
+        }
+        let shot = page
+            .chrome
+            .call(
+                Some(&page.session),
+                "Page.captureScreenshot",
+                json!({ "format": "jpeg", "quality": 72, "fromSurface": true, "captureBeyondViewport": false }),
+            )
+            .await
+            .map_err(tool)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(shot["data"].as_str().unwrap_or(""))
+            .map_err(|e| tool(format!("the browser returned a bad picture: {e}")))?;
+        Ok(
+            ActionOutput::json(json!({ "url": url, "title": state["title"] }))
+                .with_image("image/jpeg", bytes),
+        )
+    }
+
     async fn act(
         &self,
         action: &str,
@@ -972,6 +1007,12 @@ impl Adapter for Browser {
             })),
             ActionDescriptor::new(READ, "see the current page again", RiskTier::Observe).volatile(),
             ActionDescriptor::new(BACK, "go back one page", RiskTier::Observe).volatile(),
+            ActionDescriptor::new(
+                SCREENSHOT,
+                "see the current page as a picture: what the ARK browser view draws now (the visible area only). What is on screen, including a signed-in page, goes to the model provider, like the page text does",
+                RiskTier::Observe,
+            )
+            .volatile(),
             ActionDescriptor::new(CLICK, "click an element of the current page, by its number", RiskTier::Mutate)
                 .with_input_schema(json!({
                     "type": "object", "required": ["ref"],
@@ -993,6 +1034,7 @@ impl Adapter for Browser {
         let workspace = ctx.workspace.as_deref();
         match action {
             OPEN => self.open(&input, workspace).await,
+            SCREENSHOT => self.screenshot(workspace).await,
             READ | BACK | CLICK | TYPE => self.act(action, &input, workspace).await,
             other => Err(AdapterError::UnknownAction(other.into())),
         }

@@ -111,7 +111,7 @@ impl Provider for Ollama {
         let body = self.body(system, messages, tools, false);
         let resp = self.post(&body, false).await?;
         if !resp.status().is_success() {
-            return Err(status_error("ollama", resp, error_detail).await);
+            return Err(status_error("ollama", &self.model, resp, error_detail).await);
         }
         let v: Value = resp.json().await?;
         let msg = &v["message"];
@@ -162,7 +162,7 @@ impl Provider for Ollama {
         let body = self.body(system, messages, tools, true);
         let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            return Err(status_error("ollama", resp, error_detail).await);
+            return Err(status_error("ollama", &self.model, resp, error_detail).await);
         }
         let mut fold = OllamaFold::default();
         for_each_line(resp, |line| {

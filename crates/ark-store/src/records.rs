@@ -625,6 +625,7 @@ impl RecordTransaction<'_> {
             )
             .into());
         }
+        let turn = &crate::scrub::turn(turn);
         self.tx.execute(
             "INSERT INTO session_turns(session_id,idx,json,text_len) VALUES(?1,?2,?3,?4)
              ON CONFLICT(session_id,idx) DO UPDATE SET json=excluded.json,text_len=excluded.text_len",

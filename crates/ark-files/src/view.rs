@@ -111,7 +111,7 @@ impl File {
                 };
                 Ok(Listing {
                     text: format!(
-                        "{}: {} ({}{size}). The person sees it in the window; its picture is not readable here.\n",
+                        "{}: {} ({}{size}). The person sees it in the window.\n",
                         self.path,
                         self.kind().noun(),
                         m.media_type

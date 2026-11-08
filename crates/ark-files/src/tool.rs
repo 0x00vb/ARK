@@ -190,7 +190,14 @@ impl Adapter for Files {
             }
             READ => {
                 let rel = s("path");
-                let file = crate::open(&root, &rel).map_err(tool)?;
+                if let Some(why) = picture_over_cap(&root, &rel) {
+                    let path = crate::inside(&root, &rel).map_err(tool)?;
+                    return Ok(ActionOutput::json(json!({
+                        "path": crate::relative(&root, &path), "kind": Kind::Image.as_str(),
+                        "version": "", "text": why, "more": false,
+                    })));
+                }
+                let (file, bytes) = crate::open_with_bytes(&root, &rel).map_err(tool)?;
                 let w = Window {
                     sheet: Some(s("sheet")).filter(|x| !x.is_empty()),
                     range: Some(s("range")).filter(|x| !x.is_empty()),
@@ -201,10 +208,22 @@ impl Adapter for Files {
                         .map(|n| n as usize),
                 };
                 let l = file.listing(&w).map_err(tool)?;
-                Ok(ActionOutput::json(json!({
+                let mut text = l.text;
+                let mut picture = None;
+                if let Content::Media(m) = &file.content {
+                    if m.media_type != "image/svg+xml" {
+                        text.push_str("The picture is attached.\n");
+                        picture = Some((m.media_type.clone(), bytes));
+                    }
+                }
+                let out = ActionOutput::json(json!({
                     "path": file.path, "kind": file.kind().as_str(), "version": file.version,
-                    "text": l.text, "more": l.more,
-                })))
+                    "text": text, "more": l.more,
+                }));
+                Ok(match picture {
+                    Some((media_type, bytes)) => out.with_image(&media_type, bytes),
+                    None => out,
+                })
             }
             SEARCH => {
                 let query = s("query");
@@ -662,6 +681,26 @@ pub fn distill() -> Distiller {
     })
 }
 
+const PICTURE_CAP: u64 = 3_670_016;
+
+/// Why a picture is not attached, from the file's metadata alone, so an over-cap file is never
+/// read. `None` for anything that is not a picture the model could look at, or fits the cap.
+fn picture_over_cap(root: &Path, rel: &str) -> Option<String> {
+    if crate::kind_of(rel) != Kind::Image || rel.to_lowercase().ends_with(".svg") {
+        return None;
+    }
+    let size = std::fs::metadata(crate::inside(root, rel).ok()?)
+        .ok()?
+        .len();
+    (size > PICTURE_CAP).then(|| {
+        format!(
+            "The picture is not attached: it is {:.1} MB and the limit is {:.1} MB.\n",
+            size as f64 / 1_048_576.0,
+            PICTURE_CAP as f64 / 1_048_576.0
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,6 +732,98 @@ mod tests {
 
     fn said(out: &ActionOutput, action: &str) -> String {
         distill()(action, &out.output).unwrap().0
+    }
+
+    fn png_header(pad: usize) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&3u32.to_be_bytes());
+        png.extend_from_slice(&2u32.to_be_bytes());
+        png.resize(png.len() + pad, 0);
+        png
+    }
+
+    #[tokio::test]
+    async fn reading_a_png_attaches_the_picture() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = png_header(16);
+        std::fs::write(dir.path().join("shot.png"), &png).unwrap();
+        let out = run(dir.path(), READ, json!({"path": "shot.png"}))
+            .await
+            .unwrap();
+        assert_eq!(out.pictures.len(), 1);
+        assert_eq!(out.pictures[0].media_type, "image/png");
+        assert_eq!(*out.pictures[0].bytes, png);
+        let text = said(&out, READ);
+        assert!(text.contains("The picture is attached."), "{text}");
+        assert!(!text.contains("not readable"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_picture_over_the_cap_is_not_attached_and_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("big.png"), png_header(6 * 1024 * 1024)).unwrap();
+        let out = run(dir.path(), READ, json!({"path": "big.png"}))
+            .await
+            .unwrap();
+        assert!(out.pictures.is_empty());
+        let text = said(&out, READ);
+        assert!(
+            text.contains("not attached: it is 6.0 MB and the limit is 3.5 MB"),
+            "{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_over_cap_picture_is_refused_before_any_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = std::fs::File::create(dir.path().join("huge.png")).unwrap();
+        big.set_len(30 * 1024 * 1024).unwrap();
+        let out = run(dir.path(), READ, json!({"path": "huge.png"}))
+            .await
+            .unwrap();
+        assert!(out.pictures.is_empty());
+        let text = said(&out, READ);
+        assert!(text.contains("not attached: it is 30.0 MB"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_picture_of_exactly_the_cap_is_attached() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = png_header(PICTURE_CAP as usize - png_header(0).len());
+        assert_eq!(png.len() as u64, PICTURE_CAP);
+        std::fs::write(dir.path().join("edge.png"), &png).unwrap();
+        let out = run(dir.path(), READ, json!({"path": "edge.png"}))
+            .await
+            .unwrap();
+        assert_eq!(out.pictures.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn jpeg_and_webp_get_their_media_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let jpeg = b"\xff\xd8\xff\xe0\0\x10JFIF\0\x01\x01\0\0\x01\0\x01\0\0".to_vec();
+        let mut webp = b"RIFF\x10\0\0\0WEBPVP8 ".to_vec();
+        webp.resize(32, 0);
+        for (name, bytes, media) in [
+            ("a.jpg", jpeg, "image/jpeg"),
+            ("b.webp", webp, "image/webp"),
+        ] {
+            std::fs::write(dir.path().join(name), &bytes).unwrap();
+            let out = run(dir.path(), READ, json!({"path": name})).await.unwrap();
+            assert_eq!(out.pictures.len(), 1, "{name}");
+            assert_eq!(out.pictures[0].media_type, media);
+            assert_eq!(*out.pictures[0].bytes, bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_svg_stays_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.svg"), "<svg xmlns='x'></svg>").unwrap();
+        let out = run(dir.path(), READ, json!({"path": "a.svg"}))
+            .await
+            .unwrap();
+        assert!(out.pictures.is_empty());
     }
 
     /// The loop the feature is for: the agent makes a workbook, a person changes a cell in the

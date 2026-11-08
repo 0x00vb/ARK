@@ -215,7 +215,7 @@ impl Provider for Anthropic {
         let body = self.body(system, messages, tools, false);
         let resp = self.post(&body, false).await?;
         if !resp.status().is_success() {
-            return Err(status_error("anthropic", resp, error_detail).await);
+            return Err(status_error("anthropic", &self.model, resp, error_detail).await);
         }
         let v: Value = resp.json().await?;
         let mut content = String::new();
@@ -260,7 +260,7 @@ impl Provider for Anthropic {
         let run = async {
             let resp = self.post(&body, false).await?;
             if !resp.status().is_success() {
-                return Err(status_error("anthropic", resp, error_detail).await);
+                return Err(status_error("anthropic", &self.model, resp, error_detail).await);
             }
             Ok(search_hits(&resp.json::<Value>().await?, limit))
         };
@@ -277,7 +277,7 @@ impl Provider for Anthropic {
         let body = self.body(system, messages, tools, true);
         let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            return Err(status_error("anthropic", resp, error_detail).await);
+            return Err(status_error("anthropic", &self.model, resp, error_detail).await);
         }
         let mut fold = AnthropicFold::default();
         for_each_line(resp, |line| match sse_data(line) {

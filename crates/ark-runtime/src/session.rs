@@ -1503,14 +1503,16 @@ impl Session {
 
         let mut state = engine
             .store
-            .get_research_state(&self.execution_project(engine)?)?
+            .get_research_state(&self.execution_project(engine)?, self.id().as_str())?
             .unwrap_or_default();
         report.state_before = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
         report.state_items_removed = state.compact(6);
         report.state_after = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
-        engine
-            .store
-            .put_research_state(&self.execution_project(engine)?, &state)?;
+        engine.store.put_research_state(
+            &self.execution_project(engine)?,
+            self.id().as_str(),
+            &state,
+        )?;
 
         self.record.compactions += 1;
         self.record.updated_at = OffsetDateTime::now_utc();
@@ -1925,8 +1927,11 @@ mod tests {
         for _ in 0..3 {
             st.next_actions.push("read chapter 4".into());
         }
-        engine.store.put_research_state(&p.id, &st).unwrap();
         let mut s = Session::start(&engine, &p.id).unwrap();
+        engine
+            .store
+            .put_research_state(&p.id, s.id().as_str(), &st)
+            .unwrap();
         for i in 0..12 {
             s.record_turn(
                 &engine,

@@ -592,7 +592,7 @@ mod tests {
             assert!(!serde_json::to_string(
                 &engine
                     .store
-                    .get_research_state(&ProjectId("p".into()))
+                    .get_research_state(&ProjectId("p".into()), "")
                     .unwrap()
             )
             .unwrap()

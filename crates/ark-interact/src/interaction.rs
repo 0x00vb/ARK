@@ -1818,7 +1818,7 @@ impl Interaction {
             .map_err(ark_runtime::AgentError::from)?;
         let state = engine
             .store
-            .get_research_state(pid)
+            .get_research_state(pid, self.session.id().as_str())
             .map_err(ark_runtime::AgentError::from)?
             .unwrap_or_default();
         Ok(KeptOut {
@@ -1867,7 +1867,7 @@ impl Interaction {
         let store = &self.engine().store;
         let execution_project = self.session.execution_project(self.engine())?;
         let state = store
-            .get_research_state(&execution_project)
+            .get_research_state(&execution_project, self.session.id().as_str())
             .map_err(ark_runtime::AgentError::from)?
             .unwrap_or_default();
         let artifacts = store

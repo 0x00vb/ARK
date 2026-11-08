@@ -164,6 +164,7 @@ pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Durati
 /// Turn a non-success response into an error, reading the detail with `detail` from the body.
 pub(crate) async fn status_error(
     provider: &str,
+    model: &str,
     resp: reqwest::Response,
     detail: impl Fn(&serde_json::Value) -> Option<String>,
 ) -> ProviderError {
@@ -174,6 +175,17 @@ pub(crate) async fn status_error(
             detail,
             ..
         } => ProviderError::OutOfCredit { provider, detail },
+        ProviderError::Status {
+            status: 410,
+            provider,
+            ..
+        } => {
+            crate::catalog::retire(&provider, model);
+            ProviderError::Retired {
+                provider,
+                model: model.to_string(),
+            }
+        }
         error => error,
     }
 }

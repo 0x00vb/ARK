@@ -4778,13 +4778,14 @@ async fn work_contexts_isolate_state_and_explicit_files_and_survive_reopen_and_c
         };
         ark.engine()
             .store
-            .put_research_state(&project.id, &seeded("ROOT_PRIVATE_FINDING"))
+            .put_research_state(&project.id, "", &seeded("ROOT_PRIVATE_FINDING"))
             .unwrap();
         if agent_work {
             ark.engine()
                 .store
                 .put_research_state(
                     &ProjectId(o.agent("reader").unwrap().scope),
+                    "",
                     &seeded("PRIMARY_AGENT_FINDING"),
                 )
                 .unwrap();
@@ -4818,7 +4819,11 @@ async fn work_contexts_isolate_state_and_explicit_files_and_survive_reopen_and_c
         assert_ne!(alpha_scope, project.id);
         ark.engine()
             .store
-            .put_research_state(&alpha_scope, &seeded("ALPHA_PRIVATE_FINDING"))
+            .put_research_state(
+                &alpha_scope,
+                alpha_session.id().as_str(),
+                &seeded("ALPHA_PRIVATE_FINDING"),
+            )
             .unwrap();
         if agent_work {
             o.execute_work(&alpha.id).unwrap();

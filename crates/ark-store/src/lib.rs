@@ -30,6 +30,7 @@ mod error;
 mod index;
 mod memory;
 mod records;
+mod scrub;
 mod writer;
 pub use error::StoreError;
 pub use index::Hit;
@@ -441,7 +442,9 @@ impl Store {
                  kind TEXT NOT NULL, created_at TEXT NOT NULL,
                  json TEXT NOT NULL, PRIMARY KEY(project_id, id));
              CREATE TABLE IF NOT EXISTS research_state(
-                 project_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, json TEXT NOT NULL);
+                 project_id TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '',
+                 updated_at TEXT NOT NULL, json TEXT NOT NULL,
+                 PRIMARY KEY(project_id, session_id));
              CREATE TABLE IF NOT EXISTS evidence_cards(
                  project_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
                  action TEXT NOT NULL, call_digest TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -483,6 +486,7 @@ impl Store {
              CREATE INDEX IF NOT EXISTS records_by_scope_id ON records(kind, scope, id);
              CREATE INDEX IF NOT EXISTS events_by_stream ON events(stream, seq);",
             )?;
+            migrate_research_state(&db)?;
             migrate_immutable(&db)?;
             migrate_record_watches(&db)?;
             migrate(&db)?;
@@ -1307,6 +1311,9 @@ impl Store {
     // ---- notes ------------------------------------------------------------
 
     pub fn put_note(&self, project: &ProjectId, n: &Note) -> Result<()> {
+        let mut note_json = serde_json::to_value(n)?;
+        scrub::scrub_all(&mut note_json);
+        let note_json = note_json.to_string();
         let db = self.db.lock().unwrap();
         db.execute(
             "INSERT OR REPLACE INTO notes(project_id, id, kind, created_at, json)
@@ -1316,7 +1323,7 @@ impl Store {
                 n.id.as_str(),
                 serde_json::to_string(&n.kind)?.trim_matches('"'),
                 rfc(n.created_at),
-                serde_json::to_string(n)?
+                note_json
             ],
         )?;
         Ok(())
@@ -1332,23 +1339,35 @@ impl Store {
 
     // ---- research / working state -----------------------------------------
 
-    /// Persist the compact working state for a project (one row, replaced in place). This
+    /// Persist the compact working state for a chat of a project (one row, replaced in
+    /// place; `""` is a run with no chat). Secrets are taken out of every string first. This
     /// *is* the resume checkpoint for the structured record — a new session loads it
     /// instead of replaying history.
-    pub fn put_research_state(&self, project: &ProjectId, state: &ResearchState) -> Result<()> {
+    pub fn put_research_state(
+        &self,
+        project: &ProjectId,
+        session: &str,
+        state: &ResearchState,
+    ) -> Result<()> {
+        let mut json = serde_json::to_value(state)?;
+        scrub::scrub_all(&mut json);
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT OR REPLACE INTO research_state(project_id, updated_at, json) VALUES(?1, ?2, ?3)",
-            rusqlite::params![project.as_str(), rfc(OffsetDateTime::now_utc()), serde_json::to_string(state)?],
+            "INSERT OR REPLACE INTO research_state(project_id, session_id, updated_at, json) VALUES(?1, ?2, ?3, ?4)",
+            rusqlite::params![project.as_str(), session, rfc(OffsetDateTime::now_utc()), json.to_string()],
         )?;
         Ok(())
     }
 
-    pub fn get_research_state(&self, project: &ProjectId) -> Result<Option<ResearchState>> {
+    pub fn get_research_state(
+        &self,
+        project: &ProjectId,
+        session: &str,
+    ) -> Result<Option<ResearchState>> {
         let db = self.db.lock().unwrap();
         one(db.query_row(
-            "SELECT json FROM research_state WHERE project_id=?1",
-            [project.as_str()],
+            "SELECT json FROM research_state WHERE project_id=?1 AND session_id=?2",
+            [project.as_str(), session],
             |r| r.get::<_, String>(0),
         ))
     }
@@ -1551,6 +1570,7 @@ impl Store {
         index: u32,
         turn: &serde_json::Value,
     ) -> Result<()> {
+        let turn = &scrub::turn(turn);
         let db = self.db.lock().unwrap();
         db.execute(
             "INSERT OR REPLACE INTO session_turns(session_id, idx, json, text_len) VALUES(?1, ?2, ?3, ?4)",
@@ -1607,6 +1627,9 @@ impl Store {
         index: u32,
         trace: &serde_json::Value,
     ) -> Result<()> {
+        let mut trace = trace.clone();
+        scrub::scrub_all(&mut trace);
+        let trace = &trace;
         let db = self.db.lock().unwrap();
         db.execute(
             "INSERT OR REPLACE INTO turn_traces(session_id, idx, json) VALUES(?1, ?2, ?3)",
@@ -3019,6 +3042,28 @@ fn ensure_immutable_schema(db: &Connection) -> Result<()> {
     if version != 1 || triggers != 7 {
         return Err(std::io::Error::other("immutable record schema is unavailable").into());
     }
+    Ok(())
+}
+
+fn migrate_research_state(db: &Connection) -> Result<()> {
+    let keyed_by_session = db
+        .prepare("SELECT 1 FROM pragma_table_info('research_state') WHERE name='session_id'")?
+        .exists([])?;
+    if keyed_by_session {
+        return Ok(());
+    }
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    tx.execute_batch(
+        "ALTER TABLE research_state RENAME TO research_state_by_project;
+        CREATE TABLE research_state(
+            project_id TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL, json TEXT NOT NULL,
+            PRIMARY KEY(project_id, session_id));
+        INSERT INTO research_state(project_id, session_id, updated_at, json)
+            SELECT project_id, '#legacy', updated_at, json FROM research_state_by_project;
+        DROP TABLE research_state_by_project;",
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -5629,6 +5674,114 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_turn_and_its_trace_hold_no_pasted_secret() {
+        let (_d, s) = store();
+        s.put_session_turn(
+            "s",
+            0,
+            &serde_json::json!({
+                "input": "DATABASE_URL=postgresql://u:p4ss@h/db",
+                "answer": "I used the connection string"
+            }),
+        )
+        .unwrap();
+        let turn = &s.list_session_turns("s", None).unwrap()[0];
+        assert!(!turn.to_string().contains("p4ss"), "{turn}");
+        assert!(turn["answer"]
+            .as_str()
+            .unwrap()
+            .contains("connection string"));
+
+        s.put_turn_trace(
+            "s",
+            0,
+            &serde_json::json!({
+                "input": "run it",
+                "events": [{"event": {"summary": "API_KEY=abc123"}}]
+            }),
+        )
+        .unwrap();
+        let trace = s.get_turn_trace("s", 0).unwrap().unwrap();
+        assert!(!trace.to_string().contains("abc123"), "{trace}");
+
+        s.put_session_turn(
+            "s",
+            1,
+            &serde_json::json!({"input": "let password_len = 3;"}),
+        )
+        .unwrap();
+        let turn = &s.list_session_turns("s", None).unwrap()[1];
+        assert_eq!(turn["input"], "let password_len = 3;");
+    }
+
+    #[test]
+    fn working_state_belongs_to_its_chat() {
+        use ark_core::ResearchState;
+        let (_d, s) = store();
+        let p = Project::new("t", "");
+        s.put_project(&p).unwrap();
+        s.put_research_state(&p.id, "chat-1", &ResearchState::new("goal one"))
+            .unwrap();
+        assert!(s.get_research_state(&p.id, "chat-2").unwrap().is_none());
+        s.put_research_state(&p.id, "chat-2", &ResearchState::new("goal two"))
+            .unwrap();
+        let one = s.get_research_state(&p.id, "chat-1").unwrap().unwrap();
+        assert_eq!(one.goal, "goal one");
+    }
+
+    #[test]
+    fn a_secret_in_a_question_or_answer_reaches_neither_state_nor_notes() {
+        use ark_core::ResearchState;
+        let (_d, s) = store();
+        let p = Project::new("t", "");
+        s.put_project(&p).unwrap();
+        let secret = "DATABASE_URL=postgresql://u:p4ss@h/db";
+        let mut st = ResearchState::new(format!("why does {secret} fail"));
+        st.questions.push(secret.into());
+        s.put_research_state(&p.id, "c", &st).unwrap();
+        let note = Note::new(NoteKind::Finding, secret, ark_core::Author::Agent);
+        s.put_note(&p.id, &note).unwrap();
+        let back = s.get_research_state(&p.id, "c").unwrap().unwrap();
+        let all = format!("{back:?} {:?}", s.list_notes(&p.id).unwrap());
+        assert!(!all.contains("p4ss"), "{all}");
+        assert!(all.contains("u:[redacted]@h"), "{all}");
+    }
+
+    #[test]
+    fn a_database_with_project_keyed_working_state_migrates() {
+        use ark_core::ResearchState;
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let db = rusqlite::Connection::open(dir.path().join("meta.db")).unwrap();
+            db.execute_batch(
+                "CREATE TABLE research_state(
+                     project_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, json TEXT NOT NULL);",
+            )
+            .unwrap();
+            let json = serde_json::to_string(&ResearchState::new("old goal")).unwrap();
+            db.execute(
+                "INSERT INTO research_state VALUES('p', '2026-01-01T00:00:00Z', ?1)",
+                [json],
+            )
+            .unwrap();
+        }
+        let s = Store::open(dir.path()).unwrap();
+        let p = ProjectId("p".into());
+        assert!(s.get_research_state(&p, "chat-1").unwrap().is_none());
+        assert!(s.get_research_state(&p, "").unwrap().is_none());
+        let old = s.get_research_state(&p, "#legacy").unwrap().unwrap();
+        assert_eq!(old.goal, "old goal");
+        s.put_research_state(&p, "chat-1", &ResearchState::new("new goal"))
+            .unwrap();
+        assert_eq!(
+            s.get_research_state(&p, "#legacy").unwrap().unwrap().goal,
+            "old goal"
+        );
+        drop(s);
+        Store::open(dir.path()).unwrap();
+    }
+
+    #[test]
     fn research_state_and_cards_persist_and_dedup() {
         use ark_core::{Claim, ClaimType, EvidenceCard, InvocationId, ResearchState};
         let (_d, s) = store();
@@ -5636,14 +5789,14 @@ mod tests {
         s.put_project(&p).unwrap();
 
         // working state round-trips and replaces in place
-        assert!(s.get_research_state(&p.id).unwrap().is_none());
+        assert!(s.get_research_state(&p.id, "").unwrap().is_none());
         let mut st = ResearchState::new("find the root cause");
         st.findings
             .push(Claim::new("cache evicted early", ClaimType::Fact));
-        s.put_research_state(&p.id, &st).unwrap();
+        s.put_research_state(&p.id, "", &st).unwrap();
         st.questions.push("which key first?".into());
-        s.put_research_state(&p.id, &st).unwrap();
-        let back = s.get_research_state(&p.id).unwrap().unwrap();
+        s.put_research_state(&p.id, "", &st).unwrap();
+        let back = s.get_research_state(&p.id, "").unwrap().unwrap();
         assert_eq!(back.goal, "find the root cause");
         assert_eq!(back.findings.len(), 1);
         assert_eq!(back.questions.len(), 1);

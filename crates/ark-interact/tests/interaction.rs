@@ -1194,8 +1194,18 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
                 tool_calls: vec![],
                 usage: Usage::measured(60, 6),
             },
+            Completion {
+                content: "Lumen is open.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
             // Turn 2: on, so the tools are there from the start.
             call("computer.open", serde_json::json!({ "app": "Lumen" })),
+            Completion {
+                content: "Again.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
             Completion {
                 content: "Again.".into(),
                 tool_calls: vec![],
@@ -1314,7 +1324,7 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
         .result
         .unwrap();
     let requests = model.recorded();
-    let t2 = &requests[3];
+    let t2 = &requests[4];
     assert!(t2.tools.iter().any(|t| t.name == "computer.open"));
     assert!(!t2.messages[0].content.contains("- computer:"));
     assert_eq!(

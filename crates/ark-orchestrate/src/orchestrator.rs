@@ -3863,6 +3863,11 @@ impl Inner {
             .stopping(Some(self.engine.stopping()))
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
+            .chat(if task.conversation.is_some() {
+                session.id().as_str()
+            } else {
+                task.id.as_str()
+            })
             .rules(selection.clone())
             .skills(catalog)
             .done_before(done);

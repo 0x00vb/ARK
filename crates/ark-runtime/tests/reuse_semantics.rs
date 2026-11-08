@@ -416,6 +416,8 @@ async fn an_identical_change_runs_at_most_twice_in_a_task() {
         ],
         "done",
     );
+    let mut script = script;
+    script.push(script[script.len() - 1].clone());
     let p: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
     let profile = AgentProfile::builder().core_actions(["kv.set"]).build();
     let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(

@@ -70,6 +70,9 @@ pub enum ProviderError {
     /// help until the person adds credit or picks another model.
     #[error("{detail}")]
     OutOfCredit { provider: String, detail: String },
+    /// The provider removed the model (HTTP 410). Sending again fails the same way.
+    #[error("{model} was retired by {provider}. Pick another model.")]
+    Retired { provider: String, model: String },
     /// The provider reported a temporary failure inside a successful response (an
     /// `overloaded_error` event mid-stream).
     #[error("{provider} is overloaded: {detail}")]
@@ -107,6 +110,7 @@ impl ProviderError {
             | ProviderError::Refused { .. } => true,
             ProviderError::Api { .. }
             | ProviderError::OutOfCredit { .. }
+            | ProviderError::Retired { .. }
             | ProviderError::MissingCredential(_)
             | ProviderError::Serde(_) => false,
         }

@@ -96,7 +96,7 @@ impl OpenAi {
         if self.raw_status {
             raw_status_error(&self.name, response, error_detail, Some(&self.key)).await
         } else {
-            status_error(&self.name, response, error_detail).await
+            status_error(&self.name, &self.model, response, error_detail).await
         }
     }
 

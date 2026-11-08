@@ -211,7 +211,12 @@ async fn the_owners_task_survives_a_crash_and_continues_on_a_real_model() {
         outcome.steps,
         outcome.metrics.prompt_tokens
     );
-    let state = ark.engine().store.get_research_state(&p).unwrap().unwrap();
+    let state = ark
+        .engine()
+        .store
+        .get_research_state(&p, "")
+        .unwrap()
+        .unwrap();
     assert_eq!(
         state.goal, QUESTION,
         "the goal is the request, not \"cointinue\""

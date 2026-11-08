@@ -3088,7 +3088,7 @@ impl Host {
                 let state = self
                     .engine
                     .store
-                    .get_research_state(&context)?
+                    .get_research_state(&context, &r.location.session)?
                     .unwrap_or_default();
                 let artifacts = self.engine.store.list_artifacts(&context)?;
                 Ok(serde_json::to_value(StateView::build(

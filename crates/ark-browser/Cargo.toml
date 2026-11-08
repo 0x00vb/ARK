@@ -19,6 +19,7 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["process", "net", "time", "sync", "fs", "io-util", "macros", "rt"] }
 tokio-tungstenite = "0.30"
 reqwest.workspace = true
+base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -263,6 +263,7 @@ async fn a_failed_and_killed_task_continues_with_its_goal_and_finishes() {
             json!({ "command": "grep -c highlightLayer web/js/file.js && echo tests passed", "wait": 30 }),
         )),
         Step::Ok(say("Syntax highlighting is in place and its test passes.")),
+        Step::Ok(say("Syntax highlighting is in place and its test passes.")),
     ]);
     let ark = ark(dir.path(), model.clone());
     let (p, folder) = project(&ark);
@@ -341,7 +342,12 @@ async fn a_failed_and_killed_task_continues_with_its_goal_and_finishes() {
         "code with quotes arrives whole"
     );
 
-    let state = ark.engine().store.get_research_state(&p).unwrap().unwrap();
+    let state = ark
+        .engine()
+        .store
+        .get_research_state(&p, session.id().as_str())
+        .unwrap()
+        .unwrap();
     assert_eq!(
         state.goal, QUESTION,
         "the goal is the request, not \"cointinue\""

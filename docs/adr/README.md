@@ -153,3 +153,4 @@ Local integration decisions:
 - [0105-dictation-shows-words-while-listening](0105-dictation-shows-words-while-listening.md)
 - [0106-images-go-with-the-message](0106-images-go-with-the-message.md)
 - [0107-every-chat-starts-in-auto](0107-every-chat-starts-in-auto.md)
+- [0108-an-agent-checks-what-it-changed-and-sees-what-it-shows](0108-an-agent-checks-what-it-changed-and-sees-what-it-shows.md)

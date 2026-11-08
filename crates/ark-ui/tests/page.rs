@@ -1480,6 +1480,10 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
             "You took the computer back, so I did not save the note.",
             false,
         ),
+        say(
+            "You took the computer back, so I did not save the note.",
+            false,
+        ),
     ];
     drive("computer", script, Duration::ZERO).await;
 }

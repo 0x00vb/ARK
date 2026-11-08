@@ -196,3 +196,41 @@ async fn the_output_cap_is_sent() {
     let sent: serde_json::Value = serde_json::from_str(&body.lock().unwrap()).unwrap();
     assert_eq!(sent["options"]["num_predict"], 321);
 }
+
+#[tokio::test]
+async fn a_retired_model_says_so_and_leaves_the_catalog() {
+    let (gone, _) = serve(Reply::Raw(vec![(
+        Duration::ZERO,
+        response("410 Gone", &[], r#"{"error":"model retired"}"#),
+    )]))
+    .await;
+    let err = Ollama::new("glm-4.6")
+        .with_host(&gone)
+        .with_http(http(2000))
+        .complete("s", &[Message::user("q")], &[])
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "glm-4.6 was retired by ollama. Pick another model."
+    );
+    assert!(!err.is_transient());
+
+    let tags =
+        r#"{"models":[{"name":"glm-4.6:latest"},{"name":"glm-4.6:q4"},{"name":"qwen3:4b"}]}"#;
+    let (host, _) = serve(Reply::Raw(vec![(
+        Duration::ZERO,
+        response("200 OK", &[], tags),
+    )]))
+    .await;
+    std::env::set_var("OLLAMA_HOST", &host);
+    let listed = ark_model::catalog()
+        .await
+        .into_iter()
+        .find(|b| b.provider == "ollama")
+        .unwrap();
+    assert_eq!(
+        listed.models,
+        vec!["glm-4.6:q4".to_string(), "qwen3:4b".to_string()]
+    );
+}

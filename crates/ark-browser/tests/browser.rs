@@ -6,7 +6,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_browser::{distill, BrowserService, CLICK, OPEN, READ, TYPE};
+use ark_browser::{distill, BrowserService, CLICK, OPEN, READ, SCREENSHOT, TYPE};
 use ark_tools::{Adapter, BlobResolver, RunCtx};
 use serde_json::{json, Value};
 
@@ -447,7 +447,12 @@ fn pages(name: &'static str, other: Arc<std::sync::Mutex<String>>) -> u16 {
             let req = String::from_utf8_lossy(&buf[..n]).to_string();
             let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
             let other = other.lock().unwrap().clone();
-            let reply = if path == "/away" {
+            let reply = if path == "/later" {
+                let body = format!(
+                    "<title>later</title><script>setTimeout(() => location = \"{other}\", 4000)</script>"
+                );
+                format!("HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+            } else if path == "/away" {
                 format!("HTTP/1.1 302 Found\r\nlocation: {other}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
             } else {
                 let body = format!(
@@ -565,4 +570,56 @@ async fn a_project_opens_the_pages_its_processes_serve_and_nothing_else_here() {
     let link = element(&page.output, "link", "Elsewhere");
     refused(agent.run(CLICK, json!({ "ref": link }), in_project).await);
     refused(agent.run(ark_browser::BACK, json!({}), in_project).await);
+
+    // A page that moves itself to theirs after it opened: a screenshot is refused with no
+    // picture, and the page is left blank like after any other refusal.
+    open(format!("http://localhost:{ours}/later"), in_project)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(6000)).await;
+    let e = refused(agent.run(SCREENSHOT, json!({}), in_project).await);
+    assert!(e.contains("process of this project serves itself"), "{e}");
+    let now = agent.run(READ, json!({}), in_project).await.unwrap();
+    assert!(
+        !now.output["text"].as_str().unwrap_or("").contains("theirs"),
+        "{}",
+        now.output
+    );
+}
+
+#[test]
+fn screenshot_is_listed_as_an_observe_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let svc = BrowserService::new(dir.path());
+    let actions = svc.for_owner("alice").actions();
+    let shot = actions.iter().find(|a| a.name == SCREENSHOT).unwrap();
+    assert_eq!(shot.risk, ark_core::RiskTier::Observe);
+    assert!(shot.summary.contains("model provider"));
+}
+
+#[tokio::test]
+async fn a_screenshot_of_a_local_page_is_a_jpeg() {
+    let dir = tempfile::tempdir().unwrap();
+    let svc = BrowserService::new(dir.path()).allow_private(true);
+    if svc.browser().is_none() {
+        eprintln!("skipped: no Chrome, Edge or Brave on this machine");
+        return;
+    }
+    let server = site();
+    let ctx = RunCtx::new(&NoBlobs);
+    let alice = svc.for_owner("alice");
+    alice
+        .run(OPEN, json!({ "url": server.url.clone() }), &ctx)
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap();
+    let out = alice
+        .run(SCREENSHOT, json!({}), &ctx)
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap();
+    assert_eq!(out.output["title"], "Greeter");
+    assert_eq!(out.pictures.len(), 1);
+    assert_eq!(out.pictures[0].media_type, "image/jpeg");
+    assert!(out.pictures[0].bytes.starts_with(b"\xff\xd8\xff"));
 }

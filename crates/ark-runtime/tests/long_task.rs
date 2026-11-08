@@ -180,7 +180,11 @@ async fn a_long_task_keeps_its_goal_what_the_person_said_and_what_it_did() {
         steer_seen_from.is_some(),
         "the person's message reached the model"
     );
-    let state = engine.store.get_research_state(&project).unwrap().unwrap();
+    let state = engine
+        .store
+        .get_research_state(&project, "")
+        .unwrap()
+        .unwrap();
     assert_eq!(
         state.goal, REQUEST,
         "the research state's goal is the request"

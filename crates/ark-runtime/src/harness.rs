@@ -250,6 +250,9 @@ pub struct Harness {
     /// What this turn works on when it continues an unfinished one (ADR 0050). `None`: the
     /// question is the goal.
     goal: Option<crate::session::Goal>,
+    /// The conversation whose working state this turn reads and writes; empty for a run with
+    /// none.
+    chat: String,
     /// The request budget the app or `ARK_CTX_BUDGET` set. `None`: sized from the reasoning
     /// model's window ([`crate::budget::budget_for`], ADR 0050).
     budget: Option<u32>,
@@ -291,6 +294,8 @@ struct FirstTurn {
     /// The project's name, target and newest artifacts. Here, not in the system prompt, so the
     /// system prompt stays identical across projects and a vendor's prompt cache serves it.
     project: String,
+    /// What this session has, from the registry ([`session_line`]).
+    session: String,
     memory: Option<String>,
     workspace: Option<String>,
     conversation: Option<String>,
@@ -311,6 +316,7 @@ impl FirstTurn {
         if !self.project.is_empty() {
             let _ = write!(s, "== PROJECT ==\n{}\n\n", self.project);
         }
+        let _ = write!(s, "== THIS SESSION ==\n{}\n\n", self.session);
         if let Some(w) = &self.workspace {
             let _ = write!(s, "== WORKSPACE CONTEXT ==\n{w}\n\n");
         }
@@ -347,6 +353,7 @@ impl Harness {
             allow_mutate: false,
             max_steps: 16,
             goal: None,
+            chat: String::new(),
             budget: crate::budget::budget_from_env(),
             // 2: measured live on qwen3:4b and Claude Haiku (bench/RESULTS.md, P1).
             preload: std::env::var("ARK_PRELOAD_ACTIONS")
@@ -534,6 +541,12 @@ impl Harness {
         self.critic = yes;
         self
     }
+    /// Keep this turn's working state under a conversation, so another conversation of the
+    /// project never carries it (ADR 0108).
+    pub fn chat(mut self, id: &str) -> Self {
+        self.chat = id.to_string();
+        self
+    }
     /// Bounded carry-over from earlier turns (see [`crate::Session`]). It rides in the first
     /// message under the budget; it is never the raw transcript.
     pub fn conversation(mut self, digest: Option<String>) -> Self {
@@ -628,7 +641,7 @@ impl Harness {
         // findings/interesting/hypotheses.
         let mut state = engine
             .store
-            .get_research_state(project)?
+            .get_research_state(project, &self.chat)?
             .unwrap_or_default();
         // A turn that continues an unfinished one works on that one's goal, not on its own
         // words ("continue"), for everything chosen from the task (ADR 0050).
@@ -640,7 +653,9 @@ impl Harness {
             .filter(|r| !r.trim().is_empty())
             .unwrap_or_else(|| question.to_string());
         state.touch();
-        engine.store.put_research_state(project, &state)?;
+        engine
+            .store
+            .put_research_state(project, &self.chat, &state)?;
         let budget = self.request_budget();
 
         let trivial = classify_trivial(&goal_text, &profile.investigation_markers);
@@ -666,7 +681,9 @@ impl Harness {
                         steps: steps.clone(),
                     });
                     state.next_actions = steps;
-                    engine.store.put_research_state(project, &state)?;
+                    engine
+                        .store
+                        .put_research_state(project, &self.chat, &state)?;
                 }
                 Some(_) => {}
             }
@@ -713,6 +730,11 @@ impl Harness {
 
         let mut first = FirstTurn {
             project: self.project_block(engine, project)?,
+            session: session_line(
+                &engine.registry,
+                self.router.provider(Role::Reason).reads_pictures(),
+                |d| self.descriptor_available(d),
+            ),
             memory: crate::memory::recall(&engine.store, project, &goal_text, budget)?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
@@ -789,6 +811,14 @@ impl Harness {
         let mut corrected_announce = false;
         // The answer the model last wrote beside a check of its own changes (see `rechecks`).
         let mut checked: Option<String> = None;
+        // Calls run this turn in order: the last change, the last look, how many changes, and
+        // whether the model was asked once to check its change (ADR 0108).
+        let mut call_seq: u32 = 0;
+        let mut last_mutation: Option<u32> = None;
+        let mut last_observation: Option<u32> = None;
+        // The last call that looked at something and succeeded.
+        let mut mutations: u32 = 0;
+        let mut verify_nudged = false;
         let mut steered: Vec<String> = Vec::new();
         // Tools an acquisition added this turn, and the turn's engine once it has them.
         let outer = engine;
@@ -859,6 +889,10 @@ impl Harness {
             report.tool_rounds = report.tool_rounds.saturating_sub(said);
             on_event(HarnessEvent::Context { report });
 
+            // An answer after a change nobody checked is asked for again, so its text is held
+            // back until the turn knows it stays.
+            let hold = !verify_nudged
+                && last_mutation.is_some_and(|m| last_observation.is_none_or(|o| o < m));
             let mut unusable = String::new();
             let called = self
                 .call_model(
@@ -866,7 +900,7 @@ impl Harness {
                     &system,
                     &messages,
                     &tools,
-                    true,
+                    !hold,
                     &mut metrics,
                     &mut on_event,
                     Some(&mut unusable),
@@ -912,6 +946,14 @@ impl Harness {
                 break;
             };
             repairs_in_row = 0;
+            let mut held = Some(completion.content.clone()).filter(|t| hold && !t.is_empty());
+            macro_rules! show_held {
+                () => {
+                    if let Some(text) = held.take() {
+                        on_event(HarnessEvent::TextDelta { text });
+                    }
+                };
+            }
 
             // A full answer beside reads of what this turn changed is a check of its own work.
             // A second one that repeats the first is the model restating its answer, not
@@ -944,6 +986,7 @@ impl Harness {
                 // narration and keep going with their message.
                 let late = steer::drain(&self.steer);
                 if !late.is_empty() {
+                    show_held!();
                     let mut round = vec![Message::assistant(completion.content.clone())];
                     self.deliver_steering(late, &mut round, &mut steered, &mut on_event);
                     ws.push_round(round);
@@ -956,6 +999,7 @@ impl Harness {
                 // once and let it try again.
                 if !corrected_text_call && writes_tool_call_as_text(&completion.content, &tools) {
                     corrected_text_call = true;
+                    show_held!();
                     tracing::info!("the model wrote a tool call as text; asking again");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),
@@ -978,6 +1022,7 @@ impl Harness {
                     );
                     if !missing.is_empty() {
                         corrected_claim = true;
+                        show_held!();
                         tracing::info!(files = ?missing, "the answer names files no call wrote; asking again");
                         ws.push_round(vec![
                             Message::assistant(completion.content.clone()),
@@ -992,10 +1037,23 @@ impl Harness {
                 // model does this after reading what it was asked to change. Say so once.
                 if !corrected_announce && !tools.is_empty() && announces_work(&completion.content) {
                     corrected_announce = true;
+                    show_held!();
                     tracing::info!("the answer announces work it has not done; asking again");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),
                         Message::user(ANNOUNCED_NOTE),
+                    ]);
+                    retrieved.push(0);
+                    continue;
+                }
+                let unchecked =
+                    last_mutation.is_some_and(|m| last_observation.is_none_or(|o| o < m));
+                if unchecked && !verify_nudged {
+                    verify_nudged = true;
+                    tracing::info!("the answer follows a change nobody checked; asking once");
+                    ws.push_round(vec![
+                        Message::assistant(completion.content.clone()),
+                        Message::user(VERIFY_NOTE),
                     ]);
                     retrieved.push(0);
                     continue;
@@ -1006,6 +1064,7 @@ impl Harness {
                 break;
             }
 
+            show_held!();
             // The model's note with its calls stays in the round for the ledger (it is not sent
             // while the round is shown: `budget::sent`) and goes on each call's record, so work
             // that stops continues with it.
@@ -1026,6 +1085,9 @@ impl Harness {
                 failed_runs: &mut failures_run,
                 changed_at: &mut changed_at,
                 written: &mut written,
+                observed: &mut last_observation,
+                changed: &mut last_mutation,
+                changes: &mut mutations,
             };
             macro_rules! flush {
                 () => {
@@ -1320,6 +1382,11 @@ impl Harness {
                 if desc.risk == RiskTier::Mutate {
                     *changes_run.entry(digest.clone()).or_default() += 1;
                 }
+                call_seq += 1;
+                // A volatile call observes something new each time (`Reuse::Volatile`), so a
+                // Mutate one asks for consent but looks rather than changes.
+                let looks = desc.risk != RiskTier::Mutate || desc.reuse == Reuse::Volatile;
+                let needs_check = !looks && checkable(&engine.registry, &call.name);
                 let mut executed = call.clone();
                 if let Some(invocation) = &pending_invocation {
                     executed.arguments = invocation.input.clone();
@@ -1331,6 +1398,9 @@ impl Harness {
                     invocation: pending_invocation,
                     failed_before,
                     digest,
+                    seq: call_seq,
+                    needs_check,
+                    looks,
                 });
                 if desc.risk == RiskTier::Mutate {
                     flush!();
@@ -1394,7 +1464,9 @@ impl Harness {
 
         if cancelled {
             state.touch();
-            engine.store.put_research_state(project, &state)?;
+            engine
+                .store
+                .put_research_state(project, &self.chat, &state)?;
             metrics.finish();
             let stopped = self.stopped_event();
             let interrupted = matches!(stopped, HarnessEvent::Interrupted);
@@ -1480,12 +1552,18 @@ impl Harness {
             answer = guarded;
             streamed = false;
         }
-        let (passed, detail) = self.self_check(&answer, &cited, trivial, steps_taken);
+        let verify = Verify {
+            changed: mutations,
+            checked_after: last_mutation.is_none_or(|m| last_observation.is_some_and(|o| o > m)),
+            nudged: verify_nudged,
+            ran_out,
+        };
+        let (passed, detail) = self.self_check(&answer, &cited, trivial, steps_taken, verify);
         on_event(HarnessEvent::SelfCheck {
             passed,
             detail: detail.clone(),
         });
-        if !passed && self.critic && !trivial {
+        if !passed && self.critic && !trivial && !verify.unchecked_after_nudge() {
             if let Some(revised) = self
                 .run_critic(
                     profile,
@@ -1512,7 +1590,9 @@ impl Harness {
         note.cites_invocations = cited.clone();
         engine.store.put_note(project, &note)?;
         state.touch();
-        engine.store.put_research_state(project, &state)?;
+        engine
+            .store
+            .put_research_state(project, &self.chat, &state)?;
 
         metrics.finish();
         let checkpoint = json!({
@@ -1565,7 +1645,7 @@ impl Harness {
         let query = self.goal_query(task);
         let state = engine
             .store
-            .get_research_state(project)?
+            .get_research_state(project, &self.chat)?
             .unwrap_or_default();
         let sys = self.system_prompt(engine, profile).await;
         let system = sys.render();
@@ -1591,6 +1671,11 @@ impl Harness {
         };
         let first = FirstTurn {
             project: self.project_block(engine, project)?,
+            session: session_line(
+                &engine.registry,
+                self.router.provider(Role::Reason).reads_pictures(),
+                |d| self.descriptor_available(d),
+            ),
             memory: crate::memory::recall(&engine.store, project, &query, self.request_budget())?,
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
@@ -1799,6 +1884,13 @@ impl Harness {
                 }
             } else if p.risk != RiskTier::Mutate {
                 *tally.failed_runs.entry(p.digest.clone()).or_default() += 1;
+            }
+            if ok && p.looks {
+                *tally.observed = (*tally.observed).max(Some(p.seq));
+            }
+            if ok && p.needs_check {
+                *tally.changed = (*tally.changed).max(Some(p.seq));
+                *tally.changes += 1;
             }
             let card = distill(&inv, &profile.distillers);
             engine.store.put_evidence_card(project, &card)?;
@@ -2309,7 +2401,9 @@ impl Harness {
                 let kind = sarg("kind");
                 let text = sarg("text");
                 apply_state_update(state, &kind, &text, a);
-                engine.store.put_research_state(project, state)?;
+                engine
+                    .store
+                    .put_research_state(project, &self.chat, state)?;
                 on_event(HarnessEvent::StateUpdate {
                     kind: kind.clone(),
                     text: text.clone(),
@@ -2580,9 +2674,18 @@ impl Harness {
         cited: &[InvocationId],
         trivial: bool,
         steps: usize,
+        verify: Verify,
     ) -> (bool, String) {
         if answer.is_empty() {
             return (false, "no answer produced".into());
+        }
+        let checked = format!(
+            "changed {}; checked after: {}",
+            verify.changed,
+            if verify.checked_after { "yes" } else { "no" }
+        );
+        if verify.unchecked_after_nudge() {
+            return (false, checked);
         }
         let admits_unknown = [
             "unknown",
@@ -2600,14 +2703,16 @@ impl Harness {
                 "answer is ungrounded: no evidence cited and no uncertainty acknowledged".into(),
             );
         }
-        (
-            true,
-            format!(
-                "answered; {} evidence {} cited",
-                cited.len(),
-                if cited.len() == 1 { "item" } else { "items" }
-            ),
-        )
+        let mut detail = format!(
+            "answered; {} evidence {} cited",
+            cited.len(),
+            if cited.len() == 1 { "item" } else { "items" }
+        );
+        if verify.changed > 0 {
+            detail.push_str("; ");
+            detail.push_str(&checked);
+        }
+        (true, detail)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2787,6 +2892,12 @@ struct Pending {
     invocation: Option<Invocation>,
     failed_before: bool,
     digest: String,
+    /// The call's place in the turn's order of calls.
+    seq: u32,
+    /// A change that an Observe action of its namespace could check.
+    needs_check: bool,
+    /// The call looks at something: Read or Observe, or a volatile Mutate call.
+    looks: bool,
 }
 
 /// The per-turn tallies a finished call updates.
@@ -2798,6 +2909,11 @@ struct Tally<'a> {
     changed_at: &'a mut time::OffsetDateTime,
     /// Files of the project folder the turn's calls wrote (relative paths).
     written: &'a mut Vec<String>,
+    /// The place of the last call that looked at something and succeeded.
+    observed: &'a mut Option<u32>,
+    /// The place of the last checkable change that succeeded, and how many there were.
+    changed: &'a mut Option<u32>,
+    changes: &'a mut u32,
 }
 
 /// Artifacts named in the first message. Older ones stay reachable through search.
@@ -2887,6 +3003,39 @@ impl Harness {
 /// Whether the turn is offered the acquisition tools: a provider with something to acquire.
 fn acquisition_on(profile: &AgentProfile) -> bool {
     profile.acquisition.as_ref().is_some_and(|a| a.active())
+}
+
+/// A change can be checked when its namespace (the text before the first `.`) has an Observe
+/// action: a way to see the result on the system the change touched.
+fn checkable(registry: &ark_tools::Registry, action: &str) -> bool {
+    let namespace = action.split('.').next().unwrap_or(action);
+    registry.actions().iter().any(|a| {
+        a.risk == RiskTier::Observe && a.name.split('.').next().is_some_and(|n| n == namespace)
+    })
+}
+
+/// One stable line of what the session has. Built from the registered actions the execution
+/// mode allows, not from the actions offered in a request, so it does not change when a
+/// vendor withholds schemas.
+fn session_line(
+    registry: &ark_tools::Registry,
+    pictures: bool,
+    offered: impl Fn(&ark_core::ActionDescriptor) -> bool,
+) -> String {
+    let actions: Vec<_> = registry.actions().into_iter().filter(offered).collect();
+    let has = |name: &str| actions.iter().any(|a| a.name == name);
+    let yn = |on: bool| if on { "yes" } else { "no" };
+    format!(
+        "terminal: {}. local pages: {}. pictures: {}. Computer: {}.",
+        yn(has("process.start")),
+        yn(has("browser.open")),
+        yn(pictures),
+        if actions.iter().any(|a| a.name.starts_with("computer.")) {
+            "on"
+        } else {
+            "off"
+        },
+    )
 }
 
 fn can_add(profile: &AgentProfile) -> Option<String> {
@@ -3074,6 +3223,23 @@ const MAX_IDENTICAL_FAILURES: u32 = 2;
 /// Replies that could not be used the model is asked to send again: in a row, and in a turn.
 const MAX_REPAIRS_IN_ROW: u32 = 2;
 const MAX_REPAIRS: u32 = 4;
+const VERIFY_NOTE: &str = "Check the change you made before you finish: read it back, run it, or look at it. If you cannot check it, say plainly that it is unchecked.";
+
+/// What a turn did to its work, for `self_check`.
+#[derive(Clone, Copy)]
+struct Verify {
+    changed: u32,
+    checked_after: bool,
+    nudged: bool,
+    ran_out: bool,
+}
+
+impl Verify {
+    fn unchecked_after_nudge(self) -> bool {
+        self.changed > 0 && !self.checked_after && (self.nudged || self.ran_out)
+    }
+}
+
 const REPAIR_NOTE: &str = "Your last reply could not be used, so nothing ran. Send it again with valid arguments for the tool you meant to call. Put long text in several smaller edits instead of one large one.";
 
 const DONE_BEFORE_NOTE: &str = "not run again: this exact change already ran before the work was interrupted, so running it again would make it twice. Its result";

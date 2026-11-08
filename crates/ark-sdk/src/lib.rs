@@ -575,6 +575,7 @@ impl Ark {
         let harness = harness
             .goal(goal.clone())
             .conversation(digest)
+            .chat(session.id().as_str())
             .done_before(done_before)
             .cut_short(cut_short)
             .approvals(opts.approvals)
@@ -949,6 +950,7 @@ impl Ark {
             .goal(goal)
             .presentation(present)
             .conversation(session.conversation_digest())
+            .chat(session.id().as_str())
             .rules(rules)
             .skills(catalog)
             .preview_context(&engine, &profile, &execution_project, task)

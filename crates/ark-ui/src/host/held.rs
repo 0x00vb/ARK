@@ -38,6 +38,17 @@ pub(super) struct HeldLive {
     pub(super) changes: usize,
 }
 
+/// A chat made on another computer, or the question its project's copy needs answered first.
+pub(super) enum Made {
+    Ask(Value),
+    Chat(Box<MadeChat>),
+}
+
+pub(super) struct MadeChat {
+    pub(super) chat: HeldChat,
+    pub(super) sent: Value,
+}
+
 /// How long a place's events may be silent (it pings every 15 s) before the stream counts as gone.
 const IDLE: Duration = Duration::from_secs(40);
 
@@ -49,7 +60,7 @@ impl Host {
     }
 
     /// The held chat `session`, when it is one.
-    fn held_chat(&self, session: &str) -> Option<HeldChat> {
+    pub(super) fn held_chat(&self, session: &str) -> Option<HeldChat> {
         held::get(&self.engine, session)
     }
 
@@ -89,7 +100,7 @@ impl Host {
     }
 
     /// One call on a held chat's computer.
-    async fn on_place(
+    pub(super) async fn on_place(
         &self,
         chat: &HeldChat,
         method: &str,
@@ -184,6 +195,29 @@ impl Host {
         model: &str,
         big: bool,
     ) -> anyhow::Result<Value> {
+        let project = self.project()?;
+        let made = match self.held_make(place, &project, model, big).await? {
+            Made::Ask(ask) => return Ok(json!({ "ask": ask, "place": place })),
+            Made::Chat(made) => *made,
+        };
+        *self.held.lock().unwrap() = Some(made.chat.session.clone());
+        let mut summary = self.held_summary(&made.chat);
+        // What the send did: files kept back because the computer changed them, or none sent
+        // because work runs in the copy there.
+        summary["copy"] = made.sent;
+        self.emit(json!({ "kind": "summary", "summary": summary }));
+        self.emit_working();
+        Ok(summary)
+    }
+
+    /// A new chat of `project` held on `place`, after the project's copy went there.
+    pub(super) async fn held_make(
+        self: &Arc<Self>,
+        place: &str,
+        project: &ark_sdk::prelude::Project,
+        model: &str,
+        big: bool,
+    ) -> anyhow::Result<Made> {
         let probe = HeldChat {
             place: place.to_string(),
             ..Default::default()
@@ -191,7 +225,6 @@ impl Host {
         if let Some(why) = self.unreachable(&probe) {
             anyhow::bail!(why);
         }
-        let project = self.project()?;
         // Its store id names its chats' questions and its copy: a computer that does not say it
         // runs an older version.
         let runtime = self.links.runtime_id(place).ok_or_else(|| {
@@ -199,9 +232,9 @@ impl Host {
         })?;
         self.ensure_relay(place).await;
         // The project goes first, so the chat finds it there.
-        let sent = self.copy_send(place, &project, big).await?;
+        let sent = self.copy_send(place, project, big).await?;
         if !sent["ask"].is_null() {
-            return Ok(json!({ "ask": sent["ask"], "place": place }));
+            return Ok(Made::Ask(sent["ask"].clone()));
         }
         let v = self
             .links
@@ -237,20 +270,13 @@ impl Host {
         };
         held::keep(&self.engine, &chat)?;
         self.held_live.lock().unwrap().insert(
-            session.clone(),
+            session,
             HeldLive {
                 summary: v["summary"].clone(),
                 ..Default::default()
             },
         );
-        *self.held.lock().unwrap() = Some(session);
-        let mut summary = self.held_summary(&chat);
-        // What the send did: files kept back because the computer changed them, or none sent
-        // because work runs in the copy there.
-        summary["copy"] = sent;
-        self.emit(json!({ "kind": "summary", "summary": summary }));
-        self.emit_working();
-        Ok(summary)
+        Ok(Made::Chat(Box::new(MadeChat { chat, sent })))
     }
 
     /// Show the held chat `chat`: what its computer has of it now, or its record when that
@@ -856,6 +882,10 @@ impl Host {
                 self.leave_held().await;
                 None
             }
+            // The sidebar's agents and what moves or ends one are this runtime's, whichever
+            // chat the window shows.
+            "agents" if params["all"].as_bool() == Some(true) => None,
+            "agent_move" | "agent_end" | "agent_restore" => None,
             // Explicitly window-local or relationship-wide. This is the complete fallthrough
             // set while a held chat is shown; adding a host method requires classifying it.
             "hello"

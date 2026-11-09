@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Group chats (ADR 0113 draft): window calls `groups`, `group_create`, `group_update`, `group_delete`, `group_messages`, `group_send` and event `ark:group`. A message goes to the `@Name` members, else the only member, else one router call, else the last speaker. Replies that name `@Other` hand on, at most 6 per message. The rules are in `ark_interact::groups`.
+
 ## [0.43.1] - 2026-11-09
 
 Name a new agent, delete one (ADR 0112 amendment).

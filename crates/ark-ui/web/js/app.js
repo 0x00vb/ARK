@@ -1512,7 +1512,7 @@ async function agentsSettled(entries) {
   if (none) {
     let start = $("#no-agents");
     if (!start) {
-      start = h("div.no-agents#no-agents", h("button.btn.primary.no-agents-new", { type: "button", onclick: (e) => void newAgent(e.currentTarget) }, icon("plus"), "New agent"));
+      start = h("div.no-agents", { id: "no-agents" }, h("button.btn.primary.no-agents-new", { type: "button", onclick: (e) => void newAgent(e.currentTarget) }, icon("plus"), "New agent"));
       $(".main").append(start);
     }
     return;
@@ -1542,6 +1542,8 @@ function setAgent(agent) {
 }
 
 const hasAgentView = () => [...registry.views.values()].some(view => view.agentConversation);
+/// The app's view of a group's chat (`groupConversation: true`), if it draws them.
+const groupView = () => [...registry.views.values()].find(view => view.groupConversation)?.id || null;
 
 /// ARK's chats that have a turn or are running their first, newest first, without hidden folders.
 async function arkChats() {
@@ -1564,6 +1566,11 @@ async function agentChats(entry) {
 /// in a chat tab of its own with `newTab` (⌘-click). An agent with no chat yet opens its first
 /// one, which becomes its default chat.
 async function openEntry(entry, { newTab = false } = {}) {
+  if (entry.group) {
+    if (!groupView()) return false;
+    await showView(groupView(), { id: entry.id });
+    return true;
+  }
   if (entry.ark) {
     const newest = (await arkChats())[0];
     if (!newest) return arkNewChat();
@@ -2021,6 +2028,7 @@ function onEvent(msg) {
       break;
     case "ext":
       dispatchExt(msg.name, msg.payload);
+      if (msg.name === "ark:group") refreshAgentsSoon();
       break;
     case "resync":
       boot(true);
@@ -2176,6 +2184,8 @@ async function showView(id, params) {
   entry.ctl.show?.();
   if (v.agentConversation && params?.name) setAgent({ name: params.name, project: params.project || location.project });
   else if (v.agentConversation && params?.draft) setAgent(null);
+  // A group's chat: its tile is the current one.
+  if (v.groupConversation && params?.id) { state.agent = null; sidebar?.markAgent(`group:${params.id}`); }
   if (id !== SETTINGS) state.homeView = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
@@ -2870,6 +2880,12 @@ async function start() {
     runtime: () => state.runtime,
     hasAgents: hasAgentView,
     loadAgents: () => transport.call("agents", { all: true }),
+    loadGroups: () => groupView() ? transport.call("groups") : Promise.resolve([]),
+    deleteGroup: async (entry) => {
+      try { await transport.call("group_delete", { id: entry.id }); } catch (error) { toast(error.message || String(error)); return; }
+      if (state.view && state.view === groupView()) showConversation();
+      sidebar.refresh();
+    },
     assistant: () => registry.newAgent?.assistant !== false,
     arkName,
     arkFace,

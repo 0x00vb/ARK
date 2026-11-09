@@ -95,16 +95,16 @@ export class Identity {
           : h("div.identity-face", identity.avatar(72)),
         h("h2.identity-title", identity.name),
         identity.description ? h("p.identity-description", identity.description) : null,
+        h("button.identity-row", {
+          type: "button", disabled: !identity.rename, "data-row": "name", "aria-label": `Name: ${named}${identity.rename ? ", rename" : ""}`,
+          onclick: (event) => this.rename(event.currentTarget, latest, named),
+        }, h("span.identity-row-label", "Name"), h("span.identity-row-value", h("span", named))),
         model ? h("button.identity-row", {
           type: "button", "aria-haspopup": "menu", disabled: !!model.disabled, title: model.disabled ? model.disabledReason : null, "data-row": "model",
           onclick: (event) => latest?.model?.open(event.currentTarget),
         },
           h("span.identity-row-label", "Model"),
           h("span.identity-row-value", model.mark?.() || null, h("span", model.label), icon("chevron-down"))) : null,
-        h("button.identity-row", {
-          type: "button", disabled: !identity.rename, "data-row": "name", "aria-label": `Name: ${named}${identity.rename ? ", rename" : ""}`,
-          onclick: (event) => this.rename(event.currentTarget, latest, named),
-        }, h("span.identity-row-label", "Name"), h("span.identity-row-value", h("span", named))),
         computer ? h("button.identity-row", {
           type: "button", "aria-haspopup": computer.open ? "menu" : null, disabled: !computer.open, "data-row": "computer",
           onclick: (event) => latest?.computer?.open?.(event.currentTarget),

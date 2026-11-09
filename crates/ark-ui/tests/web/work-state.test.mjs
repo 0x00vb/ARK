@@ -482,8 +482,8 @@ test("the title bar names who the chat is with and opens the details in the side
   await panel.waitFor();
   await shoot(page, "calm-details-pane");
   assert.equal(await panel.locator("h2").textContent(), "ARK");
-  assert.deepEqual(await panel.locator(".identity-row-label").allTextContents(), ["Model", "Name", "Folder"]);
-  assert.deepEqual((await panel.locator(".identity-row-value").allTextContents()).slice(1), ["Quarterly review", "Operations"]);
+  assert.deepEqual(await panel.locator(".identity-row-label").allTextContents(), ["Name", "Model", "Folder"]);
+  assert.deepEqual((await panel.locator(".identity-row-value").allTextContents()).filter((_, i) => i !== 1), ["Quarterly review", "Operations"]);
   const model = panel.locator('.identity-row[data-row="model"]');
   assert.equal(await model.isEnabled(), true);
   assert.equal(await chip.getAttribute("aria-expanded"), "true");

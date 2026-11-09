@@ -49,6 +49,8 @@ import { setAgentIdentity } from "./dom.js";
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })
 //     One consumer handler for explicit New chat actions. createChat keeps the captured origin.
+//   ark.view({ ..., groupConversation: true }) draws a group's chat (`{ id }`): the sidebar then
+//     lists the runtime's groups (`groups`) as tiles that open it.
 //   ark.newAgent({ open({ location, anchor }), assistant })
 //     What the sidebar's + does: make an agent and open its chat. Without it, + starts a chat.
 //     `assistant: false` leaves the built-in assistant out of the sidebar: the window opens

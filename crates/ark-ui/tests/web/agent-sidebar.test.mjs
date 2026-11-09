@@ -95,6 +95,7 @@ async function fixture(run, { agentView = true, agents = agentRows(4), general =
       return structuredClone(agents);
     },
     transcript: () => [],
+    groups: () => [{ id: "g1", name: "Launch team", members: [{ project: "a", agent: "Mia" }, { project: "b", agent: "Writer" }], updated_ms: now - 3 * HOUR }],
     places: () => ({ here: "This computer", places: [] }),
     attention_all: () => ({ items: [], notes: [], away: [] }),
     plugins: () => [], computers: () => [],
@@ -669,3 +670,37 @@ test("screenshots of each sidebar state", { skip: !shots }, async () => {
     await both(page, "narrow-390-drawer");
   }, { width: 390, coarse: true, agents: agentRows(12, { asking: ["Scout"], working: ["Mia"] }) });
 });
+
+test("an app with only its agents: no ARK tile, the latest agent opens, groups are tiles, none left offers New agent", () => fixture(async (page, { calls }) => {
+  await page.evaluate(() => {
+    window.ark.view({ id: "group-chat", title: "Group", groupConversation: true, render(el, params) {
+      el.textContent = `Group ${params.id}`;
+      return { update(next) { el.textContent = `Group ${next.id}`; } };
+    } });
+    window.ark.newAgent({ assistant: false, open({ anchor }) { window.madeFrom = anchor?.id || anchor?.className; } });
+    window.ark.refreshSidebar();
+  });
+  await page.waitForFunction(() => !document.querySelector('#agents [data-key="ark"]') && document.querySelector('#agents [data-key="group:g1"]'));
+  assert.equal((await keys(page)).some(([, key]) => key === "ark"), false, "no assistant tile");
+  // At start the latest agent opens in place of the assistant's chat.
+  await page.waitForFunction(() => window.opened.some((o) => o.name === "Mia"));
+  assert.equal(await agent(page, "a", "Mia").getAttribute("aria-current"), "true");
+  // A group's tile opens the app's group view and becomes the current one.
+  await page.locator('#agents .agent-btn[data-key="group:g1"]').click();
+  await page.getByText("Group g1").waitFor();
+  assert.equal(await page.locator('#agents .agent-btn[data-key="group:g1"]').getAttribute("aria-current"), "true");
+  assert.ok(calls.some((call) => call.method === "groups"));
+}, { agents: agentRows(3) }));
+
+test("an app with only its agents and none yet shows one New agent button", () => fixture(async (page) => {
+  await page.evaluate(() => {
+    window.ark.newAgent({ assistant: false, open({ anchor }) { window.madeFrom = anchor?.className; } });
+    window.ark.refreshSidebar();
+  });
+  const start = page.locator("#no-agents button");
+  await start.waitFor();
+  assert.equal((await start.innerText()).trim(), "New agent");
+  await start.click();
+  await page.waitForFunction(() => /no-agents-new/.test(window.madeFrom || ""));
+  await page.waitForFunction(() => !document.querySelector('#agents [data-key="ark"]'), null, { timeout: 2000 });
+}, { agents: [] }));

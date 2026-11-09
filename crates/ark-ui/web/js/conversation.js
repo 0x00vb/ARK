@@ -146,6 +146,7 @@ export class Thread {
     // Work still going keeps its block open, as a live turn does.
     if (t.working) turn.since(t.working.label, t.working.since);
     else turn.closeBlocks();
+    if (t.author) turn.agent.prepend(h("div.turn-author", t.author.avatar?.(20) || null, h("span", t.author.name)));
     if (t.status) turn.notice(t.status, "muted");
     // A replayed "stopped" activity already said so, as it did live.
     const stopped = acts.some((a) => a.kind === "stopped");

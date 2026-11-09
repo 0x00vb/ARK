@@ -2602,3 +2602,12 @@ button.ticket-property:hover { background: var(--hover); }
 .identity-pet { border: 0; background: none; padding: 0; cursor: pointer; border-radius: 50%; transition: scale 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .identity-pet:active { scale: 0.96; }
 .identity-pet:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+
+/* A reply in a view several write in: the writer's face and name above it. */
+.turn-author { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 13px; font-weight: 500; color: var(--text-2); }
+.turn > .user:empty { display: none; }
+
+/* A group's tile: two members' faces, overlapped. */
+.group-face { position: relative; display: inline-block; flex: none; }
+.group-face > :first-child { position: absolute; left: 0; top: 0; }
+.group-face > :nth-child(2) { position: absolute; right: 0; bottom: 0; }

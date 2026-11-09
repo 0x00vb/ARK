@@ -203,9 +203,12 @@ export class Sidebar {
       this.draw();
       return;
     }
+    // Groups: several agents in one chat. A runtime without them lists none.
+    const groups = await this.nav.loadGroups?.().catch(() => []);
     if (gen !== this.gen) return;
     clearTimeout(this.loading);
     this.placeholders = false;
+    this.groups = Array.isArray(groups) ? groups.filter((g) => g && typeof g.id === "string") : [];
     const first = this.agents === null;
     this.failed = false;
     this.agents = Array.isArray(rows) ? rows.filter((row) => row && typeof row.name === "string" && typeof row.project === "string") : [];
@@ -224,8 +227,13 @@ export class Sidebar {
     const agents = shown.map((agent) => ({
       ...agent, look: typeof agent.look === "string" ? agent.look : "", key: agentKey(agent.project, agent.name), label: label(agent), twin: seen.get(label(agent).toLocaleLowerCase()) > 1,
     }));
+    const looks = new Map(shown.map((agent) => [agentKey(agent.project, agent.name), agent.look || ""]));
+    const groups = (this.groups || []).map((group) => ({
+      key: `group:${group.id}`, group: true, id: group.id, name: group.name, label: group.name, updated_ms: group.updated_ms,
+      members: (group.members || []).map((m) => ({ ...m, look: looks.get(agentKey(m.project, m.agent)) || "" })),
+    }));
     // An app whose + makes agents may leave the built-in assistant out: only its agents show.
-    return this.nav.assistant() ? [ark, ...agents] : agents;
+    return this.nav.assistant() ? [ark, ...agents, ...groups] : [...agents, ...groups];
   }
 
   pins() {
@@ -324,6 +332,11 @@ export class Sidebar {
   }
 
   face(entry, size) {
+    if (entry.group) {
+      const small = Math.round(size * 0.7);
+      return h("span.group-face", { style: { width: `${size}px`, height: `${size}px` } },
+        ...entry.members.slice(0, 2).map((m) => agentFace(m.agent, small, m.look)));
+    }
     return entry.ark ? this.nav.arkFace(size) : agentFace(entry.name, size, entry.look);
   }
 
@@ -332,7 +345,7 @@ export class Sidebar {
     const mark = this.mark(entry);
     const sub = entry.twin ? entry.project_name : kind === "row" ? entry.preview : null;
     const end = kind === "row" ? (mark === "asking" ? "Needs you" : entry.updated_ms ? ago(entry.updated_ms) : "") : "";
-    const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : entry.look]);
+    const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : entry.group ? entry.members.map((m) => m.look) : entry.look]);
     item.dataset.kind = kind;
     button.dataset.name = entry.label.toLocaleLowerCase();
     if (button.dataset.signature !== signature) {
@@ -421,6 +434,7 @@ export class Sidebar {
   menu(key) {
     const entry = this.find(key);
     if (!entry || !this.online) return [];
+    if (entry.group) return [{ label: "Delete", run: () => this.nav.deleteGroup?.(entry) }];
     const pinned = !entry.ark && this.pins().some(([project, name]) => project === entry.project && name === entry.name);
     return [
       !entry.program && { label: "New chat", run: () => this.nav.newChatWith(entry) },

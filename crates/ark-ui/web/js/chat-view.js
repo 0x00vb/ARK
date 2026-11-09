@@ -4,7 +4,8 @@
 // `turns` take the shape of `chat_read`'s transcript, plus what a run that is not this chat's
 // own may need: `key` (stable per turn, so only a changed turn redraws), `note` (a line under
 // the person's message), `working: { label, since }` (still going, since a time in ms),
-// `status` (a muted line for a run that waits) and `after` (an app's node under the reply).
+// `status` (a muted line for a run that waits), `after` (an app's node under the reply) and
+// `author` (`{ name, avatar(size) }`: who wrote the reply, when several write in one view).
 // Two fields change in place, without drawing the turn again: `streaming` (the text being
 // written now) and `approvals` (questions the run waits on, as `ark:approval` brought them).
 // `call(key, id)` loads a tool call's detail so its row opens; `stop()` is the chat's Stop.

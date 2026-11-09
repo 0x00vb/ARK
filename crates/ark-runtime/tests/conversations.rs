@@ -228,3 +228,24 @@ fn offered_only_when_another_conversation_has_turns() {
     chat(&engine, &p.id, "earlier", &[("hi", "hello")], |_| {});
     assert!(check());
 }
+
+#[test]
+fn the_model_sees_the_excerpts_and_the_chat_it_read_whole() {
+    use ark_runtime::conversations::{distiller, READ, SEARCH};
+    let d = distiller();
+    let found = serde_json::json!({"hits": [{"conversation": "c-1", "title": "Garden guide", "date": "2026-11-09", "snippet": "the printed copy costs 7 euros and the launch is on March 14", "turn": 0}]});
+    let (text, ids) = d(SEARCH, &found).expect("search is shown");
+    assert!(
+        text.contains("7 euros") && text.contains("March 14") && text.contains("c-1"),
+        "{text}"
+    );
+    assert_eq!(ids, ["c-1"]);
+    let read = serde_json::json!({"conversation": "c-1", "title": "Garden guide", "date": "2026-11-09", "turns": 1, "text": "[turn 0] Person: the printed copy costs 7 euros"});
+    let (text, _) = d(READ, &read).expect("read is shown");
+    assert!(
+        text.ends_with("Person: the printed copy costs 7 euros"),
+        "{text}"
+    );
+    let (none, _) = d(SEARCH, &serde_json::json!({"hits": []})).unwrap();
+    assert_eq!(none, "No earlier chat matches.");
+}

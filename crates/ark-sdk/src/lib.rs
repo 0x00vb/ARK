@@ -539,7 +539,7 @@ impl Ark {
             .map(|g| g.text())
             .unwrap_or_else(|| input.to_string());
         let (engine, rules) = self.with_rules(&project, &execution_project, &goal_text)?;
-        let engine = self.with_conversations(engine, session)?;
+        let (engine, recall) = self.with_conversations(engine, session)?;
         let (engine, catalog) = self.with_skills(engine, &project);
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(&opts.tools, &router, &owner);
@@ -550,6 +550,15 @@ impl Ark {
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
             p.core_actions.push(skills::READ.into());
+        }
+        if recall {
+            // An app's capability catalog does not name it, so it is loaded, not discovered.
+            let p = profile.to_mut();
+            p.distillers.push(ark_runtime::conversations::distiller());
+            p.core_actions.extend([
+                ark_runtime::conversations::SEARCH.into(),
+                ark_runtime::conversations::READ.into(),
+            ]);
         }
         // What work this chat set up has posted since its last answer.
         session.read_posts(&self.engine)?;
@@ -729,7 +738,7 @@ impl Ark {
         &self,
         engine: Arc<Engine>,
         session: &Session,
-    ) -> Result<Arc<Engine>, ArkError> {
+    ) -> Result<(Arc<Engine>, bool), ArkError> {
         use ark_runtime::conversations;
         if !conversations::is_conversation(session.record())
             || !conversations::has_other_conversations(
@@ -738,16 +747,15 @@ impl Ark {
                 session.id(),
             )?
         {
-            return Ok(engine);
+            return Ok((engine, false));
         }
         let tool = conversations::ConversationsTool::new(
             engine.store.clone(),
             session.project().clone(),
             session.id().clone(),
         );
-        Ok(Arc::new(
-            engine.scoped(engine.registry.clone().with(Arc::new(tool))),
-        ))
+        let engine = Arc::new(engine.scoped(engine.registry.clone().with(Arc::new(tool))));
+        Ok((engine, true))
     }
 
     /// The skills a conversation turn may read, and the engine that offers `skills.read` for
@@ -948,7 +956,7 @@ impl Ark {
             .unwrap_or_else(|| task.to_string());
         let router = self.session_router(session).await?;
         let (engine, rules) = self.with_rules(session.project(), &execution_project, &query)?;
-        let engine = self.with_conversations(engine, session)?;
+        let (engine, recall) = self.with_conversations(engine, session)?;
         let (engine, catalog) = self.with_skills(engine, session.project());
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(tools, &router, &owner);
@@ -958,6 +966,14 @@ impl Ark {
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
             p.core_actions.push(skills::READ.into());
+        }
+        if recall {
+            let p = profile.to_mut();
+            p.distillers.push(ark_runtime::conversations::distiller());
+            p.core_actions.extend([
+                ark_runtime::conversations::SEARCH.into(),
+                ark_runtime::conversations::READ.into(),
+            ]);
         }
         Ok(self
             .harness_with(router)
@@ -1632,6 +1648,59 @@ mod tests {
         .await
         .unwrap();
         assert!(offered(3));
+    }
+
+    #[tokio::test]
+    async fn past_conversations_reach_the_model_when_the_app_declares_capabilities() {
+        use ark_runtime::conversations::{READ, SEARCH};
+        let dir = tempfile::tempdir().unwrap();
+        let model = Arc::new(MockProvider::new("recall-catalog", vec![]));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(model.clone())
+            .planner(false)
+            .critic(false)
+            .profile(
+                AgentProfile::builder()
+                    .capabilities(CapabilityCatalog::new([CapabilitySpec::new(
+                        "drafting",
+                        "write prose",
+                    )]))
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let project = ark.create_project("home", "").unwrap();
+        let mut first = ark.start_session(&project.id).unwrap();
+        ark.ask_session(&mut first, "hello", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        let tools = |n: usize| -> Vec<String> {
+            model.recorded()[n]
+                .tools
+                .iter()
+                .map(|t| t.name.clone())
+                .collect()
+        };
+        assert!(
+            !tools(0).iter().any(|t| t == SEARCH),
+            "a lone chat loads nothing"
+        );
+        let mut second = ark.start_session(&project.id).unwrap();
+        ark.ask_session(
+            &mut second,
+            "what did we say",
+            TurnOptions::default(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let last = model.recorded().len() - 1;
+        let loaded = tools(last);
+        assert!(
+            loaded.iter().any(|t| t == SEARCH) && loaded.iter().any(|t| t == READ),
+            "the model is given both: {loaded:?}"
+        );
     }
 
     struct NoBlobs;

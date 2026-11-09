@@ -3790,6 +3790,7 @@ impl Inner {
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
         }
+        let mut recall = false;
         // A person's chat with the agent shares its memory and can look back at its other chats.
         // A task another agent delegated is not that chat: it works from its brief alone.
         if task.submission.is_none() && task.run.is_none() && task.origin == Origin::External {
@@ -3809,13 +3810,16 @@ impl Inner {
                     &scope,
                     &current,
                 ) {
-                    Ok(true) => registry.register(Arc::new(
-                        ark_runtime::conversations::ConversationsTool::new(
-                            self.engine.store.clone(),
-                            scope.clone(),
-                            current,
-                        ),
-                    )),
+                    Ok(true) => {
+                        recall = true;
+                        registry.register(Arc::new(
+                            ark_runtime::conversations::ConversationsTool::new(
+                                self.engine.store.clone(),
+                                scope.clone(),
+                                current,
+                            ),
+                        ))
+                    }
                     Ok(false) => {}
                     Err(e) => return Attempt::Failed(e.to_string()),
                 }
@@ -3837,6 +3841,16 @@ impl Inner {
             // The catalog says to call it, so it is loaded, not left to discovery.
             profile.distillers.push(skills::distiller());
             profile.core_actions.push(skills::READ.into());
+        }
+        if recall {
+            // An app's capability catalog does not name it, so it is loaded, not discovered.
+            profile
+                .distillers
+                .push(ark_runtime::conversations::distiller());
+            profile.core_actions.extend([
+                ark_runtime::conversations::SEARCH.into(),
+                ark_runtime::conversations::READ.into(),
+            ]);
         }
         for d in per_agent_distillers {
             profile.distillers.push(d);

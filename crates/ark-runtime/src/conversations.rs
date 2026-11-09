@@ -8,7 +8,7 @@ use ark_store::Store;
 use ark_tools::{ActionOutput, Adapter, AdapterError, RunCtx};
 use serde_json::{json, Value};
 
-use crate::{memory::words, AgentError, SessionRecord};
+use crate::{distill::Distiller, memory::words, AgentError, SessionRecord};
 
 pub const SEARCH: &str = "conversations.search";
 pub const READ: &str = "conversations.read";
@@ -409,4 +409,55 @@ fn fitted(mut text: String, cap: usize, wrap: impl Fn(&str) -> Value) -> Value {
         }
         text = window(&text, 0, len.saturating_sub(size - cap));
     }
+}
+
+/// What the model sees of its other chats: the excerpts and the chat it read, whole. Both are
+/// bounded where they are made (2,000 and 4,000 characters), so nothing more is cut here.
+pub fn distiller() -> Distiller {
+    Arc::new(|action: &str, out: &Value| {
+        let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        match action {
+            SEARCH => {
+                let hits = out
+                    .get("hits")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if hits.is_empty() {
+                    return Some(("No earlier chat matches.".to_string(), Vec::new()));
+                }
+                let mut text =
+                    String::from("Earlier chats that match (conversations.read opens one):\n");
+                let mut ids = Vec::new();
+                for hit in &hits {
+                    let turn = hit
+                        .get("turn")
+                        .and_then(Value::as_u64)
+                        .map(|t| format!(", turn {t}"))
+                        .unwrap_or_default();
+                    text.push_str(&format!(
+                        "- {} \"{}\" ({}{}): {}\n",
+                        s(hit, "conversation"),
+                        s(hit, "title"),
+                        s(hit, "date"),
+                        turn,
+                        s(hit, "snippet")
+                    ));
+                    ids.push(s(hit, "conversation"));
+                }
+                Some((text, ids))
+            }
+            READ => Some((
+                format!(
+                    "Chat {} \"{}\" ({}):\n{}",
+                    s(out, "conversation"),
+                    s(out, "title"),
+                    s(out, "date"),
+                    s(out, "text")
+                ),
+                vec![s(out, "conversation")],
+            )),
+            _ => None,
+        }
+    })
 }

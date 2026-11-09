@@ -79,6 +79,7 @@ const MAX_IMAGES_BYTES: usize = 20_000_000;
 mod copying;
 mod groups;
 mod held;
+mod placed;
 
 const DICTATION_CHUNK: usize = 256 * 1024;
 const DICTATION_MAX: usize = 8 * 60 * 16_000 * 2;
@@ -4949,7 +4950,8 @@ impl Host {
                     ark_interact::ark_orchestrate::agent_contacts(&self.engine.store, &project)?,
                 )?)
             }
-            "agents" if params["all"].as_bool() == Some(true) => self.all_agents(),
+            "agents" if params["all"].as_bool() == Some(true) => self.all_agents_placed().await,
+            "agent_move" => self.agent_move(&params).await,
             // An agent the sidebar lists, in its own folder whichever chat is shown: Delete
             // ends it (its chats stay), Undo brings it back as it was (ADR 0112).
             "groups" | "group_create" | "group_update" | "group_delete" | "group_messages"
@@ -4957,6 +4959,9 @@ impl Host {
             "agent_end" | "agent_restore" => {
                 let project = s("project");
                 let agent = s("agent");
+                if method == "agent_end" && self.placed_end(&project, &agent).await? {
+                    return Ok(json!({}));
+                }
                 let top = self
                     .engine
                     .store

@@ -14,6 +14,7 @@
 ### Changed
 
 - The details pane's Title row is now Name: it renames the agent (or the chat when there is no agent).
+- An agent runs on a computer the person picks (ADR 0114 draft): window call `agent_move {agent, project, place}`; `agents {all}` rows of agents on other computers carry `place`, `session` and `location`; they work through the held-chat resource routes, and show as remembered when their computer does not answer.
 
 ## [0.43.1] - 2026-11-09
 

@@ -143,10 +143,16 @@ const api = {
   /// conversation }` (another folder: the window goes there first), or, as before, a session
   /// that opens as a plain chat when no app draws agents' chats.
   async openAgentChat(name, options) {
-    const { project, conversation, fallback } = options && typeof options === "object" ? options : { fallback: options };
+    const { project, conversation, session, fallback } = options && typeof options === "object" ? options : { fallback: options };
     const view = [...registry.views.values()].find(view => view.agentConversation);
     if (!view) return fallback ? this.openSession(fallback) : false;
     const params = { name, ...(project ? { project } : {}), ...(conversation ? { conversation } : {}) };
+    if (session) {
+      // An agent on another computer: its chat there puts the window at its project.
+      try { await openChatTab(session); } catch (error) { toast(error.message); return false; }
+      await showView(view.id, params);
+      return true;
+    }
     if (project) {
       try { await arriveAt(project); } catch (error) { toast(error.message); return false; }
       await showView(view.id, params);
@@ -1582,6 +1588,7 @@ async function openEntry(entry, { newTab = false } = {}) {
     await api.openSession(newest.id);
     return true;
   }
+  if (entry.session) return api.openAgentChat(entry.name, { project: entry.project, session: entry.session });
   const latest = (await agentChats(entry))[0];
   // The default chat opens without an id: the view knows it before it lists the agent's chats.
   return api.openAgentChat(entry.name, { project: entry.project, conversation: latest && !latest.default ? latest.id : undefined });
@@ -1593,6 +1600,7 @@ async function newChatWith(entry) {
   if ((!entry || entry.ark) && !assistant()) return newAgent();
   if (!entry || entry.ark) return arkNewChat();
   if (entry.program) return api.openAgentChat(entry.name, { project: entry.project });
+  if (entry.session) return api.openAgentChat(entry.name, { project: entry.project, session: entry.session });
   let chats;
   try { chats = await agentChats(entry); } catch (error) { toast(error.message); return false; }
   return api.openAgentChat(entry.name, { project: entry.project, ...(chats.some(chat => chat.default) ? { conversation: "new" } : {}) });

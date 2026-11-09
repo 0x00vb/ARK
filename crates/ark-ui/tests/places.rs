@@ -97,7 +97,13 @@ fn app(dir: &std::path::Path, who: &'static str, saves: Arc<AtomicUsize>) -> App
         .critic(false)
         .build()
         .unwrap();
-    App::new("Test").ark(ark)
+    App::new("Test").ark(ark).orchestrate(|ark, project, gate| {
+        Ok(
+            ark_interact::ark_orchestrate::Orchestrator::builder(ark, project)
+                .approvals(gate)
+                .build()?,
+        )
+    })
 }
 
 fn app_with_computer(
@@ -2286,4 +2292,218 @@ fn computer_kept_reports_a_store_held_by_another_process() {
     for name in ["kept", "removed"] {
         assert!(ark_ui::computers::kept(dir.path(), name).unwrap());
     }
+}
+
+fn row_of(all: &Value, name: &str) -> Option<Value> {
+    all.as_array()?.iter().find(|a| a["name"] == name).cloned()
+}
+
+async fn project_of(host: &Arc<Host>) -> String {
+    host.call("summary", json!({})).await.unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// B on a runtime of its own, so that it can go away: (its port, its token, stop).
+fn away_server(
+    dir: &std::path::Path,
+) -> (
+    u16,
+    String,
+    tokio::sync::oneshot::Sender<()>,
+    std::thread::JoinHandle<()>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let dir = dir.to_path_buf();
+    let thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let (_b, port, token) = server(&dir, Arc::new(AtomicUsize::new(0))).await;
+            tx.send((port, token)).unwrap();
+            stopped.await.ok();
+        });
+        rt.shutdown_background();
+    });
+    let (port, token) = rx.recv().unwrap();
+    (port, token, stop, thread)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_moved_to_the_server_runs_there_and_comes_back() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let project = project_of(&a).await;
+    resource_call(
+        &a,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"scout","title":"Scout","look":"pebble-pink","role":"scouts"}}),
+    )
+    .await
+    .unwrap();
+
+    let moved = json!({"agent":"scout","project":project,"place":"vps"});
+    a.call("agent_move", moved.clone()).await.unwrap();
+    // Asking again changes nothing.
+    a.call("agent_move", moved).await.unwrap();
+
+    let all = a.call("agents", json!({"all":true})).await.unwrap();
+    let rows: Vec<_> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["name"] == "scout")
+        .collect();
+    assert_eq!(rows.len(), 1, "listed once: {all}");
+    let row = rows[0];
+    assert_eq!(row["place"], "vps", "{row}");
+    assert_eq!(row["title"], "Scout");
+    assert_eq!(row["look"], "pebble-pink");
+    assert_eq!(row["project"], project.as_str());
+    assert!(
+        row["location"]["runtime"].as_str().unwrap().len() > 8,
+        "{row}"
+    );
+    assert!(row_of(
+        &b.call("agents", json!({"all":true})).await.unwrap(),
+        "scout"
+    )
+    .is_some());
+
+    // Opened from the row, the agent takes a message and answers from there.
+    a.call("open_session", json!({"id": row["session"]}))
+        .await
+        .unwrap();
+    let sent = resource_call(
+        &a,
+        "project",
+        "submit_task",
+        "",
+        json!({"agent":"scout","task":{"objective":"hi"}}),
+    )
+    .await
+    .unwrap();
+    let task = sent["task"].as_str().unwrap().to_string();
+    until("the task to finish on B", async || {
+        resource_call(&a, "project", "task", "", json!({"task": task}))
+            .await
+            .map(|d| d["task"]["state"] == "done")
+            .unwrap_or(false)
+    })
+    .await;
+    let detail = resource_call(&a, "project", "task", "", json!({"task": task}))
+        .await
+        .unwrap();
+    assert!(
+        detail.to_string().contains("Hello from B."),
+        "B's model answered: {detail}"
+    );
+
+    a.call(
+        "agent_move",
+        json!({"agent":"scout","project":project,"place":null}),
+    )
+    .await
+    .unwrap();
+    let all = a.call("agents", json!({"all":true})).await.unwrap();
+    let row = row_of(&all, "scout").expect("back here");
+    assert!(row["place"].is_null(), "{row}");
+    assert_eq!(row["title"], "Scout");
+    assert!(
+        row_of(
+            &b.call("agents", json!({"all":true})).await.unwrap(),
+            "scout"
+        )
+        .is_none(),
+        "it ended on B"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_does_not_move_to_a_server_that_does_not_answer() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (port, token, stop, thread) = away_server(dir_b.path());
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let project = project_of(&a).await;
+    resource_call(
+        &a,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"scout"}}),
+    )
+    .await
+    .unwrap();
+    stop.send(()).unwrap();
+    thread.join().unwrap();
+    until("B to count as away", async || {
+        a.links().state("vps") != Some(ark_interact::links::State::Ok)
+    })
+    .await;
+
+    let e = a
+        .call(
+            "agent_move",
+            json!({"agent":"scout","project":project,"place":"vps"}),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert_eq!(e, "vps is not answering");
+    let all = a.call("agents", json!({"all":true})).await.unwrap();
+    let row = row_of(&all, "scout").expect("still here");
+    assert!(row["place"].is_null(), "{row}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_agent_stays_listed_while_its_server_is_away() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (port, token, stop, thread) = away_server(dir_b.path());
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let project = project_of(&a).await;
+    resource_call(
+        &a,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"scout","title":"Scout"}}),
+    )
+    .await
+    .unwrap();
+    a.call(
+        "agent_move",
+        json!({"agent":"scout","project":project,"place":"vps"}),
+    )
+    .await
+    .unwrap();
+    stop.send(()).unwrap();
+    thread.join().unwrap();
+    until("B to count as away", async || {
+        a.links().state("vps") != Some(ark_interact::links::State::Ok)
+    })
+    .await;
+
+    let all = a.call("agents", json!({"all":true})).await.unwrap();
+    let row = row_of(&all, "scout").expect("listed from what A remembers");
+    assert_eq!(row["place"], "vps", "{row}");
+    assert_eq!(row["title"], "Scout");
+    let e = a
+        .call(
+            "agent_move",
+            json!({"agent":"scout","project":project,"place":null}),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert_eq!(e, "vps is not answering");
+    let all = a.call("agents", json!({"all":true})).await.unwrap();
+    assert_eq!(
+        row_of(&all, "scout").unwrap()["place"],
+        "vps",
+        "nothing changed"
+    );
 }

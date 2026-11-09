@@ -423,7 +423,16 @@ export class Sidebar {
       !entry.program && { label: "New chat", run: () => this.nav.newChatWith(entry) },
       { label: "Chats", run: () => this.nav.history(entry) },
       !entry.ark && { label: pinned ? "Unpin" : "Pin", run: () => this.pin(entry, !pinned) },
+      ...(entry.ark ? [] : this.agentActions(entry)),
     ].filter(Boolean);
+  }
+
+  /// The app's `where: "agent"` actions for one agent's tile.
+  agentActions(entry) {
+    const ctx = { agent: { name: entry.name, project: entry.project, title: entry.label } };
+    return registry.actions
+      .filter((action) => action.where === "agent" && (!action.when || action.when(ctx)))
+      .map((action) => ({ label: action.label, run: () => action.run(ctx, window.ark) }));
   }
 
   pin(entry, on) {

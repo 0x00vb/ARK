@@ -42,7 +42,9 @@ import { setAgentIdentity } from "./dom.js";
 //                      `api.confirm(label)`: one local opening choice beside Cancel,
 //                      abort-safe, no saved grant.
 //   ark.toolRenderer({ match(action), render(el, call, api) })
-//   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
+//   ark.action({ id, label, icon, where: "artifact" | "palette" | "project" | "agent", when(ctx), run(ctx, api) })
+//                      `agent`: an item in an agent tile's menu (not ARK's); `ctx` is
+//                      `{ agent: { name, project, title } }`
 //                      `project`: an item in the chat's Folder menu (its details); `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })

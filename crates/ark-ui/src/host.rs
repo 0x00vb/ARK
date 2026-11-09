@@ -4946,6 +4946,31 @@ impl Host {
                 )?)
             }
             "agents" if params["all"].as_bool() == Some(true) => self.all_agents(),
+            // An agent the sidebar lists, in its own folder whichever chat is shown: Delete
+            // ends it (its chats stay), Undo brings it back as it was (ADR 0112).
+            "agent_end" | "agent_restore" => {
+                let project = s("project");
+                let agent = s("agent");
+                let top = self
+                    .engine
+                    .store
+                    .get_project(&ProjectId(project.clone()))?
+                    .filter(|p| p.parent.is_none())
+                    .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
+                let o = self.siblings.project_orchestrator(&top.id)?;
+                if method == "agent_end" {
+                    self.control_on(&o, Control::Terminate { agent }).await?;
+                } else {
+                    let record = o
+                        .agents()
+                        .into_iter()
+                        .find(|a| a.name == agent)
+                        .ok_or_else(|| anyhow::anyhow!("no agent `{agent}` in `{project}`"))?;
+                    self.control_on(&o, Control::Spawn(Box::new(record.spec)))
+                        .await?;
+                }
+                Ok(json!({}))
+            }
             "sessions" if params["general"].as_bool() == Some(true) => {
                 Ok(serde_json::to_value(self.general_sessions()?)?)
             }

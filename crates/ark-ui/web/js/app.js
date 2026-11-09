@@ -1310,13 +1310,24 @@ function retitle(key, title) {
 // ---- small UI services ----------------------------------------------------------------------
 
 let toastTimer;
-function toast(msg) {
+/// A short message. With `action` (`{ label, run }`), a button that undoes or follows up; the
+/// message then stays long enough to reach it.
+function toast(msg, { action } = {}) {
   const t = $("#toast");
   delete t.dataset.persist;
   t.textContent = msg;
+  const hide = () => {
+    t.dataset.show = "false";
+    delete t.dataset.persist;
+    t.querySelector("button")?.remove();
+  };
+  if (action) {
+    t.append(" ", h("button.link", { type: "button", onclick: () => { hide(); action.run(); } }, action.label));
+    t.dataset.persist = "";
+  }
   t.dataset.show = "true";
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.dataset.show = "false"), 3200);
+  toastTimer = setTimeout(hide, action ? 6000 : 3200);
 }
 
 function popover(anchor, children, { above = false, end = false, onClose } = {}) {

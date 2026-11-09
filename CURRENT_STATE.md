@@ -1,3 +1,17 @@
+# Core 0.43.1 release: name a new agent, delete one (2026-11-09)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.43.1 (2026-11-09), over v0.43.0 (497c8d3). `where: "agent"` actions, toast with Undo, window calls `agent_end` and `agent_restore` |
+| Change | ADR 0112 amendment: an app adds items to an agent tile's menu; `api.toast(msg, {action})`; top-level window calls end an agent in its own top folder (chats stay) and spawn its stored spec again. Chat-scoped resource ops still act only on their chat's folder (a test proves a chat ref cannot end another folder's agent) |
+| Found from | The owner's review of 0.43.0 / Desktop 0.14.0: + did not ask a name, pets did not show, no delete |
+| Gates | `scripts/ci.sh` passes. Web fixtures agent-sidebar, project-work, work-state: 72 of 72. Implementation review (qa): 1 blocker (authority widening, replaced by window calls), 4 majors, all fixed |
+| Dogfood | Desktop `--serve --tokens` on embedded assets and a copy of the owner's store: named agent created with its pet, Delete from Settings and across folders, Undo restores |
+| Release | Owner OK 2026-11-09 |
+| Consumer | Desktop 0.14.1 pins this tag |
+| Not done | Native window not opened by hand. iPhone does not draw `look` yet |
+| Evidence | `../board/evidence/agent-polish-20261109/` |
+
 # Core 0.43.0 release: one sidebar and an agent's look (2026-11-09)
 
 | Release state | Value |

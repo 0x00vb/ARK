@@ -38,6 +38,7 @@ impl Client {
             | "graph"
             | "suspend_agent"
             | "resume_agent"
+            | "terminate_agent"
             | "cancel_task"
             | "workspace"
             | "unschedule"
@@ -1064,4 +1065,75 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
     assert!(general
         .iter()
         .all(|r| r["project"] != scope.as_str() && r["id"] != conversation.as_str()));
+}
+
+#[tokio::test]
+async fn an_agent_in_another_folder_ends_and_comes_back_from_the_chat_in_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let first = host.call("summary", json!({})).await.unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    host.call("add_project", json!({"name":"Second project"}))
+        .await
+        .unwrap();
+    let second = host.call("summary", json!({})).await.unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    host.call(
+        "spawn_agent",
+        json!({"spec":{"name":"scout","title":"Scout","look":"pebble-pink"}}),
+    )
+    .await
+    .unwrap();
+    host.call("open_project", json!({"id":first}))
+        .await
+        .unwrap();
+    let listed = |all: Value| {
+        all.as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == "scout")
+            .cloned()
+    };
+
+    // A chat in the first folder holds no authority over the second folder's agents.
+    let _ = host
+        .call("terminate_agent", json!({"agent":"scout","project":second}))
+        .await;
+    let all = host.call("agents", json!({"all":true})).await.unwrap();
+    assert!(
+        listed(all.clone()).is_some(),
+        "a chat reference cannot end it: {all}"
+    );
+
+    host.call("agent_end", json!({"agent":"scout","project":second}))
+        .await
+        .unwrap();
+    let all = host.call("agents", json!({"all":true})).await.unwrap();
+    assert!(
+        listed(all.clone()).is_none(),
+        "an ended agent leaves the sidebar: {all}"
+    );
+
+    host.call("agent_restore", json!({"agent":"scout","project":second}))
+        .await
+        .unwrap();
+    let all = host.call("agents", json!({"all":true})).await.unwrap();
+    let row = listed(all.clone()).expect("Undo brings it back");
+    assert_eq!(row["look"], "pebble-pink", "with its pet: {row}");
+    assert_eq!(row["title"], "Scout");
+    assert_eq!(
+        host.call("summary", json!({})).await.unwrap()["project"]["id"],
+        first.as_str(),
+        "the window stayed in its folder"
+    );
+    for project in ["nowhere", ""] {
+        assert!(host
+            .call("agent_end", json!({"agent":"scout","project":project}))
+            .await
+            .is_err());
+    }
 }

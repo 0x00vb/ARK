@@ -35,3 +35,12 @@ the bottom, and an agent whose name and pet the person can change.
 - A Chat button no longer returns to the conversation from a view: an agent's tile does.
 - Apps that drew into the rail with `nav` views now draw into the sidebar foot; the call is the same.
 - An app that does not register `ark.newAgent` keeps + as New chat.
+
+## Amendment (2026-11-09): delete from the sidebar
+
+The owner asked to delete agents. A tile's menu lists the app's `where: "agent"` actions. Ending
+an agent in another folder goes through two window calls, `agent_end` and `agent_restore`
+(`{project, agent}`), on the host's runtime-wide entry like `agents {all}`. A first version let
+chat-scoped resource calls name another `project`; review rejected it, because a chat reference
+must act only on its own chat's folder (`resource.rs`, ADR 0052). Delete ends the agent (its
+chats and records stay); Undo restores the same spec. Hard delete is cut.

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-09
+
+Name a new agent, delete one (ADR 0112 amendment).
+
+### Added
+
+- `ark.action({ where: "agent" })`: an item in an agent tile's menu (not ARK's), with `{ agent: { name, project, title } }`.
+- `api.toast(message, { action: { label, run } })`: a toast with a button (Undo); it stays 6 seconds.
+- Window calls `agent_end {project, agent}` and `agent_restore {project, agent}`: end an agent the sidebar lists, in its own folder whichever chat is shown (its chats stay), and bring it back as it was. Chat-scoped resource calls keep acting only on their chat's folder.
+
 ## [0.43.0] - 2026-11-09
 
 One sidebar like the owner's reference (ADR 0112).

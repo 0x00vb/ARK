@@ -594,6 +594,31 @@ test("the sidebar edge resizes, remembers, hides past the minimum, and keys move
   assert.equal(await width(), start, "double click: the default width");
 }));
 
+test("an app's agent actions sit in an agent tile's menu, not ARK's, and a toast can offer Undo", () => fixture(async (page) => {
+  await page.evaluate(() => {
+    window.done = [];
+    window.ark.action({ id: "delete", label: "Delete", where: "agent", when: ({ agent }) => agent.name !== "Scout", run: ({ agent }, api) => {
+      window.done.push(agent);
+      api.toast(`Deleted ${agent.title}`, { action: { label: "Undo", run: () => window.done.push("undo") } });
+    } });
+  });
+  await page.locator('#agents .agent-btn[data-key="ark"]').click({ button: "right" });
+  assert.equal(await page.getByRole("menuitem", { name: "Delete", exact: true }).count(), 0, "not on ARK");
+  await page.keyboard.press("Escape");
+  await agent(page, "d", "Scout").click({ button: "right" });
+  assert.equal(await page.getByRole("menuitem", { name: "Delete", exact: true }).count(), 0, "when() hides it");
+  await page.keyboard.press("Escape");
+  await agent(page, "c", "Editor").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.done[0]), { name: "Editor", project: "c", title: "Editor" });
+  const toast = page.locator("#toast");
+  assert.match(await toast.innerText(), /Deleted Editor/);
+  await toast.getByRole("button", { name: "Undo" }).click();
+  assert.deepEqual(await page.evaluate(() => window.done.at(-1)), "undo");
+  await page.waitForFunction(() => document.querySelector("#toast").dataset.show === "false");
+  assert.equal(await toast.getByRole("button").count(), 0, "Undo runs once and leaves with the toast");
+}));
+
 test("screenshots of each sidebar state", { skip: !shots }, async () => {
   const brand = process.env.ARK_UI_BRAND_CSS;
   const both = async (page, name) => {

@@ -96,11 +96,25 @@
     },
     "AgentCreateInput": {
       "properties": {
+        "look": {
+          "description": "The pet the app draws (`pebble-green`), at most 64 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
         "role": {
           "type": "string"
+        },
+        "title": {
+          "description": "The name the person typed, shown in place of `name`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

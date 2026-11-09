@@ -115,15 +115,21 @@ public struct AgentConversations: Codable, Equatable, Sendable {
 }
 
 public struct AgentCreateInput: Codable, Equatable, Sendable {
+    public let look: String?
     public let name: String
     public let role: String
+    public let title: String?
 
     public init(
+        look: String? = nil,
         name: String,
-        role: String
+        role: String,
+        title: String? = nil
     ) {
+        self.look = look
         self.name = name
         self.role = role
+        self.title = title
     }
 }
 

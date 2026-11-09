@@ -419,6 +419,12 @@ wire!(
     pub struct AgentCreateInput {
         name: String,
         role: String,
+        /// The name the person typed, shown in place of `name`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// The pet the app draws (`pebble-green`), at most 64 characters.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        look: Option<String>,
     }
 );
 wire!(

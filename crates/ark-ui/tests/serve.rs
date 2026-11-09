@@ -4701,3 +4701,60 @@ async fn the_agent_routes_need_a_credential_and_match_the_protocol_fixtures() {
 fn keys(value: &Value) -> Vec<&String> {
     value.as_object().unwrap().keys().collect()
 }
+
+#[tokio::test]
+async fn a_deleted_agent_and_its_chats_leave_the_phone() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"scout","title":"Scout"}}),
+    )
+    .await
+    .unwrap();
+    resource_call(
+        &client,
+        "project",
+        "agent_conversation_start",
+        "",
+        json!({"agent":"scout"}),
+    )
+    .await
+    .unwrap();
+    let project = client.call("summary", json!({})).await.unwrap()["location"]["project"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: runtime.example\r\n{auth}\r\n");
+    let scouts = |body: &str| body.matches("\"scout\"").count();
+    let body = |response: String| response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    let chats = body(raw(served.port, get("/client/v1/chats")).await);
+    assert!(
+        scouts(&chats) >= 2,
+        "the agent and its second chat: {chats}"
+    );
+    assert!(scouts(&body(raw(served.port, get("/client/v1/agents")).await)) >= 1);
+
+    client
+        .call("agent_end", json!({"agent":"scout","project":project}))
+        .await
+        .unwrap();
+    for path in ["/client/v1/chats", "/client/v1/agents", "/client/v1/home"] {
+        let listed = body(raw(served.port, get(path)).await);
+        assert_eq!(scouts(&listed), 0, "{path} still lists it: {listed}");
+    }
+}

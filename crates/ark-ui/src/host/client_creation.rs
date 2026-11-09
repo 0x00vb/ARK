@@ -19,7 +19,13 @@ impl Host {
                     && request.input["role"].as_str().is_some_and(|role| {
                         role.chars().count() <= 120 && !role.chars().any(char::is_control)
                     })
-                    && keys == 2
+                    && optional_text(&request.input["title"], 120)
+                    && optional_text(&request.input["look"], 64)
+                    && keys
+                        == 2 + ["title", "look"]
+                            .iter()
+                            .filter(|k| request.input.get(**k).is_some())
+                            .count()
             }
             _ => false,
         }
@@ -73,6 +79,8 @@ impl Host {
             .map_err(ClientMutationError::Store)?;
         let spec: AgentSpec = serde_json::from_value(json!({
             "name": name, "role": request.input["role"], "tools": ["*"],
+            "title": request.input["title"].as_str().unwrap_or_default(),
+            "look": request.input["look"].as_str().unwrap_or_default(),
             "allow_mutate": false, "delegates_to": [], "model": null,
         }))
         .map_err(|_| ClientMutationError::Unsupported)?;
@@ -91,4 +99,12 @@ impl Host {
             Err(error) => Err(ClientMutationError::Store(error.into())),
         }
     }
+}
+
+/// Absent, or a string of at most `max` characters with no control characters.
+fn optional_text(value: &Value, max: usize) -> bool {
+    value.is_null()
+        || value
+            .as_str()
+            .is_some_and(|v| v.chars().count() <= max && !v.chars().any(char::is_control))
 }

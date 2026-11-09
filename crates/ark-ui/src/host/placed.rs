@@ -208,17 +208,21 @@ impl Host {
         let project = self.top_project(params["project"].as_str().unwrap_or(""))?;
         let to = params["place"].as_str().filter(|p| !p.is_empty());
         let from = self.placed_get(project.id.as_str(), &agent);
+        let mut session = None;
         match (from, to) {
-            (Some(at), Some(to)) if at.place == to => self.settle_away(&project, &agent).await?,
+            (Some(at), Some(to)) if at.place == to => {
+                self.settle_away(&project, &agent).await?;
+                session = Some(at.session);
+            }
             (Some(at), Some(to)) => {
                 self.bring_back(&project, at).await?;
-                self.send_away(&project, &agent, to).await?;
+                session = Some(self.send_away(&project, &agent, to).await?);
             }
             (Some(at), None) => self.bring_back(&project, at).await?,
-            (None, Some(to)) => self.send_away(&project, &agent, to).await?,
+            (None, Some(to)) => session = Some(self.send_away(&project, &agent, to).await?),
             (None, None) => {}
         }
-        Ok(json!({ "agent": agent, "place": to }))
+        Ok(json!({ "agent": agent, "place": to, "session": session }))
     }
 
     async fn local_agent(&self, project: &Project, agent: &str) -> anyhow::Result<AgentRecord> {
@@ -250,7 +254,7 @@ impl Host {
         project: &Project,
         agent: &str,
         place: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         let local = self.local_agent(project, agent).await?;
         anyhow::ensure!(
             local.state != AgentState::Terminated,
@@ -279,10 +283,11 @@ impl Host {
         self.placed_keep(&Placed {
             project: project.id.as_str().to_string(),
             place: place.to_string(),
-            session: chat.session,
+            session: chat.session.clone(),
             record,
         })?;
-        self.settle_away(project, agent).await
+        self.settle_away(project, agent).await?;
+        Ok(chat.session)
     }
 
     async fn bring_back(&self, project: &Project, placed: Placed) -> anyhow::Result<()> {

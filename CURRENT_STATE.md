@@ -1,3 +1,14 @@
+# Core 0.44.0 release: agent details, groups, an agent's computer (2026-11-09)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.44.0 (2026-11-09), over v0.43.1 (ccdff2f). ADR 0113 (group chats), ADR 0114 (an agent runs on a computer the person picks), ADR 0115 (an agent's details; apps without the assistant) |
+| Change | Details pane: Name, Model, Computer, Folder, pet. `agent_folder`; `workspace_dir` takes the nearest folder and refuses an agent folder that is gone. `ark.newAgent({assistant:false})`: no ARK tile, latest agent opens, one New agent button when none. Groups: `group_*` calls, router or @Name, at most 6 replies a message, tiles for a `groupConversation` view, turn `author`. `agent_move` and placed agents in `agents {all}`. Phone: `agent.create` takes `title` and `look`; `AgentRow` gains `model`, `description`, `folder`, `own_folder`, `place`, `session`, `location` |
+| Found from | The owner's requests of 2026-11-09 (change an agent's folder and name, setup out of the composer, no default ARK, group chats like Grok bots, pick each agent's computer, deletes reach the phone) |
+| Gates | Implementation review (qa, Haiku): 4 blockers (mid-turn message lost by a member, start state hid Settings, Description, evidence), all fixed or cut with tests; see `../board/evidence/agent-groups-20261109/` |
+| Not done | A group message to live models (needs the owner's OK); the native window by hand; a real second computer for `agent_move`; groups on the phone; placed agents on the phone |
+| Evidence | `../board/evidence/agent-groups-20261109/` |
+
 # Core 0.43.1 release: name a new agent, delete one (2026-11-09)
 
 | Release state | Value |

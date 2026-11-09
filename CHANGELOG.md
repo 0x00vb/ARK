@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-09
+
+An agent's details hold its setup, apps may list only their agents, group chats, an agent runs on a computer the person picks (ADR 0113, ADR 0114, ADR 0115).
+
 ### Added
 
 - An agent's details (ADR 0115): rows Name, Model, Computer (`identity.computer`), Folder; the face picks the pet (`identity.pet`). Window call `agent_folder {project, agent, path|null}` gives one agent a folder of its own (`Engine::workspace_dir` takes the nearest folder up the chain); `agents {all}` rows carry `folder`, `own_folder`, `model`, `description`.

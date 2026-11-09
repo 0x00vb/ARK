@@ -16,29 +16,11 @@
   </head>
   <body>
     <div id="app" class="app" data-pane="closed" data-sidebar="open">
-      <nav class="destinations" id="destinations" aria-label="Destinations">
-        <div class="destination-drag" data-tauri-drag-region></div>
-        <button class="destination" type="button" data-destination="home" aria-current="page" title="Chat">
-          <span class="destination-icon" data-icon="chat"></span>
-          <span class="destination-label">Chat</span>
-        </button>
-        <div class="workspace-destinations" id="workspace-destinations" aria-label="Workspace"></div>
-        <div class="destination-spacer"></div>
-        <button class="destination account-destination" type="button" id="open-settings" title="Account and settings" aria-label="Account and settings">
-          <span class="account-avatar" aria-hidden="true">V</span>
-          <span class="destination-label">Account</span>
-        </button>
-      </nav>
       <aside class="sidebar" aria-label="Sidebar">
         <div class="sidebar-top" data-tauri-drag-region>
-          <button class="icon-btn" id="search-chats" title="Search (⇧⌘F)" aria-label="Search" data-icon="search"></button>
-          <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
+          <button class="icon-btn round" id="search-chats" title="Search (⇧⌘F)" aria-label="Search" data-icon="search"></button>
+          <button class="icon-btn round" id="new-agent" title="New agent" aria-label="New agent" data-icon="plus"></button>
         </div>
-        <button class="nav-row new-session" id="new-session">
-          <span class="nav-icon" data-icon="new-chat"></span>
-          <span class="nav-label">New chat</span>
-          <kbd>⌘N</kbd>
-        </button>
         <div class="sidebar-ext" id="sidebar-ext" hidden></div>
         <div class="agents-scroll">
           <div class="agents" id="agents" role="list" aria-label="Agents"></div>
@@ -46,7 +28,15 @@
         </div>
         <div class="sidebar-foot">
           <div class="status-ext" id="status-ext"></div>
+          <div class="sidebar-foot-row">
+            <button class="profile" type="button" id="open-settings" title="Account and settings">
+              <span class="account-avatar" aria-hidden="true"></span>
+              <span class="profile-name">Settings</span>
+            </button>
+            <div class="sidebar-views" id="sidebar-views" aria-label="Views"></div>
+          </div>
         </div>
+        <div class="sidebar-grip" id="sidebar-grip" role="separator" aria-orientation="vertical" aria-label="Sidebar width" tabindex="0"></div>
       </aside>
 
       <main class="main">

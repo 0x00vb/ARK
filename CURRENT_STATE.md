@@ -1,3 +1,14 @@
+# In progress: one sidebar and an agent's look (2026-11-09, branch agent-sidebar, uncommitted)
+
+| State | Value |
+| --- | --- |
+| Change | ADR 0112: no fixed rail; round Search and + at the sidebar top (+ calls the app's `ark.newAgent`, else New chat); tiles centered; profile and app views in the foot; trailing-edge grip resizes 200 to 400 px, hides under 150; `AgentSpec.look` (display, max 64) in graph nodes and `agents {all}` rows; `agentIdentity((name, look))` |
+| Found from | The owner's review of 0.42.0 with a reference screenshot |
+| Gates | `scripts/ci.sh` passes. Web fixtures: agent-sidebar 22 of 22 (4 new, each failing without its change where checked), project-work 23 of 23, work-state, vm-module 22 of 22. Implementation review (qa, Haiku): 7 majors, all fixed |
+| Dogfood | Desktop `--serve --tokens` on a copy of the owner's store: + made Agent 1 to 3 with pets, rename and pet saved (`look` read back from the store) |
+| Not done | Commit, tag and Desktop pin wait for the owner's OK. Native window not opened by hand. iPhone does not draw `look` yet |
+| Evidence | `../board/evidence/agent-sidebar-20261109/` |
+
 # Core 0.42.1 release: the phone lists agents and their chats (2026-11-09)
 
 | Release state | Value |

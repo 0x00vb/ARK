@@ -230,7 +230,6 @@ test("an agent in another folder opens its latest chat there; latest click wins"
   assert.deepEqual(calls.filter((call) => call.method === "open_project").map((call) => call.params.id), ["b"]);
   assert.deepEqual(await page.evaluate(() => window.opened.at(-1)), { name: "Writer", project: "b", conversation: "conv-2" });
   assert.equal(await agent(page, "b", "Writer").getAttribute("aria-current"), "true");
-  assert.equal(await page.locator("#new-session").getAttribute("aria-label"), "New chat with Writer");
   // An agent with no chat yet: a new one.
   await agent(page, "a", "Mia").click();
   await page.getByText("Chat with Mia first", { exact: true }).waitFor();
@@ -243,14 +242,14 @@ test("an agent with no chat yet opens its first chat; until it has one, New chat
   await agent(page, "a", "Mia").click();
   await page.getByText("Chat with Mia first", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.opened.at(-1)), { name: "Mia", project: "a" });
-  await page.locator("#new-session").click();
+  await page.keyboard.press("Meta+n");
   await page.waitForFunction(() => window.opened.length === 2);
   assert.deepEqual(await page.evaluate(() => window.opened.at(-1)), { name: "Mia", project: "a" }, "no second chat beside a default one that does not exist");
   assert.equal(calls.filter((call) => call.method === "resource" && call.params.operation.kind === "agent_conversation_start").length, 0);
   // Once it has its default chat, New chat is a new one.
   await agent(page, "b", "Writer").click();
   await page.getByText("Chat with Writer first", { exact: true }).waitFor();
-  await page.locator("#new-session").click();
+  await page.keyboard.press("Meta+n");
   await page.getByText("Chat with Writer new", { exact: true }).waitFor();
 }, { conversations: { "a:Mia": [] } }));
 
@@ -280,14 +279,14 @@ test("ARK opens its newest chat with turns, in its own folder", () => fixture(as
   { id: "chat-a", title: "First draft", turns: 2, updated_at: iso(2 * HOUR), project: "a", project_name: "Notes" },
 ] }));
 
-test("New chat, ⌘N and /new start a chat with the agent in view", () => fixture(async (page, { calls }) => {
-  assert.equal(await page.locator("#new-session").getAttribute("aria-label"), "New chat with ARK");
-  await page.locator("#new-session").click();
+test("⌘N, the tile menu and /new start a chat with the agent in view", () => fixture(async (page, { calls }) => {
+  await page.keyboard.press("Meta+n");
   await page.waitForFunction(() => window.ark.summary().session.id.startsWith("new-"));
   assert.equal(calls.filter((call) => call.method === "new_session").length, 1);
   await agent(page, "c", "Editor").click();
   await page.getByText(/Chat with Editor/).waitFor();
-  await page.locator("#new-session").click();
+  await agent(page, "c", "Editor").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "New chat", exact: true }).click();
   await page.getByText("Chat with Editor new", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.opened.at(-1)), { name: "Editor", project: "c", conversation: "new" });
   await page.keyboard.press("Meta+n");
@@ -295,7 +294,7 @@ test("New chat, ⌘N and /new start a chat with the agent in view", () => fixtur
   // An agent on an agent program has one chat: New chat opens that one, its menu has no New chat.
   await agent(page, "d", "Scout").click();
   await page.getByText(/Chat with Scout/).waitFor();
-  await page.locator("#new-session").click();
+  await page.keyboard.press("Meta+n");
   await page.waitForFunction(() => window.opened.at(-1).name === "Scout" && !window.opened.at(-1).conversation);
   await agent(page, "d", "Scout").click({ button: "right" });
   assert.deepEqual(await page.locator(".context-menu .menu-item").allTextContents(), ["Chats", "Pin"]);
@@ -389,7 +388,7 @@ test("/history opens this agent's chats in the search overlay, filtered by the w
 ] } }));
 
 test("the list is one tab stop: arrows by tile row, Home, End, typeahead and the menu key", () => fixture(async (page) => {
-  await page.locator("#new-session").focus();
+  await page.locator("#new-agent").focus();
   await page.keyboard.press("Tab");
   const focused = () => page.evaluate(() => document.activeElement?.dataset.key?.replace("/", "/"));
   assert.equal(await focused(), "ark");
@@ -472,6 +471,129 @@ test("narrow: the drawer lists agents and a pick closes it", () => fixture(async
 
 // Evidence only: `ARK_UI_SHOTS=<dir>` draws each state in light and dark. With
 // `ARK_UI_BRAND_CSS=<path to a consumer's brand.css>`, faces wear that app's look.
+const centers = (page) => page.evaluate(() => {
+  const list = document.querySelector("#agents").getBoundingClientRect();
+  const mid = list.left + list.width / 2;
+  return [...document.querySelectorAll('#agents .agent-item[data-kind="tile"]')].map((item) => {
+    const box = item.getBoundingClientRect();
+    return [Math.round(box.top), Math.round(box.left + box.width / 2 - mid)];
+  });
+});
+
+test("tiles sit centered: one alone, two side by side, a fourth alone on the next row", async () => {
+  await fixture(async (page) => {
+    assert.deepEqual((await centers(page)).map(([, dx]) => dx), [0], "ARK alone is centered");
+  }, { agents: [] });
+  await fixture(async (page) => {
+    const tiles = await centers(page);
+    assert.equal(tiles.length, 2);
+    assert.equal(tiles[0][0], tiles[1][0], "one row");
+    assert.equal(tiles[0][1], -tiles[1][1], "the pair is centered");
+  }, { agents: agentRows(1) });
+  await fixture(async (page) => {
+    const tiles = await centers(page);
+    assert.equal(tiles.length, 4);
+    assert.equal(tiles[1][1], 0, "the middle of three is centered");
+    assert.ok(tiles[3][0] > tiles[0][0], "the fourth starts a row");
+    assert.equal(tiles[3][1], 0, "and is centered on it");
+    await shot(page, "sidebar-centered-4");
+  }, { agents: agentRows(3) });
+});
+
+test("+ makes an agent through the app; with no app it starts a chat", () => fixture(async (page, { calls }) => {
+  const plus = page.locator("#new-agent");
+  assert.equal(await plus.getAttribute("aria-label"), "New chat");
+  await plus.click();
+  await page.waitForFunction(() => window.ark.summary().session.id.startsWith("new-"));
+  assert.equal(calls.filter((call) => call.method === "new_session").length, 1);
+  await page.evaluate(() => window.ark.newAgent({ open: ({ location }) => { window.made = location; } }));
+  await page.waitForFunction(() => document.querySelector("#new-agent").getAttribute("aria-label") === "New agent");
+  await plus.click();
+  await page.waitForFunction(() => window.made);
+  assert.equal(await page.evaluate(() => window.made.runtime), "fixture");
+  assert.equal(calls.filter((call) => call.method === "new_session").length, 1, "no chat besides");
+  await page.evaluate(() => window.ark.newAgent({ open() {} })).then(() => assert.fail("a second handler"), (error) => assert.match(error.message, /duplicate New agent/));
+  assert.equal(await page.locator("#destinations, #toggle-sidebar, #new-session").count(), 0, "no rail, no hide button, no New chat row");
+}));
+
+test("the foot holds the person, who opens Settings, and the app's views as buttons", () => fixture(async (page) => {
+  await page.evaluate(() => {
+    window.ark.profile(() => ({ name: "Ada Lovelace" }));
+    window.ark.setting({ id: "account", title: "Account", render(el) { el.textContent = "Account section"; } });
+    window.ark.view({ id: "board", title: "Board", nav: true, icon: "box", render(el) { el.textContent = "Board view"; } });
+  });
+  const profile = page.locator("#open-settings");
+  await profile.waitFor();
+  assert.equal(await profile.locator(".profile-name").textContent(), "Ada Lovelace");
+  assert.equal(await profile.locator(".account-avatar").textContent(), "A");
+  const board = page.locator('#sidebar-views [data-view="board"]');
+  assert.equal(await board.getAttribute("aria-label"), "Board");
+  const top = async (selector) => page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2));
+  assert.ok(Math.abs(await top("#open-settings") - await top('#sidebar-views [data-view="board"]')) <= 1, "on one line");
+  await board.click();
+  await page.getByText("Board view").waitFor();
+  assert.equal(await board.getAttribute("aria-current"), "page");
+  await profile.click();
+  await page.getByText("Account section").waitFor();
+  assert.equal(await profile.getAttribute("aria-current"), "true");
+  assert.equal(await board.getAttribute("aria-current"), null);
+  await shot(page, "sidebar-foot");
+}));
+
+test("the sidebar edge resizes, remembers, hides past the minimum, and keys move it", () => fixture(async (page) => {
+  const width = () => page.locator(".sidebar").evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  const grip = page.locator("#sidebar-grip");
+  const start = await width();
+  const box = await grip.boundingBox();
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 3, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 63, y, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  assert.equal(await width(), start + 60);
+  assert.equal(await page.evaluate(() => localStorage.getItem("ark-sidebar-width")), String(start + 60));
+  await page.mouse.move(box.x + 63, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 63 + 400, y, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  assert.equal(await width(), 400, "no wider than the maximum");
+  await grip.focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForTimeout(300);
+  assert.equal(await width(), 384);
+  const now = await grip.boundingBox();
+  await page.mouse.move(now.x + 3, y);
+  await page.mouse.down();
+  await page.mouse.move(40, y, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector("#app").dataset.sidebar === "closed");
+  assert.equal(await page.evaluate(() => localStorage.getItem("ark-sidebar-width")), "384", "hiding keeps the width");
+  await page.locator("#reveal-sidebar").click();
+  await page.waitForFunction(() => document.querySelector("#app").dataset.sidebar === "open");
+  await page.waitForTimeout(300);
+  assert.equal(await width(), 384);
+  // No handler of the hiding drag is left: a stray cancel later changes nothing.
+  await grip.dispatchEvent("pointercancel");
+  await page.mouse.click((await grip.boundingBox()).x + 3, y);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => document.querySelector("#app").dataset.sidebar), "open");
+  assert.equal(await width(), 384);
+  await grip.focus();
+  await page.keyboard.press("Home");
+  await page.waitForTimeout(300);
+  assert.equal(await width(), 200, "Home: the narrowest");
+  const inside = await page.evaluate(() => {
+    const edge = document.querySelector(".sidebar").getBoundingClientRect().right;
+    return ["#new-agent", "#search-chats", "#agents .agent-btn"].map((s) => Math.round(document.querySelector(s).getBoundingClientRect().right) <= Math.round(edge));
+  });
+  assert.deepEqual(inside, [true, true, true], "nothing is cut off at the narrowest width");
+  await grip.dblclick();
+  await page.waitForTimeout(300);
+  assert.equal(await width(), start, "double click: the default width");
+}));
+
 test("screenshots of each sidebar state", { skip: !shots }, async () => {
   const brand = process.env.ARK_UI_BRAND_CSS;
   const both = async (page, name) => {

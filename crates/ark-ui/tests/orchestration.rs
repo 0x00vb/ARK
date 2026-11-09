@@ -919,7 +919,7 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
     let host = open_with(dir.path(), Arc::new(AtomicUsize::new(0)), model).await;
     host.call(
         "spawn_agent",
-        json!({"spec":{"name":"writer","title":"Writer"}}),
+        json!({"spec":{"name":"writer","title":"Writer","look":"arch-green"}}),
     )
     .await
     .unwrap();
@@ -998,6 +998,17 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
     assert_eq!(m["delivered"], false);
     let agents = host.call("agents", json!({})).await.unwrap();
     assert_eq!(agents[0]["inbox"][0]["thread"], conversation.as_str());
+    assert_eq!(agents[0]["spec"]["look"], "arch-green", "{}", agents[0]);
+    let long = "x".repeat(65);
+    assert!(
+        host.call(
+            "spawn_agent",
+            json!({"spec":{"name":"writer","title":"Writer","look":long}})
+        )
+        .await
+        .is_err(),
+        "a look past 64 characters is refused"
+    );
 
     let scope = agents[0]["scope"].as_str().unwrap().to_string();
     for all in [
@@ -1011,6 +1022,10 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
         assert!(row["project_name"].is_string());
         assert_eq!(row["name"], "writer");
         assert_eq!(row["title"], "Writer");
+        assert_eq!(
+            row["look"], "arch-green",
+            "the app's chosen look comes back: {row}"
+        );
         assert_eq!(row["state"], "idle");
         assert_eq!(row["asking"], false);
         assert_eq!(row["program"], false);

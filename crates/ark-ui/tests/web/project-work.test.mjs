@@ -254,7 +254,7 @@ test("search waits for delayed project navigation before opening the exact agent
   assert.deepEqual(await page.evaluate(() => window.openedSearch), [{ id: "Archivist", location: { runtime: "fixture", project: "b", session: "chat-b" } }]);
 }, { boot: true, searchProjects: true }));
 
-test("New chat interception is shared by the sidebar button and keyboard and creates nothing on open", () => fixture(async (page, { calls }) => {
+test("New chat interception is shared by the sidebar + (no New agent handler) and keyboard and creates nothing on open", () => fixture(async (page, { calls }) => {
   await page.locator("#app.ready").waitFor();
   await page.evaluate(() => {
     window.destinations = [];
@@ -263,7 +263,7 @@ test("New chat interception is shared by the sidebar button and keyboard and cre
     try { window.ark.newChat({open() {}}); } catch { rejected = true; }
     if (!rejected) throw Error("duplicate New chat handler accepted");
   });
-  await page.locator("#new-session").click();
+  await page.locator("#new-agent").click();
   await page.waitForFunction(() => window.destinations.length === 1);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+n" : "Control+n");
   await page.waitForFunction(() => window.destinations.length === 2);

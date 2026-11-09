@@ -364,16 +364,16 @@ test("mixed scene files keep accurate labels and compact cards", () => fixture(a
 }));
 
 
-for (const remote of [false, true]) test(`a view slash command opens outside the fixed rail without sending a message (${remote ? "remote" : "local"})`, () => fixture(async page => {
+for (const remote of [false, true]) test(`a view slash command opens a view without a sidebar button and sends no message (${remote ? "remote" : "local"})`, () => fixture(async page => {
   await page.evaluate(() => window.ark.view({ id: "agents", title: "Agents", command: "/agents", render(el) {
     el.append(window.ark.h("h1", "Agent canvas"));
   } }));
-  assert.equal(await page.locator('#destinations [data-view="agents"]').count(), 0);
+  assert.equal(await page.locator('#sidebar-views [data-view="agents"]').count(), 0);
   await page.locator("#input").fill("/agents");
   await page.locator("#input").press("Enter");
   await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor();
-  assert.equal(await page.locator('#destinations [data-view="agents"]').count(), 0);
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  assert.equal(await page.locator('#sidebar-views [data-view="agents"]').count(), 0);
+  await page.evaluate(() => window.ark.showConversation());
   await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor({ state: "hidden" });
 }, { remote }));
 

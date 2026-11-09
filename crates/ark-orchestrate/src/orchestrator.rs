@@ -2351,7 +2351,10 @@ impl Inner {
         chat_creation: Option<&serde_json::Value>,
     ) -> Result<AgentRecord, OrchError> {
         self.require_agent_control(&spec.name)?;
-        if spec.title.chars().count() > 120 || spec.description.chars().count() > 500 {
+        if spec.title.chars().count() > 120
+            || spec.description.chars().count() > 500
+            || spec.look.chars().count() > 64
+        {
             return Err(OrchError::NotAllowed("display metadata is too long".into()));
         }
         if !valid_name(&spec.name) {

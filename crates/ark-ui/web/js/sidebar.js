@@ -1,11 +1,13 @@
 // Who the person works with: ARK first, then the app's agents of every folder (ADR 0110). The
 // first few are tiles, the rest rows. Everything comes from the host (`agents {all}`); nothing is
 // kept here that could drift from the store, except the person's pins and the folders they hid.
+// The foot holds the person (profile, which opens Settings) and the app's views as buttons.
 
 import { h, icon, clear, ago, $, agentFace } from "./dom.js";
 import { bindContextMenu, contextMenu } from "./context-menu.js";
 import { registry } from "./ext.js";
 import { SETTINGS } from "./settings.js";
+import { label as keyLabel } from "./keys.js";
 
 export const ARK = "ark";
 const HIDDEN_PROJECTS = "ark-hidden-projects";
@@ -14,6 +16,8 @@ const TILES = 6;
 const MAX_TILES = 9;
 const COLUMNS = 3;
 const LONG_PRESS = 500;
+const WIDTH_KEY = "ark-sidebar-width";
+export const WIDTH = { min: 200, max: 400, close: 150 };
 
 export const agentKey = (project, name) => `${project}/${name}`;
 export const pinStorageKey = (runtime) => `ark-pins:${runtime}`;
@@ -66,7 +70,7 @@ const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").match
 export class Sidebar {
   /// `nav` is the window's side of it: `runtime()`, `hasAgents()`, `loadAgents()`, `arkName()`,
   /// `arkFace(size)`, `open(entry, { newTab })` (false when it could not), `newChat()`,
-  /// `newChatWith(entry)` and `history(entry)`.
+  /// `newAgent()`, `newChatWith(entry)`, `history(entry)` and `openView(id, options)`.
   constructor(api, nav) {
     this.api = api;
     this.nav = nav;
@@ -75,7 +79,8 @@ export class Sidebar {
     this.status = $("#status-ext");
     this.top = $("#sidebar-ext");
     this.settings = $("#open-settings");
-    this.newButton = $("#new-session");
+    this.views = $("#sidebar-views");
+    this.newButton = $("#new-agent");
     this.agents = null;
     this.failed = false;
     this.order = null;
@@ -93,11 +98,14 @@ export class Sidebar {
     this.placeholders = false;
     this.agentView = false;
     this.typed = { text: "", at: 0 };
-    this.newButton.addEventListener("click", () => nav.newChat());
+    this.newButton.addEventListener("click", () => registry.newAgent ? nav.newAgent() : nav.newChat());
     this.settings.addEventListener("click", () => api.openSettings());
     this.list.addEventListener("keydown", (event) => this.keys(event));
     this.list.addEventListener("focusin", (event) => this.rove(event.target.closest(".agent-btn")));
-    addEventListener("focus", () => void this.refresh({ reorder: true }));
+    addEventListener("focus", () => {
+      this.paintProfile();
+      void this.refresh({ reorder: true });
+    });
   }
 
   setWorking(list) {
@@ -130,12 +138,40 @@ export class Sidebar {
     this.current = key || ARK;
     if (this.pending === this.current) this.pending = null;
     this.paintCurrent();
-    this.labelNewChat();
   }
 
   markView(id) {
     this.view = id;
     this.settings.setAttribute("aria-current", String(id === SETTINGS));
+    for (const button of this.views.children) {
+      if (button.dataset.view === id) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+  }
+
+  /// The app's views (`nav` views of the shown folder), as buttons beside the profile.
+  setViews(views) {
+    clear(this.views);
+    for (const view of views) {
+      const label = view.nav === true ? view.title : view.nav;
+      this.views.append(h("button.icon-btn.sidebar-view", {
+        type: "button", "data-view": view.id, title: label, "aria-label": label,
+        onclick: () => this.nav.openView(view.id),
+      }, icon(view.icon || "box")));
+    }
+    this.markView(this.view);
+  }
+
+  /// The person, from the app's `ark.profile`: their initial and name; else Settings.
+  paintProfile() {
+    let person = null;
+    try { person = registry.profile?.() || null; } catch (e) { console.error(e); }
+    const name = typeof person?.name === "string" && person.name.trim() ? person.name.trim() : "";
+    const avatar = this.settings.querySelector(".account-avatar");
+    avatar.dataset.empty = String(!name);
+    avatar.replaceChildren(name ? [...name][0].toLocaleUpperCase() : icon("person"));
+    this.settings.querySelector(".profile-name").textContent = name || "Settings";
+    this.settings.setAttribute("aria-label", name ? `${name}, account and settings` : "Settings");
   }
 
   /// Reads the agents again. `reorder` puts them in order again (load, focus, the person's
@@ -185,7 +221,7 @@ export class Sidebar {
     const seen = new Map();
     for (const agent of shown) seen.set(label(agent).toLocaleLowerCase(), (seen.get(label(agent).toLocaleLowerCase()) || 0) + 1);
     return [ark, ...shown.map((agent) => ({
-      ...agent, key: agentKey(agent.project, agent.name), label: label(agent), twin: seen.get(label(agent).toLocaleLowerCase()) > 1,
+      ...agent, look: typeof agent.look === "string" ? agent.look : "", key: agentKey(agent.project, agent.name), label: label(agent), twin: seen.get(label(agent).toLocaleLowerCase()) > 1,
     }))];
   }
 
@@ -259,7 +295,6 @@ export class Sidebar {
     this.paintCurrent();
     this.rove(focused ? this.button(focused) : null);
     if (focused) this.button(focused)?.focus({ preventScroll: true });
-    this.labelNewChat();
     $("#reveal-sidebar")?.toggleAttribute("data-attention", entries.some((entry) => this.mark(entry) === "asking"));
   }
 
@@ -286,7 +321,7 @@ export class Sidebar {
   }
 
   face(entry, size) {
-    return entry.ark ? this.nav.arkFace(size) : agentFace(entry.name, size);
+    return entry.ark ? this.nav.arkFace(size) : agentFace(entry.name, size, entry.look);
   }
 
   paint(item, entry, kind) {
@@ -294,7 +329,7 @@ export class Sidebar {
     const mark = this.mark(entry);
     const sub = entry.twin ? entry.project_name : kind === "row" ? entry.preview : null;
     const end = kind === "row" ? (mark === "asking" ? "Needs you" : entry.updated_ms ? ago(entry.updated_ms) : "") : "";
-    const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : ""]);
+    const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : entry.look]);
     item.dataset.kind = kind;
     button.dataset.name = entry.label.toLocaleLowerCase();
     if (button.dataset.signature !== signature) {
@@ -338,13 +373,6 @@ export class Sidebar {
     const buttons = this.buttons();
     const stop = target && buttons.includes(target) ? target : this.button(this.pending || this.current) || buttons[0];
     for (const button of buttons) button.tabIndex = button === stop ? 0 : -1;
-  }
-
-  labelNewChat() {
-    const entry = this.find(this.current) || this.find(ARK);
-    const words = `New chat with ${entry?.label || "ARK"}`;
-    this.newButton.setAttribute("aria-label", words);
-    this.newButton.title = words;
   }
 
   enter(item) {
@@ -462,10 +490,14 @@ export class Sidebar {
     return [...this.hidden];
   }
 
-  /// The app's rows above the agents and its status items. The account entry lives in the
-  /// fixed rail, and appears once an app has registered a settings section.
+  /// The app's rows above the agents, its status items, the profile and what + makes. The
+  /// profile appears once an app has registered a settings section.
   renderExtensions() {
     this.settings.hidden = !registry.settings.size;
+    this.paintProfile();
+    const words = registry.newAgent ? "New agent" : "New chat";
+    this.newButton.setAttribute("aria-label", words);
+    this.newButton.title = registry.newAgent ? words : `${words} (${keyLabel("⌘N")})`;
     clear(this.top);
     this.top.hidden = !registry.sidebars.length;
     for (const s of registry.sidebars) {
@@ -481,4 +513,80 @@ export class Sidebar {
     }
     if (!!this.nav.hasAgents() !== this.agentView) void this.refresh({ reorder: true });
   }
+}
+
+/// The width the person dragged the sidebar to; 0 when none is saved or storage is blocked.
+function readWidth() {
+  try {
+    return Number(localStorage.getItem(WIDTH_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/// The sidebar's trailing edge: drag to resize, drag past the minimum to hide, double click for
+/// the default width, arrow keys by 16 px, Home and End to the ends. The width is remembered; `toggle()` shows and hides.
+export function sidebarGrip(app, grip, toggle, toast) {
+  const set = (px) => {
+    const width = Math.round(Math.min(Math.max(px, WIDTH.min), WIDTH.max));
+    app.style.setProperty("--project-width", `${width}px`);
+    grip.setAttribute("aria-valuenow", String(width));
+    return width;
+  };
+  const save = (width) => {
+    try {
+      if (width) localStorage.setItem(WIDTH_KEY, String(width));
+      else localStorage.removeItem(WIDTH_KEY);
+    } catch {
+      toast("Could not save the sidebar width");
+    }
+  };
+  grip.setAttribute("aria-valuemin", String(WIDTH.min));
+  grip.setAttribute("aria-valuemax", String(WIDTH.max));
+  const current = () => String(Math.round(app.querySelector(".sidebar").getBoundingClientRect().width));
+  const stored = readWidth();
+  if (stored > 0) set(stored);
+  else grip.setAttribute("aria-valuenow", current());
+  grip.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    app.classList.add("resizing");
+    const before = app.querySelector(".sidebar").getBoundingClientRect().width;
+    const from = before - event.clientX;
+    let width = null;
+    let closing = false;
+    const gesture = new AbortController();
+    const end = (released) => {
+      gesture.abort();
+      app.classList.remove("resizing");
+      app.removeAttribute("data-sidebar-closing");
+      if (!released || closing) set(before);
+      if (released && closing) toggle();
+      else if (released && width) save(width);
+      dispatchEvent(new Event("resize"));
+    };
+    grip.addEventListener("pointermove", (m) => {
+      const want = from + m.clientX;
+      closing = want < WIDTH.close;
+      app.toggleAttribute("data-sidebar-closing", closing);
+      if (!closing) width = set(want);
+    }, { signal: gesture.signal });
+    grip.addEventListener("pointerup", () => end(true), { signal: gesture.signal });
+    grip.addEventListener("pointercancel", () => end(false), { signal: gesture.signal });
+  });
+  grip.addEventListener("dblclick", () => {
+    app.style.removeProperty("--project-width");
+    save(null);
+    dispatchEvent(new Event("resize"));
+    requestAnimationFrame(() => grip.setAttribute("aria-valuenow", current()));
+  });
+  grip.addEventListener("keydown", (event) => {
+    const now = Number(grip.getAttribute("aria-valuenow")) || app.querySelector(".sidebar").getBoundingClientRect().width;
+    const want = { ArrowRight: now + 16, ArrowLeft: now - 16, Home: WIDTH.min, End: WIDTH.max }[event.key];
+    if (want === undefined) return;
+    event.preventDefault();
+    save(set(want));
+    dispatchEvent(new Event("resize"));
+  });
 }

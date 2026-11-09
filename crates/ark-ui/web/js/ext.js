@@ -7,7 +7,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      create a conversation or bind the resource to an agent.
 //   ark.view({ id, title, icon, nav, command, render(el, params, api) })
 //                      a view of the current project in the main column, in place of the
-//                      conversation; `nav` makes it a destination in the fixed workspace rail.
+//                      conversation; `nav` makes it a button in the sidebar's foot.
 //                      `command` optionally opens the view from an exact slash command.
 //                      resourceScoped views receive a captured opening API and are disposed on
 //                      project or runtime changes. projectScoped views keep the live API and update. Controllers may provide title(), menu(), rename(),
@@ -47,6 +47,8 @@ import { setAgentIdentity } from "./dom.js";
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })
 //     One consumer handler for explicit New chat actions. createChat keeps the captured origin.
+//   ark.newAgent({ open({ location }) })
+//     What the sidebar's + does: make an agent and open its chat. Without it, + starts a chat.
 //
 //   ark.chatView(el, { submit(text), stop(), call(key, id), placeholder, model, files })
 //                      a conversation the app draws from its own records with the chat's
@@ -81,9 +83,11 @@ import { setAgentIdentity } from "./dom.js";
 //                      removed (ADR 0110): agents are the sidebar, pinned from a tile's menu.
 //                      Calling either throws a `RemovedExtensionPoint` error.
 //   ark.profile(() => ({ name }) | null)
-//                      who the person is, for the first line of an empty chat. Called each time.
-//   ark.agentIdentity(name => styleKey)
-//                      one stable style key per assigned participant, shared by single and group chats.
+//                      who the person is: the first line of an empty chat and the sidebar's
+//                      profile button. Called each time.
+//   ark.agentIdentity((name, look) => styleKey)
+//                      one stable style key per assigned participant, shared by single and group
+//                      chats. `look` is the agent's `spec.look` when the caller knows it.
 //   ark.searchSource({ id, load(project, api), open(entry, scopedApi) })
 //                      project search rows: { id, title, description?, updated_at? }.
 //                      Loading never navigates. Opening uses the selected project's API.
@@ -133,6 +137,7 @@ export const registry = {
   profile: null,
   searchSources: new Map(),
   newChat: null,
+  newAgent: null,
   modelPicker: null,
   submitHooks: [],
 };
@@ -249,6 +254,11 @@ export function installApi(api) {
     newChat(handler) {
       if (!handler || typeof handler.open !== "function" || handler.render != null && typeof handler.render !== "function" || registry.newChat) throw new Error("Invalid or duplicate New chat handler");
       registry.newChat = handler;
+    },
+    newAgent(handler) {
+      if (!handler || typeof handler.open !== "function" || registry.newAgent) throw new Error("Invalid or duplicate New agent handler");
+      registry.newAgent = handler;
+      api._changed();
     },
     modelPicker(p) {
       need(p, ["label", "render"], "modelPicker");

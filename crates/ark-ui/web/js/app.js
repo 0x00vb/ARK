@@ -10,9 +10,8 @@ import { Composer } from "./composer.js";
 import { createChatSurface } from "./chat-surface.js";
 import { chatView } from "./chat-view.js";
 import { acceptDrops, uploadFolder } from "./drop.js";
-import { Sidebar, ARK, agentKey, hiddenProjects } from "./sidebar.js";
+import { Sidebar, ARK, agentKey, hiddenProjects, sidebarGrip } from "./sidebar.js";
 import { openRecent } from "./recent.js";
-import { Destinations } from "./destinations.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
@@ -229,7 +228,7 @@ const api = {
   popover,
   contextMenu,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
-  refreshNavigation: () => topbar?.render(),
+  refreshNavigation: () => { topbar?.render(); sidebar?.paintProfile(); },
   refreshModel: () => { composer.setModel(state.summary?.model); showTitle(); },
   setExecutionMode: async (mode) => {
     try {
@@ -458,7 +457,7 @@ function scopedApi(location) {
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
 
-let thread, composer, sidebar, destinations, topbar, identity, pane, waiting, places;
+let thread, composer, sidebar, topbar, identity, pane, waiting, places;
 let primarySurface;
 let chatLayout = null;
 let pendingPrimary = null;
@@ -1476,6 +1475,16 @@ async function arkNewChat(project) {
   return registry.newChat ? registry.newChat.open({ project: project || location.project, location, createChat }) : createChat();
 }
 
+/// The sidebar's +: the app makes an agent in the folder in view and opens its chat.
+async function newAgent() {
+  if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
+  try {
+    await registry.newAgent.open({ location: { ...currentLocation() } });
+  } catch (error) {
+    toast(error.message || String(error));
+  }
+}
+
 const arkName = () => state.summary?.name || "ARK";
 
 function arkFace(size) {
@@ -2137,7 +2146,6 @@ async function showView(id, params) {
   showTitle();
   sidebar.markView(id);
   topbar.mark(id);
-  destinations?.mark(null);
   reportFocus();
   entry.ctl.focusInput?.();
   if (pane?.isOpen) pane.reportFocus();
@@ -2157,7 +2165,6 @@ async function showConversation(focusComposer = true) {
   state.homeView = null;
   setAgent(null);
   if (!state.view) {
-    destinations?.mark("home");
     pane?.syncConversation();
     return true;
   }
@@ -2169,7 +2176,6 @@ async function showConversation(focusComposer = true) {
   showTitle();
   sidebar.markView(null);
   topbar.mark(null);
-  destinations?.mark("home");
   reportFocus();
   if (focusComposer) composer.focus();
   pane?.syncConversation();
@@ -2186,32 +2192,6 @@ function showHome(focusComposer = true) {
   try { offered = !!view && (!view.when || view.when({ project: api.project() })); } catch {}
   if (offered) showView(id);
   else showConversation(focusComposer);
-}
-
-function destinationTarget(destination) {
-  const entry = state.view && views.get(state.view);
-  const visibleChatTitle = (state.view && !appEl.dataset.conversationView) || $("#chat-tabs").hidden
-    ? $("#session-title")
-    : document.querySelector('.chat-tab[aria-selected="true"]');
-  return entry?.el.querySelector("[data-destination-heading], h1, [role='heading']") || visibleChatTitle;
-}
-
-/// A keyboard jump is instant and moves focus to the destination. A pointer jump leaves focus on
-/// its button and gives the new surface one quiet, compositor-only arrival.
-async function openDestination(destination, { keyboard = false } = {}) {
-  if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
-  if (!await showConversation(false)) return;
-  const target = destinationTarget(destination);
-  if (keyboard) {
-    target?.focus({ preventScroll: true });
-    return;
-  }
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    target?.closest(".view, .scroller")?.animate(
-      [{ opacity: 0.72, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
-      { duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
-    );
-  }
 }
 
 /// The chat's title over the conversation; over a view of the project (whose tab says which),
@@ -2662,7 +2642,7 @@ function fit() {
   appEl.dataset.compact = String(compact);
   const styles = getComputedStyle(appEl);
   const px = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
-  const chrome = compact ? 0 : px("--rail") + px("--sb");
+  const chrome = compact ? 0 : px("--sb");
   const room = Math.max(320, w - chrome - px("--chat-min"));
   appEl.style.setProperty("--pw-room", `${room}px`);
   let paneWidth = 0;
@@ -2813,7 +2793,7 @@ async function bootOnce(again) {
 async function start() {
   await extensionsReady();
   hydrateIcons();
-  for (const [id, name] of [["toggle-sidebar", "sidebar"], ["reveal-sidebar", "sidebar"], ["toggle-pane", "pane"], ["close-pane", "x"]]) $(`#${id}`).append(icon(name));
+  for (const [id, name] of [["reveal-sidebar", "sidebar"], ["toggle-pane", "pane"], ["close-pane", "x"]]) $(`#${id}`).append(icon(name));
   appEl.dataset.tabs = "0";
   try {
     const s = localStorage.getItem("ark-sidebar");
@@ -2859,12 +2839,17 @@ async function start() {
     arkFaceKey: () => state.ui.logo || "",
     open: (entry, options) => openEntry(entry, options),
     newChat: () => api.newSession(),
+    newAgent: () => newAgent(),
     newChatWith,
     history: (entry) => openHistory(entry),
+    openView: (id) => {
+      if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
+      void showView(id);
+    },
   });
-  destinations = new Destinations(openDestination, (id) => showView(id));
+  sidebarGrip(appEl, $("#sidebar-grip"), toggleSidebar, toast);
   waiting = new Waiting(api, transport, () => state.sessionId);
-  topbar = new Topbar(api, destinations);
+  topbar = new Topbar(api, sidebar);
   identity = new Identity(api, chatIdentity, recentMenu);
   pane = new Pane(appEl, api, { conversation: () => {
     const entry = state.view && views.get(state.view);
@@ -2890,11 +2875,10 @@ async function start() {
   document.addEventListener("click", (e) => {
     if (appEl.dataset.drawer !== "open") return;
     const inside = e.target.closest(".sidebar");
-    if (e.target.closest("#reveal-sidebar, #toggle-sidebar")) return;
+    if (e.target.closest("#reveal-sidebar")) return;
     if (e.target.closest(".agents-retry")) return;
     if (!inside || e.target.closest("button, a")) appEl.dataset.drawer = "closed";
   });
-  $("#toggle-sidebar").addEventListener("click", toggleSidebar);
   $("#search-chats").addEventListener("click", () => searchChats());
   $("#chat-split").addEventListener("click", () => {
     if (visibleChats(chatLayout).length > 1) return closeOtherPanes();

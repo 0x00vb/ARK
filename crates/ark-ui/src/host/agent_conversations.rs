@@ -506,6 +506,7 @@ impl Host {
                     "project_name": entry.project.name,
                     "name": agent.name,
                     "title": agent.spec.title,
+                    "look": agent.spec.look,
                     "role": agent.spec.role,
                     "state": agent.state,
                     "asking": asking,

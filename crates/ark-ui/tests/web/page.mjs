@@ -610,37 +610,22 @@ const scenarios = {
   // pick, and the width never scrolls sideways.
   async narrow(page) {
     const wide = () => page.evaluate(() => {
-      const rail = document.querySelector(".destinations");
       const sidebar = document.querySelector(".sidebar");
       const main = document.querySelector(".main");
       const style = getComputedStyle(sidebar);
       return {
-        railWidth: Math.round(rail.getBoundingClientRect().width),
         sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
         sidebarPadding: Math.round(parseFloat(style.paddingLeft)),
         mainLeft: Math.round(main.getBoundingClientRect().left),
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    assert.deepEqual(await wide(), { railWidth: 44, sidebarWidth: 236, sidebarPadding: 10, mainLeft: 280, hscroll: false });
-    const rail = await page.locator(".destinations").evaluate((el) => ({
-      divider: getComputedStyle(el, "::after").content,
-      height: Math.round(el.getBoundingClientRect().height),
-      sameSurface: getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor,
-      labels: [...el.querySelectorAll(".destination-label")].map((label) => Math.round(label.getBoundingClientRect().width)),
-    }));
-    assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
-    assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
-    assert.equal(rail.sameSurface, false, "the fixed rail stays distinct from the project sidebar without a divider");
-    assert.deepEqual(rail.labels, [1, 1, 1], "wide rail labels stay available to assistive technology only");
-    await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
-    assert.equal(await page.locator(".destinations").evaluate((el) =>
-      getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), false,
-    "the fixed rail stays distinct in dark mode");
-    await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
-    await page.click("#toggle-sidebar");
+    assert.deepEqual(await wide(), { sidebarWidth: 236, sidebarPadding: 10, mainLeft: 236, hscroll: false });
+    assert.equal(await page.locator(".destinations, #toggle-sidebar").count(), 0, "no fixed rail, no hide button");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+b" : "Control+b");
     await page.waitForTimeout(350);
-    assert.deepEqual(await wide(), { railWidth: 44, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 44, hscroll: false });
+    assert.deepEqual(await wide(), { sidebarWidth: 0, sidebarPadding: 0, mainLeft: 0, hscroll: false });
+    assert.ok(await page.locator("#reveal-sidebar").isVisible(), "the title bar shows it again");
 
     await page.setViewportSize({ width: 720, height: 800 });
     // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
@@ -651,7 +636,6 @@ const scenarios = {
       sidebarLeft: Math.round(document.querySelector(".sidebar").getBoundingClientRect().left),
       sidebarWidth: Math.round(document.querySelector(".sidebar").getBoundingClientRect().width),
       sidebarPadding: Math.round(parseFloat(getComputedStyle(document.querySelector(".sidebar")).paddingLeft)),
-      destinations: (() => { const r = document.querySelector(".destinations").getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) }; })(),
       mainBottom: Math.round(document.querySelector(".main").getBoundingClientRect().bottom),
       hscroll: document.documentElement.scrollWidth > innerWidth,
     }));
@@ -660,17 +644,12 @@ const scenarios = {
     await page.click("#reveal-sidebar");
     await page.waitForTimeout(350);
     const open = await state();
-    assert.deepEqual({ ...open, destinations: undefined, mainBottom: undefined }, {
-      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 236, sidebarPadding: 10, destinations: undefined, mainBottom: undefined, hscroll: false,
-    });
-    assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
-    assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
-    assert.equal(await page.locator(".destination").count(), 3);
-    for (const button of await page.locator(".destination").all()) {
+    assert.deepEqual(open, { compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 236, sidebarPadding: 10, mainBottom: 800, hscroll: false });
+    for (const button of await page.locator("#search-chats, #new-agent").all()) {
       const box = await button.boundingBox();
-      assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
+      assert.ok(box.width >= 32 && box.height >= 32, JSON.stringify(box));
     }
-    await page.click("#new-session");
+    await page.click("#new-agent");
     await page.waitForTimeout(350);
     const closed = await state();
     assert.equal(closed.drawer, "closed");
@@ -680,7 +659,7 @@ const scenarios = {
     const restored = await state();
     assert.equal(restored.compact, "false");
     assert.equal(restored.drawer, "");
-    assert.equal(restored.sidebarLeft, 44);
+    assert.equal(restored.sidebarLeft, 0);
     assert.equal(restored.sidebarWidth, 0);
     assert.equal(restored.sidebarPadding, 0);
     assert.equal(restored.hscroll, false);
@@ -784,7 +763,7 @@ const scenarios = {
 // esc does not deny it.
 async function agents(page) {
   await page.evaluate(() => window.ark.view({ id: "board", title: "Board", nav: true, render: (el) => el.append("the board") }));
-  const tab = page.locator('.workspace-destination[data-view="board"]');
+  const tab = page.locator('.sidebar-view[data-view="board"]');
   await tab.click();
   assert.equal(await page.locator("#stage").isVisible(), true);
   assert.equal(await page.locator("#scroller").isVisible(), false);
@@ -808,7 +787,7 @@ async function agents(page) {
   assert.equal(await done, "done");
   await card.waitFor({ state: "detached" });
 
-  await page.locator('.destination[data-destination="home"]').click();
+  await page.evaluate(() => window.ark.showConversation());
   assert.equal(await page.locator("#stage").isVisible(), false);
   assert.equal(await page.locator("#scroller").isVisible(), true);
   assert.equal(await tab.getAttribute("aria-current"), null);
@@ -968,7 +947,7 @@ async function board(page) {
   // A window wide enough for the pane to show the three columns side by side.
   await page.setViewportSize({ width: 1440, height: 900 });
   // No fixed place for it: the rail has no Board and the sidebar lists agents only.
-  assert.equal(await page.locator('.workspace-destination[data-view="board"]').count(), 0);
+  assert.equal(await page.locator('.sidebar-view[data-view="board"]').count(), 0);
   await page.locator("#input").fill("plan chapter 3");
   await page.keyboard.press("Enter");
   const bd = page.locator(".pane-view.bd");
@@ -2193,12 +2172,11 @@ scenarios.plugins = plugins;
 // Plugins is a global destination. An unavailable broker is a visible account state, never an
 // empty search result, and Settings has no duplicate Plugins or Connections sections.
 async function marketplace(page) {
-  const destination = page.locator('.workspace-destination[data-view="marketplace"]');
+  const destination = page.locator('.sidebar-view[data-view="marketplace"]');
   await destination.waitFor();
   assert.equal(await destination.getAttribute("aria-label"), "Plugins");
   await destination.click();
   assert.equal(await destination.getAttribute("aria-current"), "page");
-  assert.equal(await page.locator('.destination[data-destination="home"]').getAttribute("aria-current"), null);
   await page.locator('.market-row[data-id="capability:mail"]').waitFor();
   // The chat kept above a view for its approvals paints nothing over it.
   assert.deepEqual(
@@ -2366,8 +2344,8 @@ scenarios.skills = skills;
 async function windows(page) {
   await page.locator("#input").waitFor();
   assert.equal(await page.locator("#app").getAttribute("data-os"), "windows");
-  assert.equal((await page.locator("kbd").first().innerText()).trim(), "Ctrl+N");
-  assert.match(await page.locator("#toggle-sidebar").getAttribute("title"), /\(Ctrl\+B\)/);
+  assert.equal(await page.locator("#new-agent").getAttribute("title"), "New chat (Ctrl+N)");
+  assert.match(await page.locator("#reveal-sidebar").getAttribute("title"), /\(Ctrl\+B\)/);
   assert.equal(await page.locator("body").evaluate((b) => b.innerHTML.includes("⌘")), false, "no ⌘ left");
   await page.keyboard.press("Control+k");
   await page.locator(".palette-input").waitFor();
@@ -2533,7 +2511,7 @@ scenarios.dictation = async (page) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.evaluate(() => window.arkTheme.set("dark"));
   if (await page.locator("#app").getAttribute("data-drawer") !== "open") await page.locator("#reveal-sidebar").click();
-  await page.locator("#toggle-sidebar").click();
+  await page.keyboard.press("ControlOrMeta+b");
   await page.waitForFunction(() => document.querySelector(".sidebar").getBoundingClientRect().right <= 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "dictation keeps the narrow composer within the window");
   await shot(page, "dictation-narrow-dark");
@@ -2655,7 +2633,7 @@ async function background(page) {
   await question.waitFor();
   const first = await page.evaluate(() => window.ark.summary().session.id);
 
-  await page.locator("#new-session").click();
+  await page.locator("#new-agent").click();
   await page.waitForFunction((id) => window.ark.summary().session.id !== id, first);
   const tray = page.locator("#asks .approval");
   await tray.waitFor();
@@ -2862,7 +2840,7 @@ async function chatWorkspacePolish(page) {
   assert.deepEqual(recovery, { leaves: 1, chatTabsHidden: true, heightDelta: 0 }, JSON.stringify(recovery));
 
   const first = await page.evaluate(() => window.ark.summary().session.id);
-  await page.locator("#new-session").click();
+  await page.locator("#new-agent").click();
   await page.waitForFunction((id) => window.ark.summary().session.id !== id, first);
   const primary = await page.evaluate(() => window.ark.summary().session.id);
   await page.waitForFunction(() => document.querySelectorAll(".chat-tab").length === 2);
@@ -2899,7 +2877,7 @@ async function chatWorkspacePolish(page) {
     const topbar = document.querySelector(".topbar");
     const chats = document.querySelector("#chat-tabs");
     const views = document.querySelector("#view-tabs");
-    const proof = document.querySelector('.workspace-destination[data-view="split-view-proof"]');
+    const proof = document.querySelector('.sidebar-view[data-view="split-view-proof"]');
     const account = document.querySelector("#open-settings");
     const browserHeight = Math.round(topbar.getBoundingClientRect().height);
     app.dataset.shell = "desktop";
@@ -2917,17 +2895,16 @@ async function chatWorkspacePolish(page) {
       titleBarViewsHidden: views.hidden,
       proofParent: proof.parentElement.id,
       proofLabel: proof.getAttribute("aria-label"),
-      accountParent: account.parentElement.id,
+      accountParent: account.parentElement.className,
       accountLabel: account.getAttribute("aria-label"),
-      railMaterial: getComputedStyle(document.querySelector(".destinations")).backgroundColor,
       sidebarMaterial: getComputedStyle(document.querySelector(".sidebar")).backgroundColor,
     };
   });
   assert.deepEqual(shell, {
     chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 44, nativeHeight: 44,
-    titleDisplay: "block", titleName: "none", titleRecent: true, titleBarViewsHidden: true, proofParent: "workspace-destinations",
-    proofLabel: "Proof", accountParent: "destinations", accountLabel: "Account and settings",
-    railMaterial: "rgb(241, 241, 239)", sidebarMaterial: "rgb(247, 247, 246)",
+    titleDisplay: "block", titleName: "none", titleRecent: true, titleBarViewsHidden: true, proofParent: "sidebar-views",
+    proofLabel: "Proof", accountParent: "sidebar-foot-row", accountLabel: "Settings",
+    sidebarMaterial: "rgb(247, 247, 246)",
   });
   await shot(page, "chat-workspace-shell");
   const grammar = await page.evaluate(() => {
@@ -3010,7 +2987,7 @@ async function chatWorkspacePolish(page) {
   assert.equal(await tile.evaluate((el) => getComputedStyle(el).transitionProperty), "background-color, color, scale", "hover changes colour only, press scales");
 
   await page.locator("#close-pane").click();
-  const proofDestination = page.locator('.workspace-destination[data-view="split-view-proof"]');
+  const proofDestination = page.locator('.sidebar-view[data-view="split-view-proof"]');
   assert.equal(await proofDestination.isVisible(), true);
   await page.locator("#chat-split").click();
   await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
@@ -3073,10 +3050,10 @@ async function chatWorkspacePolish(page) {
   assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
   assert.equal(await proofDestination.isVisible(), true, "opening a project view exits split and keeps the way back");
 
-  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" }).click();
+  await page.evaluate(() => window.ark.showConversation());
   for (let index = 0; index < 8; index++) {
     const before = await page.evaluate(() => window.ark.summary().session.id);
-    await page.locator("#new-session").click();
+    await page.locator("#new-agent").click();
     await page.waitForFunction((id) => window.ark.summary().session.id !== id, before);
   }
   await page.waitForFunction(() => {
@@ -3108,11 +3085,8 @@ async function chatWorkspacePolish(page) {
   const projectName = await page.evaluate(() => window.ark.summary().project.name);
   assert.equal(await page.locator("#session-title").innerText(), projectName);
   assert.equal(await page.locator("#session-title").evaluate((el) => getComputedStyle(el).display), "block", "project views keep the project title");
-  const chat = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" });
-  await chat.focus();
-  await chat.press("Enter");
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), true, "keyboard Chat focuses the visible selected chat");
-  assert.equal(await page.evaluate(() => !!document.activeElement && document.activeElement.getClientRects().length > 0), true, "keyboard Chat focuses visible conversation context");
+  await page.evaluate(() => window.ark.showConversation());
+  assert.equal(await page.locator("#stage").isVisible(), false, "back on the chat");
 }
 scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 
@@ -3121,7 +3095,7 @@ scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 async function spatialChatLayouts(page) {
   const sessions = [await page.evaluate(() => window.ark.summary().session.id)];
   for (let index = 0; index < 3; index++) {
-    await page.locator("#new-session").click();
+    await page.locator("#new-agent").click();
     await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
     sessions.push(await page.evaluate(() => window.ark.summary().session.id));
   }
@@ -3175,7 +3149,7 @@ async function spatialChatLayouts(page) {
   await page.waitForFunction(() => document.querySelectorAll(".chat-layout-leaf").length === 4);
   assert.equal(Number(await page.locator('.chat-divider[aria-orientation="vertical"]').first().getAttribute("aria-valuenow")), resized, "the divider ratio restores");
 
-  await page.locator("#new-session").click();
+  await page.locator("#new-agent").click();
   await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
   const fifth = await page.evaluate(() => window.ark.summary().session.id);
   await page.locator(`.chat-tab-item[data-session="${primary}"]`).dragTo(
@@ -3207,7 +3181,7 @@ scenarios["spatial-chat-layouts"] = spatialChatLayouts;
 async function detachedChatWindow(page) {
   const sessions = [await page.evaluate(() => window.ark.summary().session.id)];
   for (let index = 0; index < 2; index++) {
-    await page.locator("#new-session").click();
+    await page.locator("#new-agent").click();
     await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
     sessions.push(await page.evaluate(() => window.ark.summary().session.id));
   }
@@ -3519,7 +3493,7 @@ async function accent(page) {
 }
 scenarios.accent = accent;
 
-// At 760 px and below the destinations sit at the bottom and the side pane takes the whole
+// At 760 px and below the side pane takes the whole
 // window: what opens in it shows, and closing it brings the chat back.
 async function narrowPane(page) {
   const box = (selector) => page.locator(selector).evaluate((el) => {
@@ -3539,8 +3513,6 @@ async function narrowPane(page) {
     assert.equal((await box(".main")).width, 0);
     assert.ok(await page.locator(".pane-tab", { hasText: "Files" }).isVisible(), "the pane's tab shows");
     assert.ok(await page.locator("#close-pane").isVisible(), "the way back shows");
-    const rail = await page.locator(".destinations").boundingBox();
-    assert.ok(rail.y >= 700 && rail.width === 760, JSON.stringify(rail));
     await shot(page, `narrow-pane-${m}`);
     await page.click("#close-pane");
     await page.waitForFunction(() => document.getElementById("app").dataset.pane !== "open");
@@ -3556,7 +3528,7 @@ scenarios["narrow-pane"] = narrowPane;
 // ADR 0045: the Computer is off until the person turns it on, in Plugins (Turn on, Turn off),
 // or by Allow when an agent asks mid-task; the turn then goes on in the app.
 async function computerSwitch(page) {
-  const destination = page.locator('.workspace-destination[data-view="marketplace"]');
+  const destination = page.locator('.sidebar-view[data-view="marketplace"]');
   const row = page.locator('.market-row[data-id="capability:computer"]');
   const state = () => page.evaluate(async () => (await window.ark.call("capabilities")).find((c) => c.id === "computer")?.state);
   await destination.click();
@@ -3576,7 +3548,7 @@ async function computerSwitch(page) {
   assert.equal(await state(), "off");
   await shot(page, "computer-row-off");
 
-  await page.locator('.destination[data-destination="home"]').click();
+  await page.evaluate(() => window.ark.showConversation());
   await page.locator("#input").fill("Open Notes");
   await page.keyboard.press("Enter");
   const card = page.locator(".approval:not(.decided)");
@@ -3601,7 +3573,7 @@ scenarios["computer-switch"] = computerSwitch;
 async function agentConversations(page, fromNewChat = false) {
   await page.locator("#app.ready").waitFor();
   if (fromNewChat) {
-    await page.locator("#new-session").click();
+    await page.locator("#new-agent").click();
     await page.locator('.view[data-view="agent-chat"]:visible textarea').waitFor();
     assert.equal(await page.getByRole("dialog").count(), 0);
     assert.equal(await page.locator('textarea:visible').count(), 1);
@@ -3633,7 +3605,7 @@ async function agentConversations(page, fromNewChat = false) {
     const continued = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
     assert.equal(continued.id, original.id);
     assert.equal(continued.conversation, original.conversation);
-    await page.locator("#new-session").click();
+    await page.locator("#new-agent").click();
     await page.locator('.view[data-view="agent-chat"]:visible textarea').fill("GENERAL START SECOND");
     await page.locator('.view[data-view="agent-chat"]:visible textarea').press("Enter");
     await page.waitForFunction(() => window.ark.summary().location.session && document.querySelector("#thread")?.textContent.includes("GENERAL START SECOND"));

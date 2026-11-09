@@ -171,7 +171,8 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 |---|---|
 | `ark.projectSection`, `ark.rail` | Removed (ADR 0110): calling either throws `RemovedExtensionPoint`. The sidebar lists agents; a pinned agent is pinned from its tile |
 | `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` lists it in the top bar's + menu. An app panel with the id `terminal`, `browser` or `files` replaces ARK's, and an app panel's `presents` wins over a built-in one for the same view |
-| `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
+| `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a round button in the sidebar's foot, beside the profile (a string names it). Built once, kept while hidden |
+| `ark.newAgent({ open({ location }) })` | What the sidebar's + does (ADR 0112): make an agent in that folder and open its chat. Without it, + starts a chat |
 | `ark.setting({ id, title, icon, advanced, render(el, api) })` | A section of the Settings page; `advanced: true` lists it under Advanced |
 | `ark.plugin({ id, name, summary, category, icon, render(el, api) })` | Register an optional app integration in Plugins. Use a bundled same-origin image URL. The detail renderer may return `{ dispose() }`; ARK calls it on Back, detail replacement or leaving Plugins. Listing an entry never enables it. |
 | `ark.modelPicker({ label(model), render(el, { close }) })` | The app draws the composer's model menu. `label` gets the host's model ("claude sonnet") and returns the button's text, or `{ text, missing: true }` while nothing is chosen. `ark.refreshModel()` asks again after the app's state changed |
@@ -345,7 +346,7 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 
 ## The calm page
 
-ADR 0103, ADR 0110. The fixed rail holds Chat, the app's views and the account. There are no Work or Automations pages: an agent makes and runs them when asked.
+ADR 0103, ADR 0110, ADR 0112. One sidebar: Search and + (a new agent, from the app's `ark.newAgent`) at the top, agent tiles centered, the profile and the app's views at the foot; its edge drags to resize or hide it. There are no Work or Automations pages: an agent makes and runs them when asked.
 
 | Part | Behavior |
 |---|---|

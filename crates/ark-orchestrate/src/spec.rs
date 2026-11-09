@@ -17,6 +17,9 @@ pub struct AgentSpec {
     pub title: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// How the app draws it (an avatar key the app chose). Display metadata, opaque to ARK.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub look: String,
     /// One line on what it does, shown to agents that may delegate to it.
     #[serde(default)]
     pub role: String,
@@ -94,6 +97,7 @@ impl AgentSpec {
             name: name.into(),
             title: String::new(),
             description: String::new(),
+            look: String::new(),
             role: String::new(),
             instructions: String::new(),
             model: None,
@@ -345,6 +349,17 @@ impl TaskSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_record_from_before_look_reads_and_writes_without_it() {
+        let old: AgentSpec = serde_json::from_str(r#"{"name":"writer","title":"Writer"}"#).unwrap();
+        assert_eq!(old.look, "");
+        assert!(serde_json::to_value(&old).unwrap().get("look").is_none());
+        let mut new = old.clone();
+        new.look = "arch-green".into();
+        let back: AgentSpec = serde_json::from_value(serde_json::to_value(&new).unwrap()).unwrap();
+        assert_eq!(back.look, "arch-green");
+    }
 
     #[test]
     fn contacts_follow_permissions_and_parent() {

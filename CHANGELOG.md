@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+One sidebar like the owner's reference (ADR 0112).
+
+### Added
+
+- `AgentSpec.look`: how the app draws an agent (an avatar key it chooses). In graph agent nodes and `agents {all}` rows. `ark.agentIdentity` resolvers get `(name, look)`.
+- `ark.newAgent({ open({ location }) })`: what the sidebar's + does. Without it + starts a chat.
+- The sidebar's trailing edge resizes it (200 to 400 px, remembered), hides it when dragged under 150 px, resets on double click and moves with the arrow keys.
+
+### Changed
+
+- Agent tiles center in the sidebar (one alone, two side by side, a fourth on a centered row).
+- The sidebar's top holds round Search and + buttons; its foot holds the profile (from `ark.profile`), which opens Settings, and the app's `nav` views as round buttons.
+
+### Removed
+
+- The fixed rail (`#destinations`), its Chat button and compact bottom bar; the hide-sidebar button; the New chat row. New chat stays on ⌘N, `/new` and a tile's menu.
+
 ## [0.42.1] - 2026-11-09
 
 The phone lists agents and their chats (ADR 0111).

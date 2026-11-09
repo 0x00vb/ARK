@@ -43,6 +43,8 @@ pub struct AgentNode {
     pub title: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub look: String,
     pub role: String,
     pub parent: Option<String>,
     pub state: AgentState,
@@ -193,6 +195,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 name: r.name.clone(),
                 title: r.spec.title.clone(),
                 description: r.spec.description.clone(),
+                look: r.spec.look.clone(),
                 role: r.spec.role.clone(),
                 parent: r.spec.parent.clone(),
                 state: r.state,

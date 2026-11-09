@@ -1,4 +1,4 @@
-// The title bar names the current work. The fixed rail owns project navigation. On the right, a
+// The title bar names the current work. The sidebar's foot holds the app's views. On the right, a
 // + menu opens panels marked `nav` (Terminal, Browser, Files, then the app's) in the side pane.
 
 import { h, icon, clear, $ } from "./dom.js";
@@ -6,9 +6,9 @@ import { label as keyLabel } from "./keys.js";
 import { registry } from "./ext.js";
 
 export class Topbar {
-  constructor(api, destinations) {
+  constructor(api, sidebar) {
     this.api = api;
-    this.destinations = destinations;
+    this.sidebar = sidebar;
     this.tabs = $("#view-tabs");
     this.launchers = $("#panel-launchers");
     this.view = null;
@@ -19,7 +19,7 @@ export class Topbar {
     const views = [...registry.views.values()].filter((v) => v.nav && (!v.when || v.when({ project })));
     clear(this.tabs);
     this.tabs.hidden = true;
-    this.destinations?.setWorkspaceViews(views);
+    this.sidebar.setViews(views);
     clear(this.launchers);
     if ([...registry.panels.values()].some((p) => p.nav && (!p.when || p.when({ project })))) {
       this.launchers.append(h("button.icon-btn", {
@@ -52,6 +52,6 @@ export class Topbar {
   /// Mark the view the main column shows (null: the conversation).
   mark(id) {
     this.view = id;
-    this.destinations?.markWorkspace(id);
+    this.sidebar.markView(id);
   }
 }

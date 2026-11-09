@@ -116,8 +116,8 @@ function initial(name) {
 }
 
 /// One agent's face, `size` pixels square, in the style the app gives that name.
-export function agentFace(name, size) {
-  return h("span.chat-face.agent-face", { "aria-hidden": "true", "data-variant": agentIdentity?.(name), style: { "--face": `${size}px` } }, initial(String(name || "?")));
+export function agentFace(name, size, look = "") {
+  return h("span.chat-face.agent-face", { "aria-hidden": "true", "data-variant": agentIdentity?.(name, look), style: { "--face": `${size}px` } }, initial(String(name || "?")));
 }
 
 export function chatAvatar(participants = []) {

@@ -77,6 +77,7 @@ const MAX_IMAGE_BYTES: usize = 3_500_000;
 const MAX_IMAGES_BYTES: usize = 20_000_000;
 
 mod copying;
+mod groups;
 mod held;
 
 const DICTATION_CHUNK: usize = 256 * 1024;
@@ -762,6 +763,8 @@ pub struct Host {
     addressed: Mutex<HashMap<String, Arc<Conv>>>,
     /// Opens another live conversation of the app.
     siblings: ark_interact::Siblings,
+    /// Group chats in flight (ADR 0113).
+    groups: groups::GroupState,
     /// Held while the windows move to another chat and while a turn ends, so the two never
     /// interleave (a chat is never opened twice, nor left behind).
     switching: tokio::sync::Mutex<()>,
@@ -1294,6 +1297,7 @@ impl Host {
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             siblings: ix.siblings(),
+            groups: Default::default(),
             computer: ix.ark().computer().cloned(),
             processes: ix.ark().processes().cloned(),
             browser: ix.ark().browser_service().cloned(),
@@ -4948,6 +4952,8 @@ impl Host {
             "agents" if params["all"].as_bool() == Some(true) => self.all_agents(),
             // An agent the sidebar lists, in its own folder whichever chat is shown: Delete
             // ends it (its chats stay), Undo brings it back as it was (ADR 0112).
+            "groups" | "group_create" | "group_update" | "group_delete" | "group_messages"
+            | "group_send" => self.group_call(method, &params).await,
             "agent_end" | "agent_restore" => {
                 let project = s("project");
                 let agent = s("agent");

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Client protocol 1.11 (`agents.threads`): `GET /client/v1/agents`, `GET /client/v1/agents/{project}/{name}/conversations` and mutation `agent.conversation.start`. `GET /client/v1/chats` lists each agent's chats with turns. A send to a non-default chat of an agent runs in that chat (`TaskSpec.thread`), or steers it while it runs; it was landing in the first chat. The conversation read shows that chat's tasks. See `docs/MOBILE.md`.
+
 ## [0.42.0] - 2026-11-09
 
 Agent-first window (ADR 0109, ADR 0110).

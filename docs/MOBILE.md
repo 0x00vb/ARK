@@ -404,3 +404,13 @@ originating author, approvals and produced output access. Agent creation and com
 phone snapshots even without a desktop listener. Feed lag invalidates chats and open conversations.
 The native client groups Agents and Chats and searches roles. Missing metadata preserves ordinary
 chat behavior. A matching runtime release is required; this change does not deploy a Cloud image.
+
+Protocol1.11 adds an agent-first model for a phone. The runtime advertises `agents.threads` beside `agents.conversations`.
+
+| Call | Shape |
+|---|---|
+| `GET /client/v1/agents` | `{"agents":[{project, project_name, name, title, role, state, asking, running, updated_ms, preview, program}]}`, the rows of host `agents {all:true}` |
+| `GET /client/v1/agents/{project}/{name}/conversations` | `{"conversations":[{id, title, updated_at, turns, running, asking, default}]}`, newest first. Path segments are percent-decoded and checked. An unknown agent is `404` with code `agent_missing` |
+| Mutation `agent.conversation.start` | input `{project, agent}`. Idempotent per mutation id. The receipt's `resourceId` is the new conversation (session) id. `refused` for an agent on an agent program, `no_longer_applicable` for an agent that is gone |
+
+Each conversation id is a plain session id that opens with `GET /client/v1/chats/{id}`. `agent:<project>:<name>` stays the default conversation. `chat.send` to a conversation id runs the task in that conversation (`TaskSpec.thread`); while a task runs there, the text steers it. A send is `refused` for an agent on an agent program and for a session that is not that agent's conversation. The conversation read shows that conversation's tasks only. `GET /client/v1/chats` also lists each agent's non-default conversations that have turns, with `agent` set. The minimum supported minor version stays unchanged.

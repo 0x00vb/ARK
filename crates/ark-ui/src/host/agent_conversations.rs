@@ -1,7 +1,7 @@
 use super::*;
 use ark_interact::ark_orchestrate::{
-    agent_threads, latest_thread_title, person_tasks, AgentRecord, AgentState, OrchError, Origin,
-    TaskRecord, TaskSpec, TaskState,
+    agent_threads, latest_thread_title, person_tasks, AgentRecord, AgentState, AgentThread,
+    OrchError, Origin, TaskRecord, TaskSpec, TaskState,
 };
 use ark_sdk::prelude::ark_runtime::session::SessionRecord;
 use std::collections::{HashMap, HashSet};
@@ -27,6 +27,20 @@ impl std::fmt::Display for AgentUnavailable {
 }
 impl std::error::Error for AgentUnavailable {}
 
+/// A project id or an agent name as the client routes carry it.
+pub(crate) fn valid_segment(text: &str, max: usize) -> bool {
+    !text.is_empty()
+        && text.len() <= max
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// The conversation `id` names within `entry`: `None` for the default one.
+pub(crate) fn thread_of_chat<'a>(entry: &ClientAgent, id: &'a str) -> Option<&'a str> {
+    (!id.starts_with("agent:") && entry.agent.session.as_deref() != Some(id)).then_some(id)
+}
+
 fn address(id: &str) -> anyhow::Result<Option<(&str, &str)>> {
     let Some(value) = id.strip_prefix("agent:") else {
         return Ok(None);
@@ -34,14 +48,7 @@ fn address(id: &str) -> anyhow::Result<Option<(&str, &str)>> {
     let Some((project, name)) = value.split_once(':') else {
         return Err(AgentUnavailable.into());
     };
-    let valid = |text: &str, max: usize| {
-        !text.is_empty()
-            && text.len() <= max
-            && text
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    };
-    if !valid(project, 128) || !valid(name, 64) {
+    if !valid_segment(project, 128) || !valid_segment(name, 64) {
         return Err(AgentUnavailable.into());
     }
     Ok(Some((project, name)))
@@ -209,6 +216,7 @@ impl Host {
     pub(crate) fn client_agent_tasks(
         &self,
         entry: &ClientAgent,
+        thread: Option<&str>,
     ) -> anyhow::Result<Vec<TaskRecord>> {
         let mut tasks = Vec::new();
         for value in self
@@ -221,17 +229,85 @@ impl Host {
                 task.project == entry.project.id.as_str(),
                 "task belongs to another project"
             );
-            // The phone shows the agent's default conversation only.
-            let default = task
-                .thread
-                .as_ref()
-                .is_none_or(|t| entry.agent.session.as_ref() == Some(t));
-            if task.owner == entry.agent.name && task.conversation.is_none() && default {
+            let in_conversation = match thread {
+                Some(thread) => task.thread.as_deref() == Some(thread),
+                None => task
+                    .thread
+                    .as_ref()
+                    .is_none_or(|t| entry.agent.session.as_ref() == Some(t)),
+            };
+            if task.owner == entry.agent.name && task.conversation.is_none() && in_conversation {
                 tasks.push(task);
             }
         }
         tasks.sort_by(|a, b| (a.created_ms, &a.id).cmp(&(b.created_ms, &b.id)));
         Ok(tasks)
+    }
+
+    pub(crate) async fn apply_client_conversation_start(
+        self: &Arc<Self>,
+        record_id: &str,
+        device: &str,
+        request: &ark_protocol::MutationRequest,
+        record: &mut Value,
+    ) -> Result<(&'static str, &'static str, Option<String>), ClientMutationError> {
+        if let Some(id) = record["effect"]["conversation"].as_str() {
+            return Ok(("completed", "Started", Some(id.to_string())));
+        }
+        let project = request.input["project"].as_str().unwrap_or_default();
+        let name = request.input["agent"].as_str().unwrap_or_default();
+        let Some(entry) = self
+            .client_agents()
+            .map_err(ClientMutationError::Store)?
+            .into_iter()
+            .find(|e| e.project.id.as_str() == project && e.agent.name == name)
+        else {
+            return Ok((
+                "no_longer_applicable",
+                "That agent is no longer available",
+                None,
+            ));
+        };
+        let orchestrator = self
+            .siblings
+            .project_orchestrator(&entry.project.id)
+            .map_err(ClientMutationError::Store)?;
+        match orchestrator.start_thread(name) {
+            Ok(id) => {
+                record["effect"] = json!({ "conversation": id });
+                self.engine
+                    .store
+                    .put_record("client_mutation", record_id, device, record)
+                    .map_err(|error| ClientMutationError::Store(error.into()))?;
+                Ok(("completed", "Started", Some(id)))
+            }
+            Err(OrchError::Terminated(_) | OrchError::UnknownAgent(_)) => Ok((
+                "no_longer_applicable",
+                "That agent is no longer available",
+                None,
+            )),
+            Err(OrchError::NotAllowed(_)) => {
+                Ok(("refused", "That agent keeps one conversation", None))
+            }
+            Err(error) => Err(ClientMutationError::Store(error.into())),
+        }
+    }
+
+    /// The conversations of the agent `project`/`name`, or `None` when there is no such agent.
+    pub(crate) fn client_agent_conversations(
+        &self,
+        project: &str,
+        name: &str,
+    ) -> anyhow::Result<Option<Vec<AgentThread>>> {
+        let known = self.client_agents()?.into_iter().any(|e| {
+            e.project.id.as_str() == project
+                && e.agent.name == name
+                && e.agent.state != AgentState::Terminated
+        });
+        if !known {
+            return Ok(None);
+        }
+        Ok(Some(agent_threads(&self.engine, project, name)?))
     }
 
     pub(crate) async fn apply_client_agent_send(
@@ -250,13 +326,50 @@ impl Host {
             return Ok(("no_longer_applicable", "Nothing changed"));
         }
         let body = request.input["body"].as_str().unwrap_or_default();
+        let thread = thread_of_chat(&entry, &request.target);
+        let mut spec = TaskSpec::new(body);
+        if let Some(thread) = thread {
+            let running = agent_threads(&self.engine, entry.project.id.as_str(), &entry.agent.name)
+                .map_err(|error| ClientMutationError::Store(error.into()))?
+                .into_iter()
+                .any(|row| row.id == thread && row.running.is_some());
+            if running {
+                return match orchestrator.message_thread(
+                    "user",
+                    &entry.agent.name,
+                    Some(thread),
+                    body,
+                    "",
+                ) {
+                    Ok(_) => {
+                        record["effect"] = json!({ "steered": thread, "conversation": entry.id() });
+                        self.engine
+                            .store
+                            .put_record("client_mutation", record_id, device, record)
+                            .map_err(|error| ClientMutationError::Store(error.into()))?;
+                        Ok(("completed", "Sent"))
+                    }
+                    Err(OrchError::Terminated(_) | OrchError::UnknownAgent(_)) => {
+                        Ok(("no_longer_applicable", "Nothing changed"))
+                    }
+                    Err(OrchError::NotAllowed(_)) => {
+                        Ok(("refused", "That conversation cannot be written to"))
+                    }
+                    Err(error) => Err(ClientMutationError::Store(error.into())),
+                };
+            }
+            spec = spec.thread(thread);
+        }
         let task = match orchestrator
-            .submit_once(&entry.agent.name, TaskSpec::new(body), record_id)
+            .submit_once(&entry.agent.name, spec, record_id)
             .await
         {
             Ok(task) => task,
             Err(OrchError::Terminated(_) | OrchError::UnknownAgent(_)) => {
                 return Ok(("no_longer_applicable", "Nothing changed"))
+            }
+            Err(OrchError::NotAllowed(_)) if thread.is_some() => {
+                return Ok(("refused", "That conversation cannot be written to"))
             }
             Err(error) => return Err(ClientMutationError::Store(error.into())),
         };
@@ -278,7 +391,7 @@ impl Host {
         let mut summaries = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let tasks = self
-            .client_agent_tasks(&entry)
+            .client_agent_tasks(&entry, thread_of_chat(&entry, id))
             .map_err(ClientResultError::Store)?;
         for task in tasks.iter().rev() {
             for output in &task.outputs {

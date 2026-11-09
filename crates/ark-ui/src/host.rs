@@ -1645,14 +1645,22 @@ impl Host {
                     .as_str()
                     .is_some_and(|body| !body.trim().is_empty()) => {}
             "attention.answer" if request.input["choiceId"].as_str().is_some() => {}
+            "agent.conversation.start"
+                if self.agent_conversations_enabled()
+                    && ["project", "agent"]
+                        .iter()
+                        .all(|key| request.input[key].as_str().is_some_and(|v| !v.is_empty())) => {}
             "chat.model"
                 if serde_json::from_value::<ark_protocol::ChatModelInput>(
                     request.input.clone(),
                 )
                 .is_ok() => {}
-            "project.create" | "agent.create" | "chat.send" | "chat.model" | "attention.answer" => {
-                return Err(ClientMutationError::Unsupported)
-            }
+            "project.create"
+            | "agent.create"
+            | "agent.conversation.start"
+            | "chat.send"
+            | "chat.model"
+            | "attention.answer" => return Err(ClientMutationError::Unsupported),
             _ => return Err(ClientMutationError::Unsupported),
         }
         let _serial = self.client_mutations.lock().await;
@@ -1817,6 +1825,13 @@ impl Host {
             "chat.send" => {
                 self.apply_client_send(&record_id, device, request, &mut record)
                     .await?
+            }
+            "agent.conversation.start" => {
+                let result = self
+                    .apply_client_conversation_start(&record_id, device, request, &mut record)
+                    .await?;
+                resource_id = result.2;
+                (result.0, result.1)
             }
             "attention.answer" => {
                 let id = request

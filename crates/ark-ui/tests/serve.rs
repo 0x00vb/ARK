@@ -4048,3 +4048,320 @@ async fn native_general_work_followups_keep_the_same_conversation_and_admission(
     assert_eq!(provider.calls.lock().unwrap().len(), 2);
     assert!(store.list_records("orch_agent", None).unwrap().is_empty());
 }
+
+struct Phone {
+    port: u16,
+    auth: String,
+    hello: Value,
+    next: std::sync::atomic::AtomicU64,
+}
+
+impl Phone {
+    async fn open(port: u16, token: &str) -> Phone {
+        let auth = format!("Authorization: Bearer {token}\r\n");
+        let response = raw(
+            port,
+            format!("GET /client/v1/hello HTTP/1.1\r\nHost: runtime.example\r\n{auth}\r\n"),
+        )
+        .await;
+        let hello: Value =
+            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let next = hello["nextMutationCounter"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        Phone {
+            port,
+            auth,
+            hello,
+            next: std::sync::atomic::AtomicU64::new(next),
+        }
+    }
+
+    async fn get(&self, path: &str) -> (String, Value) {
+        let response = raw(
+            self.port,
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: runtime.example\r\n{}\r\n",
+                self.auth
+            ),
+        )
+        .await;
+        let status = response.lines().next().unwrap().to_string();
+        let body = response.split("\r\n\r\n").nth(1).unwrap();
+        (status, serde_json::from_str(body).unwrap_or(Value::Null))
+    }
+
+    fn mutation(&self, operation: &str, target: &str, input: Value) -> String {
+        let counter = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.mutation_numbered(counter, operation, target, input)
+    }
+
+    fn mutation_numbered(
+        &self,
+        counter: u64,
+        operation: &str,
+        target: &str,
+        input: Value,
+    ) -> String {
+        json!({
+            "epoch": self.hello["mutationEpoch"], "counter": counter.to_string(),
+            "operation": operation, "target": target,
+            "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())),
+            "input": input,
+        })
+        .to_string()
+    }
+
+    async fn send(&self, body: &str) -> Value {
+        let response = raw(
+            self.port,
+            post(
+                "/client/v1/mutations",
+                "runtime.example",
+                None,
+                &self.auth,
+                body,
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    }
+}
+
+#[tokio::test]
+async fn the_phone_lists_agents_and_their_chats_starts_one_and_sends_into_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone_token = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"researcher","role":"Acquisition research","tools":["notes.*"]}}),
+    )
+    .await
+    .unwrap();
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"coder","role":"Writes code","tools":["notes.*"]}}),
+    )
+    .await
+    .unwrap();
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    for (key, mut record) in store
+        .list_records("orch_agent", None)
+        .unwrap()
+        .into_iter()
+        .filter(|record| record["name"] == "coder")
+        .map(|record| {
+            (
+                format!("{}/coder", record["project"].as_str().unwrap()),
+                record,
+            )
+        })
+        .collect::<Vec<_>>()
+    {
+        record["spec"]["model"] = json!("agent:coder");
+        let project = record["project"].as_str().unwrap().to_string();
+        store
+            .put_record("orch_agent", &key, &project, &record)
+            .unwrap();
+    }
+    let (_restarted, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let phone = Phone::open(served.port, &phone_token.token).await;
+    assert_eq!(phone.hello["protocolMinor"], 11);
+    let capabilities = phone.hello["capabilities"].as_array().unwrap();
+    assert!(capabilities.contains(&json!("agents.threads")));
+    assert!(capabilities.contains(&json!("agents.conversations")));
+
+    let (status, agents) = phone.get("/client/v1/agents").await;
+    assert!(status.contains("200"), "{status}");
+    let row = agents["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == "researcher")
+        .unwrap();
+    for key in [
+        "project",
+        "project_name",
+        "name",
+        "title",
+        "role",
+        "state",
+        "asking",
+        "running",
+        "updated_ms",
+        "preview",
+        "program",
+    ] {
+        assert!(row.get(key).is_some(), "missing {key}: {row}");
+    }
+    assert_eq!(row["role"], "Acquisition research");
+    assert_eq!(row["program"], false);
+    let project = row["project"].as_str().unwrap().to_string();
+    let default_id = format!("agent:{project}:researcher");
+
+    let (status, listed) = phone
+        .get(&format!(
+            "/client/v1/agents/{project}/researcher/conversations"
+        ))
+        .await;
+    assert!(status.contains("200"), "{status}");
+    let rows = listed["conversations"].as_array().unwrap();
+    assert!(rows.is_empty(), "{listed}");
+    let (status, missing) = phone
+        .get(&format!("/client/v1/agents/{project}/nobody/conversations"))
+        .await;
+    assert!(status.contains("404"), "{status}");
+    assert_eq!(missing["code"], "agent_missing");
+    let (status, _) = phone
+        .get(&format!("/client/v1/agents/{project}/a%2Fb/conversations"))
+        .await;
+    assert!(status.contains("404"), "{status}");
+
+    let start = phone.mutation_numbered(
+        phone.next.load(std::sync::atomic::Ordering::SeqCst),
+        "agent.conversation.start",
+        "",
+        json!({"project": project, "agent": "researcher"}),
+    );
+    phone.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let receipt = phone.send(&start).await;
+    assert_eq!(receipt["status"], "completed", "{receipt}");
+    let thread = receipt["resourceId"].as_str().unwrap().to_string();
+    assert_ne!(thread, default_id);
+    assert_eq!(phone.send(&start).await, receipt);
+    assert_eq!(
+        store
+            .list_records("client_mutation", None)
+            .unwrap()
+            .iter()
+            .filter(|record| record["operation"] == "agent.conversation.start")
+            .count(),
+        1
+    );
+
+    let refused = phone
+        .send(&phone.mutation(
+            "agent.conversation.start",
+            "",
+            json!({"project": project, "agent": "coder"}),
+        ))
+        .await;
+    assert_eq!(refused["status"], "refused", "{refused}");
+    assert!(refused["resourceId"].is_null());
+    let thread_send = phone
+        .send(&phone.mutation("chat.send", &thread, json!({"body":"x","attachmentIds":[]})))
+        .await;
+    assert_eq!(thread_send["status"], "completed", "{thread_send}");
+
+    let sent = phone
+        .send(&phone.mutation(
+            "chat.send",
+            &default_id,
+            json!({"body":"Default question.","attachmentIds":[]}),
+        ))
+        .await;
+    assert_eq!(sent["status"], "completed", "{sent}");
+
+    let tasks = store.list_records("orch_task", None).unwrap();
+    let in_thread = tasks.iter().find(|task| task["objective"] == "x").unwrap();
+    assert_eq!(in_thread["thread"], thread);
+    let default_task = tasks
+        .iter()
+        .find(|task| task["objective"] == "Default question.")
+        .unwrap();
+    assert!(default_task["thread"].is_null());
+
+    let mut chat = Value::Null;
+    for _ in 0..200 {
+        let (_, value) = phone.get(&format!("/client/v1/chats/{thread}")).await;
+        chat = value;
+        if chat["messages"].as_array().is_some_and(|m| m.len() == 2) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let bodies: Vec<_> = chat["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["body"].clone())
+        .collect();
+    assert_eq!(bodies.len(), 2, "{chat}");
+    assert_eq!(bodies[0], "x");
+    assert_eq!(chat["chat"]["id"], thread);
+    let mut default_chat = Value::Null;
+    for _ in 0..200 {
+        let (_, value) = phone.get(&format!("/client/v1/chats/{default_id}")).await;
+        default_chat = value;
+        if default_chat["messages"]
+            .as_array()
+            .is_some_and(|m| m.len() == 2)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let default_bodies: Vec<_> = default_chat["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["body"].clone())
+        .collect();
+    assert_eq!(default_bodies[0], "Default question.");
+    assert!(!default_bodies.contains(&json!("x")));
+
+    let mut listed_thread = Value::Null;
+    for _ in 0..200 {
+        let (_, chats) = phone.get("/client/v1/chats").await;
+        if let Some(found) = chats["chats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == thread)
+        {
+            listed_thread = found.clone();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        listed_thread["agent"]["name"], "researcher",
+        "{listed_thread}"
+    );
+    let (_, listed) = phone
+        .get(&format!(
+            "/client/v1/agents/{project}/researcher/conversations"
+        ))
+        .await;
+    let rows = listed["conversations"].as_array().unwrap();
+    let row = rows.iter().find(|row| row["id"] == thread).unwrap();
+    assert_eq!(row["default"], false);
+    assert_eq!(row["turns"], 1);
+    for key in ["id", "title", "updated_at", "turns", "running", "asking"] {
+        assert!(row.get(key).is_some(), "missing {key}: {row}");
+    }
+    assert!(rows.iter().any(|row| row["default"] == true));
+}

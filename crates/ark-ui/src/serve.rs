@@ -1063,6 +1063,10 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 )
                 .chain(
                     host.agent_conversations_enabled()
+                        .then(|| "agents.threads".to_string()),
+                )
+                .chain(
+                    host.agent_conversations_enabled()
                         .then(|| "agents.create".to_string()),
                 )
                 .chain(
@@ -1423,6 +1427,60 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 body.to_string().as_bytes(),
             )
             .await
+        }
+        ("GET", "/client/v1/agents") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let body = json!({ "agents": host.all_agents()? });
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("GET", path) if client_agent_conversations_path(path).is_some() => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let Some((project, name)) = client_agent_conversations_path(path) else {
+                return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
+            };
+            match host.client_agent_conversations(&project, &name)? {
+                Some(conversations) => {
+                    let body = json!({ "conversations": conversations });
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        body.to_string().as_bytes(),
+                    )
+                    .await
+                }
+                None => {
+                    client_error(
+                        &mut sock,
+                        "agent_missing",
+                        "That agent is no longer available.",
+                        "404 Not Found",
+                    )
+                    .await
+                }
+            }
         }
         ("GET", "/client/v1/projects") => {
             if !client_authed {
@@ -2595,6 +2653,36 @@ fn client_result_path(path: &str) -> Option<(&str, &str)> {
     let (chat, result) = tail.split_once("/results/")?;
     (!chat.is_empty() && !result.is_empty() && !chat.contains('/') && !result.contains('/'))
         .then_some((chat, result))
+}
+
+/// `/client/v1/agents/{project}/{name}/conversations` with both segments percent-decoded and valid.
+fn client_agent_conversations_path(path: &str) -> Option<(String, String)> {
+    let tail = path
+        .strip_prefix("/client/v1/agents/")?
+        .strip_suffix("/conversations")?;
+    let (project, name) = tail.split_once('/')?;
+    let project = percent_decode(project)?;
+    let name = percent_decode(name)?;
+    (crate::host::agent_conversations::valid_segment(&project, 128)
+        && crate::host::agent_conversations::valid_segment(&name, 64))
+    .then_some((project, name))
+}
+
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%' {
+            let hex = text.get(at + 1..at + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            at += 3;
+        } else {
+            out.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn provider_authorization_begin_path(path: &str) -> Option<&str> {

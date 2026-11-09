@@ -2,7 +2,7 @@
   "protocols": [
     {
       "major": 1,
-      "latestMinor": 10
+      "latestMinor": 11
     }
   ],
   "runtimeVersion": "0.18.3",

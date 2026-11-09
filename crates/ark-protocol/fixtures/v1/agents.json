@@ -1,0 +1,17 @@
+{
+  "agents": [
+    {
+      "project": "p1",
+      "project_name": "Research",
+      "name": "researcher",
+      "title": "Researcher",
+      "role": "Acquisition research",
+      "state": "idle",
+      "asking": false,
+      "running": [],
+      "updated_ms": 1762700000000,
+      "preview": "Find three buyers",
+      "program": false
+    }
+  ]
+}

@@ -63,6 +63,57 @@ public struct AccountPairRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct AgentConversation: Codable, Equatable, Sendable {
+    public let asking: Bool
+    public let default: Bool
+    public let id: String
+    public let running: String?
+    public let title: String
+    public let turns: Int
+    public let updated_at: String
+
+    public init(
+        asking: Bool,
+        default: Bool,
+        id: String,
+        running: String? = nil,
+        title: String,
+        turns: Int,
+        updated_at: String
+    ) {
+        self.asking = asking
+        self.default = default
+        self.id = id
+        self.running = running
+        self.title = title
+        self.turns = turns
+        self.updated_at = updated_at
+    }
+}
+
+public struct AgentConversationStartInput: Codable, Equatable, Sendable {
+    public let agent: String
+    public let project: String
+
+    public init(
+        agent: String,
+        project: String
+    ) {
+        self.agent = agent
+        self.project = project
+    }
+}
+
+public struct AgentConversations: Codable, Equatable, Sendable {
+    public let conversations: [AgentConversation]
+
+    public init(
+        conversations: [AgentConversation]
+    ) {
+        self.conversations = conversations
+    }
+}
+
 public struct AgentCreateInput: Codable, Equatable, Sendable {
     public let name: String
     public let role: String
@@ -73,6 +124,46 @@ public struct AgentCreateInput: Codable, Equatable, Sendable {
     ) {
         self.name = name
         self.role = role
+    }
+}
+
+public struct AgentRow: Codable, Equatable, Sendable {
+    public let asking: Bool
+    public let name: String
+    public let preview: String?
+    public let program: Bool
+    public let project: String
+    public let project_name: String
+    public let role: String
+    public let running: [String]
+    public let state: String
+    public let title: String
+    public let updated_ms: Int
+
+    public init(
+        asking: Bool,
+        name: String,
+        preview: String? = nil,
+        program: Bool,
+        project: String,
+        project_name: String,
+        role: String,
+        running: [String],
+        state: String,
+        title: String,
+        updated_ms: Int
+    ) {
+        self.asking = asking
+        self.name = name
+        self.preview = preview
+        self.program = program
+        self.project = project
+        self.project_name = project_name
+        self.role = role
+        self.running = running
+        self.state = state
+        self.title = title
+        self.updated_ms = updated_ms
     }
 }
 
@@ -95,6 +186,16 @@ public struct AgentScheduleSummary: Codable, Equatable, Sendable {
         self.state = state
         self.title = title
         self.when = when
+    }
+}
+
+public struct AgentsList: Codable, Equatable, Sendable {
+    public let agents: [AgentRow]
+
+    public init(
+        agents: [AgentRow]
+    ) {
+        self.agents = agents
     }
 }
 

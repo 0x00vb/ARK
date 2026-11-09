@@ -106,15 +106,24 @@ async fn all_chats(host: &Arc<Host>) -> anyhow::Result<Vec<Value>> {
         .iter()
         .filter(|entry| entry.agent.state != AgentState::Terminated)
     {
-        for thread in agent_threads(
+        let threads = match agent_threads(
             host.engine_for_client(),
             entry.project.id.as_str(),
             &entry.agent.name,
-        )?
-        .iter()
-        .filter(|thread| !thread.default)
-        {
-            rows.push(thread_item(entry, thread));
+        ) {
+            Ok(threads) => threads,
+            Err(error) => {
+                tracing::warn!(project = %entry.project.id, agent = %entry.agent.name, %error, "skipping the chats of an agent");
+                continue;
+            }
+        };
+        for thread in threads.iter().filter(|thread| !thread.default) {
+            match thread_item(entry, thread) {
+                Ok(row) => rows.push(row),
+                Err(error) => {
+                    tracing::warn!(project = %entry.project.id, agent = %entry.agent.name, %error, "skipping a chat that has no readable time")
+                }
+            }
         }
     }
     rows.sort_by(|a, b| b["updatedAt"].as_str().cmp(&a["updatedAt"].as_str()));
@@ -138,13 +147,13 @@ fn agent_item(entry: &ClientAgent) -> Value {
         "agent": { "name": entry.agent.name, "role": entry.agent.spec.role } })
 }
 
-fn thread_item(entry: &ClientAgent, thread: &AgentThread) -> Value {
+fn thread_item(entry: &ClientAgent, thread: &AgentThread) -> Result<Value, time::error::Format> {
     let mut item = agent_item(entry);
     item["id"] = json!(thread.id);
     item["title"] = json!(thread.title);
-    item["updatedAt"] = json!(thread.updated_at.format(&Rfc3339).unwrap_or_default());
+    item["updatedAt"] = json!(thread.updated_at.format(&Rfc3339)?);
     item["preview"] = json!(thread.title);
-    item
+    Ok(item)
 }
 
 async fn agent_conversation(
@@ -184,14 +193,17 @@ async fn agent_conversation(
         .map(attention_item)
         .collect::<Vec<_>>();
     let mut chat = match thread {
-        Some(id) => agent_threads(
+        Some(id) => match agent_threads(
             host.engine_for_client(),
             entry.project.id.as_str(),
             &entry.agent.name,
         )?
         .iter()
         .find(|row| row.id == id)
-        .map_or_else(|| agent_item(&entry), |row| thread_item(&entry, row)),
+        {
+            Some(row) => thread_item(&entry, row)?,
+            None => agent_item(&entry),
+        },
         None => agent_item(&entry),
     };
     chat["agent"]["schedules"] = json!(schedules);

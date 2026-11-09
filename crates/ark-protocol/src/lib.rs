@@ -318,6 +318,51 @@ wire!(
     }
 );
 wire!(
+    pub struct AgentConversationStartInput {
+        project: String,
+        agent: String,
+    }
+);
+
+/// One agent as `GET /client/v1/agents` lists it. Field names are the runtime's own, not camelCase.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentRow {
+    pub project: String,
+    pub project_name: String,
+    pub name: String,
+    pub title: String,
+    pub role: String,
+    pub state: String,
+    pub asking: bool,
+    pub running: Vec<String>,
+    pub updated_ms: u64,
+    pub preview: Option<String>,
+    pub program: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentsList {
+    pub agents: Vec<AgentRow>,
+}
+
+/// One conversation as `GET /client/v1/agents/{project}/{name}/conversations` lists it.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentConversation {
+    pub id: String,
+    pub title: String,
+    pub updated_at: String,
+    pub turns: u32,
+    pub running: Option<String>,
+    pub asking: bool,
+    pub default: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AgentConversations {
+    pub conversations: Vec<AgentConversation>,
+}
+
+wire!(
     pub struct ApprovalChoice {
         id: String,
         label: String,
@@ -621,6 +666,9 @@ pub struct ProtocolSchema {
     model_default: ModelDefault,
     conversation_model: ConversationModel,
     chat_model_input: ChatModelInput,
+    agent_conversation_start_input: AgentConversationStartInput,
+    agents_list: AgentsList,
+    agent_conversations: AgentConversations,
     home: HomeSnapshot,
     chats: ChatsSnapshot,
     conversation: ConversationSnapshot,
@@ -698,6 +746,18 @@ mod tests {
         let expected: serde_json::Value =
             serde_json::from_str(include_str!("../fixtures/v1/bootstrap.json")).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn agent_fixtures_decode_and_round_trip() {
+        let agents: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/v1/agents.json")).unwrap();
+        let decoded: AgentsList = serde_json::from_value(agents.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), agents);
+        let conversations: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/v1/agent_conversations.json")).unwrap();
+        let decoded: AgentConversations = serde_json::from_value(conversations.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), conversations);
     }
 
     #[test]

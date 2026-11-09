@@ -25,6 +25,75 @@
       ],
       "type": "object"
     },
+    "AgentConversation": {
+      "description": "One conversation as `GET /client/v1/agents/{project}/{name}/conversations` lists it.",
+      "properties": {
+        "asking": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "running": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "turns": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "updated_at",
+        "turns",
+        "asking",
+        "default"
+      ],
+      "type": "object"
+    },
+    "AgentConversationStartInput": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "agent"
+      ],
+      "type": "object"
+    },
+    "AgentConversations": {
+      "properties": {
+        "conversations": {
+          "items": {
+            "$ref": "#/$defs/AgentConversation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "conversations"
+      ],
+      "type": "object"
+    },
     "AgentCreateInput": {
       "properties": {
         "name": {
@@ -37,6 +106,65 @@
       "required": [
         "name",
         "role"
+      ],
+      "type": "object"
+    },
+    "AgentRow": {
+      "description": "One agent as `GET /client/v1/agents` lists it. Field names are the runtime's own, not camelCase.",
+      "properties": {
+        "asking": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "program": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
+        },
+        "project_name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "running": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project",
+        "project_name",
+        "name",
+        "title",
+        "role",
+        "state",
+        "asking",
+        "running",
+        "updated_ms",
+        "program"
       ],
       "type": "object"
     },
@@ -66,6 +194,20 @@
         "title",
         "when",
         "state"
+      ],
+      "type": "object"
+    },
+    "AgentsList": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
       ],
       "type": "object"
     },
@@ -1508,8 +1650,17 @@
     "account_pair_request": {
       "$ref": "#/$defs/AccountPairRequest"
     },
+    "agent_conversation_start_input": {
+      "$ref": "#/$defs/AgentConversationStartInput"
+    },
+    "agent_conversations": {
+      "$ref": "#/$defs/AgentConversations"
+    },
     "agent_create_input": {
       "$ref": "#/$defs/AgentCreateInput"
+    },
+    "agents_list": {
+      "$ref": "#/$defs/AgentsList"
     },
     "bootstrap": {
       "$ref": "#/$defs/Bootstrap"
@@ -1658,6 +1809,9 @@
     "model_default",
     "conversation_model",
     "chat_model_input",
+    "agent_conversation_start_input",
+    "agents_list",
+    "agent_conversations",
     "home",
     "chats",
     "conversation",

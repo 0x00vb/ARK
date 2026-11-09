@@ -4365,3 +4365,339 @@ async fn the_phone_lists_agents_and_their_chats_starts_one_and_sends_into_it() {
     }
     assert!(rows.iter().any(|row| row["default"] == true));
 }
+
+struct PhoneRuntime {
+    _first: (Arc<ark_ui::Host>, ark_ui::Served),
+    _host: Arc<ark_ui::Host>,
+    served: ark_ui::Served,
+    phone: Phone,
+    store: ark_store::Store,
+    release: tokio::sync::watch::Sender<bool>,
+    _dir: tempfile::TempDir,
+}
+
+impl PhoneRuntime {
+    /// A runtime with `agents` (name, on an agent program) and a paired phone.
+    async fn open(agents: &[(&str, bool)]) -> PhoneRuntime {
+        let (release, gate) = tokio::sync::watch::channel(false);
+        let dir = tempfile::tempdir().unwrap();
+        let tokens = Tokens::in_store(dir.path());
+        let owner = tokens.create("Owner").unwrap();
+        let phone_token = tokens
+            .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+            .unwrap();
+        let provider = || -> Arc<dyn ark_model::Provider> {
+            Arc::new(BusyTurnGate {
+                inner: model(),
+                release: gate.clone(),
+            })
+        };
+        let first = ArkUi::new(app_with_provider(dir.path(), provider()))
+            .access(Access::Tokens(tokens.clone()))
+            .serve_background("127.0.0.1:0")
+            .await
+            .unwrap();
+        let client = Client::new(&format!("http://127.0.0.1:{}", first.1.port), &owner);
+        for (name, _) in agents {
+            resource_call(
+                &client,
+                "project",
+                "spawn_agent",
+                "",
+                json!({"spec":{"name":name,"role":"Does work","tools":["notes.*"]}}),
+            )
+            .await
+            .unwrap();
+        }
+        let store = ark_store::Store::open(dir.path()).unwrap();
+        for (name, _) in agents.iter().filter(|(_, program)| *program) {
+            let mut record = store
+                .list_records("orch_agent", None)
+                .unwrap()
+                .into_iter()
+                .find(|record| record["name"] == *name)
+                .unwrap();
+            let project = record["project"].as_str().unwrap().to_string();
+            record["spec"]["model"] = json!(format!("agent:{name}"));
+            store
+                .put_record(
+                    "orch_agent",
+                    &format!("{project}/{name}"),
+                    &project,
+                    &record,
+                )
+                .unwrap();
+        }
+        let (host, served) = ArkUi::new(app_with_provider(dir.path(), provider()))
+            .access(Access::Tokens(tokens))
+            .serve_background("127.0.0.1:0")
+            .await
+            .unwrap();
+        let phone = Phone::open(served.port, &phone_token.token).await;
+        PhoneRuntime {
+            _first: first,
+            _host: host,
+            served,
+            phone,
+            store,
+            release,
+            _dir: dir,
+        }
+    }
+
+    async fn agent(&self, name: &str) -> (String, String) {
+        let (_, agents) = self.phone.get("/client/v1/agents").await;
+        let project = agents["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["name"] == name)
+            .unwrap()["project"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let id = format!("agent:{project}:{name}");
+        (project, id)
+    }
+
+    async fn start_thread(&self, project: &str, agent: &str) -> String {
+        let receipt = self
+            .phone
+            .send(&self.phone.mutation(
+                "agent.conversation.start",
+                "",
+                json!({"project": project, "agent": agent}),
+            ))
+            .await;
+        assert_eq!(receipt["status"], "completed", "{receipt}");
+        receipt["resourceId"].as_str().unwrap().to_string()
+    }
+
+    async fn chat_send(&self, target: &str, body: &str) -> Value {
+        self.phone
+            .send(&self.phone.mutation(
+                "chat.send",
+                target,
+                json!({"body": body, "attachmentIds": []}),
+            ))
+            .await
+    }
+}
+
+#[tokio::test]
+async fn a_thread_send_steers_the_task_running_in_it() {
+    let runtime = PhoneRuntime::open(&[("researcher", false)]).await;
+    let (project, _) = runtime.agent("researcher").await;
+    let thread = runtime.start_thread(&project, "researcher").await;
+    let first = runtime.chat_send(&thread, "Hello.").await;
+    assert_eq!(first["status"], "completed", "{first}");
+    let path = format!("/client/v1/agents/{project}/researcher/conversations");
+    let mut turned = false;
+    for _ in 0..200 {
+        let (_, listed) = runtime.phone.get(&path).await;
+        turned = listed["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == thread && row["turns"] == 1);
+        if turned {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(turned, "the first turn never finished");
+    let held = runtime.chat_send(&thread, "Hold this turn.").await;
+    assert_eq!(held["status"], "completed", "{held}");
+    let mut running = Value::Null;
+    for _ in 0..200 {
+        let (_, listed) = runtime.phone.get(&path).await;
+        running = listed["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == thread)
+            .map_or(Value::Null, |row| row["running"].clone());
+        if !running.is_null() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!running.is_null(), "the held task never started running");
+    let tasks_before = runtime.store.list_records("orch_task", None).unwrap().len();
+    assert_eq!(tasks_before, 2);
+
+    let steered = runtime.chat_send(&thread, "Change course.").await;
+    assert_eq!(steered["status"], "completed", "{steered}");
+    let effects: Vec<Value> = runtime
+        .store
+        .list_records("client_mutation", None)
+        .unwrap()
+        .into_iter()
+        .filter(|record| {
+            record["operation"] == "chat.send" && record["effect"]["steered"] == thread
+        })
+        .collect();
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    assert!(effects[0]["effect"]["task"].is_null());
+    assert_eq!(
+        runtime.store.list_records("orch_task", None).unwrap().len(),
+        tasks_before
+    );
+    runtime.release.send(true).unwrap();
+}
+
+#[tokio::test]
+async fn a_thread_send_for_a_program_agent_is_refused() {
+    let runtime = PhoneRuntime::open(&[("researcher", false), ("coder", true)]).await;
+    let (project, _) = runtime.agent("researcher").await;
+    let thread = runtime.start_thread(&project, "researcher").await;
+    let (coder_project, coder_id) = runtime.agent("coder").await;
+    let coder_scope = runtime
+        .store
+        .list_records("orch_agent", None)
+        .unwrap()
+        .into_iter()
+        .find(|record| record["name"] == "coder")
+        .unwrap()["scope"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut session = runtime.store.get_session(&thread).unwrap().unwrap();
+    session["project"] = json!(coder_scope);
+    runtime
+        .store
+        .put_session(
+            "coder-other-chat",
+            &ark_sdk::prelude::ark_core::ProjectId(coder_scope),
+            &session,
+        )
+        .unwrap();
+    assert_eq!(coder_id, format!("agent:{coder_project}:coder"));
+    let refused = runtime.chat_send("coder-other-chat", "Work on this.").await;
+    assert_eq!(refused["status"], "refused", "{refused}");
+    assert!(runtime
+        .store
+        .list_records("orch_task", None)
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn one_damaged_agent_does_not_fail_the_chat_list() {
+    let runtime = PhoneRuntime::open(&[("researcher", false), ("writer", false)]).await;
+    let (project, _) = runtime.agent("writer").await;
+    let thread = runtime.start_thread(&project, "writer").await;
+    runtime.release.send(true).unwrap();
+    let sent = runtime.chat_send(&thread, "Hello.").await;
+    assert_eq!(sent["status"], "completed", "{sent}");
+    let path = format!("/client/v1/agents/{project}/writer/conversations");
+    let mut turned = false;
+    for _ in 0..200 {
+        let (_, listed) = runtime.phone.get(&path).await;
+        turned = listed["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == thread && row["turns"] == 1);
+        if turned {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(turned, "the turn never finished");
+    let mut record = runtime
+        .store
+        .list_records("orch_agent", None)
+        .unwrap()
+        .into_iter()
+        .find(|record| record["name"] == "researcher")
+        .unwrap();
+    record["running"] = json!(["damaged-task"]);
+    runtime
+        .store
+        .put_record(
+            "orch_agent",
+            &format!("{project}/researcher"),
+            &project,
+            &record,
+        )
+        .unwrap();
+    runtime
+        .store
+        .put_record("orch_task", "damaged-task", &project, &json!({"junk": 1}))
+        .unwrap();
+    let (status, chats) = runtime.phone.get("/client/v1/chats").await;
+    assert!(status.contains("200"), "{status}");
+    let found = chats["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["id"] == thread)
+        .count();
+    assert_eq!(found, 1);
+}
+
+#[tokio::test]
+async fn the_agent_routes_need_a_credential_and_match_the_protocol_fixtures() {
+    let runtime = PhoneRuntime::open(&[("researcher", false)]).await;
+    let (project, _) = runtime.agent("researcher").await;
+    for path in [
+        "/client/v1/agents".to_string(),
+        format!("/client/v1/agents/{project}/researcher/conversations"),
+    ] {
+        let response = raw(
+            runtime.served.port,
+            format!("GET {path} HTTP/1.1\r\nHost: runtime.example\r\n\r\n"),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+    }
+    let thread = runtime.start_thread(&project, "researcher").await;
+    let sent = runtime.chat_send(&thread, "Hello.").await;
+    assert_eq!(sent["status"], "completed", "{sent}");
+    runtime.release.send(true).unwrap();
+
+    let (_, agents) = runtime.phone.get("/client/v1/agents").await;
+    let typed: ark_protocol::AgentsList = serde_json::from_value(agents.clone()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), agents);
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../ark-protocol/fixtures/v1/agents.json")).unwrap();
+    assert_eq!(keys(&agents["agents"][0]), keys(&fixture["agents"][0]));
+
+    let path = format!("/client/v1/agents/{project}/researcher/conversations");
+    let mut listed = Value::Null;
+    for _ in 0..200 {
+        let (_, value) = runtime.phone.get(&path).await;
+        listed = value;
+        if listed["conversations"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|row| row["id"] == thread))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let typed: ark_protocol::AgentConversations = serde_json::from_value(listed.clone()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), listed);
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../ark-protocol/fixtures/v1/agent_conversations.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        keys(&listed["conversations"][0]),
+        keys(&fixture["conversations"][0])
+    );
+
+    let (_, chats) = runtime.phone.get("/client/v1/chats").await;
+    let ids: Vec<&Value> = chats["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["id"] == thread)
+        .collect();
+    assert_eq!(ids.len(), 1, "{chats}");
+}
+
+fn keys(value: &Value) -> Vec<&String> {
+    value.as_object().unwrap().keys().collect()
+}

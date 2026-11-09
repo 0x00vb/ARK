@@ -1,0 +1,22 @@
+{
+  "conversations": [
+    {
+      "id": "s1",
+      "title": "Find three buyers",
+      "updated_at": "2026-11-09T12:00:00Z",
+      "turns": 2,
+      "running": null,
+      "asking": false,
+      "default": true
+    },
+    {
+      "id": "s2",
+      "title": "Draft the outreach",
+      "updated_at": "2026-11-09T12:30:00Z",
+      "turns": 1,
+      "running": "t1",
+      "asking": true,
+      "default": false
+    }
+  ]
+}

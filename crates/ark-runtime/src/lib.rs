@@ -22,6 +22,7 @@ pub mod cancel;
 pub mod capmap;
 pub mod catalog;
 pub mod context_report;
+pub mod conversations;
 pub mod distill;
 pub mod engine;
 pub mod error;

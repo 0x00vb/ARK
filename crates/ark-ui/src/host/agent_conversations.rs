@@ -1,7 +1,10 @@
 use super::*;
 use ark_interact::ark_orchestrate::{
-    AgentRecord, AgentState, OrchError, Origin, TaskRecord, TaskSpec, TaskState,
+    agent_threads, latest_thread_title, person_tasks, AgentRecord, AgentState, OrchError, Origin,
+    TaskRecord, TaskSpec, TaskState,
 };
+use ark_sdk::prelude::ark_runtime::session::SessionRecord;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct ClientAgent {
     pub project: Project,
@@ -63,27 +66,41 @@ impl Host {
                 .store
                 .list_records("orch_agent", Some(project.id.as_str()))?
             {
-                let agent: AgentRecord = serde_json::from_value(value)?;
-                anyhow::ensure!(
-                    agent.project == project.id.as_str(),
-                    "agent belongs to another project"
-                );
-                let scope = self
-                    .engine
-                    .store
-                    .get_project(&ProjectId(agent.scope.clone()))?
-                    .ok_or_else(|| anyhow::anyhow!("agent context no longer exists"))?;
-                anyhow::ensure!(
-                    scope.parent.as_ref() == Some(&project.id),
-                    "agent context belongs to another project"
-                );
-                agents.push(ClientAgent {
-                    project: project.clone(),
-                    agent,
-                });
+                // One damaged record must not hide every other agent.
+                match self.checked_agent(&project, value) {
+                    Ok(agent) => agents.push(ClientAgent {
+                        project: project.clone(),
+                        agent,
+                    }),
+                    Err(error) => {
+                        tracing::warn!(project = %project.id, %error, "skipping an agent record")
+                    }
+                }
             }
         }
         Ok(agents)
+    }
+
+    fn checked_agent(
+        &self,
+        project: &ark_core::Project,
+        value: serde_json::Value,
+    ) -> anyhow::Result<AgentRecord> {
+        let agent: AgentRecord = serde_json::from_value(value)?;
+        anyhow::ensure!(
+            agent.project == project.id.as_str(),
+            "agent belongs to another project"
+        );
+        let scope = self
+            .engine
+            .store
+            .get_project(&ProjectId(agent.scope.clone()))?
+            .ok_or_else(|| anyhow::anyhow!("agent context no longer exists"))?;
+        anyhow::ensure!(
+            scope.parent.as_ref() == Some(&project.id),
+            "agent context belongs to another project"
+        );
+        Ok(agent)
     }
 
     pub(crate) fn client_agent(&self, id: &str) -> anyhow::Result<Option<ClientAgent>> {
@@ -204,7 +221,12 @@ impl Host {
                 task.project == entry.project.id.as_str(),
                 "task belongs to another project"
             );
-            if task.owner == entry.agent.name && task.conversation.is_none() {
+            // The phone shows the agent's default conversation only.
+            let default = task
+                .thread
+                .as_ref()
+                .is_none_or(|t| entry.agent.session.as_ref() == Some(t));
+            if task.owner == entry.agent.name && task.conversation.is_none() && default {
                 tasks.push(task);
             }
         }
@@ -325,6 +347,147 @@ impl Host {
             &ArtifactId(result.to_string()),
             max_bytes,
         )
+    }
+}
+
+/// The optional `thread` of a call: one of the agent's conversations.
+pub(crate) fn thread_of(input: &Value) -> anyhow::Result<Option<String>> {
+    match &input["thread"] {
+        Value::Null => Ok(None),
+        Value::String(t) if !t.is_empty() && t.len() <= 128 => Ok(Some(t.clone())),
+        _ => anyhow::bail!("a conversation is named by its id"),
+    }
+}
+
+/// A session that is a person's own chat: not Work's, not an automation's.
+fn general(record: &SessionRecord) -> bool {
+    record.work_item.is_none() && !record.execution_managed && record.execution_scope.is_none()
+}
+
+impl Host {
+    /// Every agent of every top-level project that has not ended, read from the store: no
+    /// orchestrator is opened for them. Most recently changed first.
+    pub(crate) fn all_agents(&self) -> anyhow::Result<Value> {
+        let mut rows: Vec<(u64, Value)> = Vec::new();
+        // The agents that ask the person something, per project: (project, agent).
+        let mut asking_in: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut tasks_in: HashMap<String, Vec<TaskRecord>> = HashMap::new();
+        for entry in self.client_agents()? {
+            let agent = &entry.agent;
+            if agent.state == AgentState::Terminated {
+                continue;
+            }
+            let project = entry.project.id.as_str();
+            if !asking_in.contains_key(project) {
+                asking_in.insert(project.to_string(), self.asking_agents(project)?);
+            }
+            let asking = asking_in[project].contains(&agent.name);
+            if !tasks_in.contains_key(project) {
+                tasks_in.insert(project.to_string(), person_tasks(&self.engine, project)?);
+            }
+            let preview = latest_thread_title(&self.engine, agent, &tasks_in[project])?;
+            rows.push((
+                agent.updated_ms,
+                json!({
+                    "project": entry.project.id,
+                    "project_name": entry.project.name,
+                    "name": agent.name,
+                    "title": agent.spec.title,
+                    "role": agent.spec.role,
+                    "state": agent.state,
+                    "asking": asking,
+                    "running": agent.running,
+                    "updated_ms": agent.updated_ms,
+                    "preview": preview,
+                    "program": agent.on_program(),
+                }),
+            ));
+        }
+        rows.sort_by_key(|row| std::cmp::Reverse(row.0));
+        Ok(Value::Array(rows.into_iter().map(|(_, row)| row).collect()))
+    }
+
+    /// The agents of `project` with a task that waits for the person's answer. A task record
+    /// that does not read is skipped, so one damaged record does not hide every agent.
+    fn asking_agents(&self, project: &str) -> anyhow::Result<HashSet<String>> {
+        let mut out = HashSet::new();
+        for value in self.engine.store.list_records("orch_task", Some(project))? {
+            match serde_json::from_value::<TaskRecord>(value) {
+                Ok(task)
+                    if !task.state.is_final()
+                        && task.question.as_ref().is_some_and(|q| q.open()) =>
+                {
+                    out.insert(task.owner);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, project, "skipped a task record that does not read")
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The conversations of `agent` in the top-level `project`, read from the store.
+    pub(crate) fn project_agent_conversations(
+        &self,
+        project: &str,
+        agent: &str,
+    ) -> anyhow::Result<Value> {
+        let top = self
+            .engine
+            .store
+            .get_project(&ProjectId(project.to_string()))?
+            .filter(|p| p.parent.is_none())
+            .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
+        Ok(serde_json::to_value(agent_threads(
+            &self.engine,
+            top.id.as_str(),
+            agent,
+        )?)?)
+    }
+
+    /// The person's chats in every top-level project (no agent's, no Work's), newest first,
+    /// as `sessions` lists them.
+    pub(crate) fn general_sessions(&self) -> anyhow::Result<Value> {
+        use ark_interact::interaction::project_sessions;
+        let current = self.session_id();
+        let working: Vec<String> = self
+            .working()
+            .iter()
+            .filter_map(|w| w["session"].as_str().map(str::to_string))
+            .collect();
+        let mut rows = Vec::new();
+        for project in self
+            .engine
+            .store
+            .list_projects()?
+            .into_iter()
+            .filter(|p| p.parent.is_none())
+        {
+            let own: std::collections::HashSet<String> =
+                Session::list(&self.engine, Some(&project.id))?
+                    .into_iter()
+                    .filter(general)
+                    .map(|r| r.id.as_str().to_string())
+                    .collect();
+            rows.extend(
+                project_sessions(&self.engine, project.id.as_str(), &current)?
+                    .into_iter()
+                    .filter(|row| own.contains(&row.id)),
+            );
+        }
+        rows.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
+        let mut v = serde_json::to_value(rows)?;
+        for row in v.as_array_mut().into_iter().flatten() {
+            if row["id"]
+                .as_str()
+                .is_some_and(|id| working.iter().any(|w| w == id))
+            {
+                row["working"] = json!(true);
+            }
+        }
+        Ok(v)
     }
 }
 

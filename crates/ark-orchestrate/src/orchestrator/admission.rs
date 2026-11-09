@@ -202,13 +202,13 @@ impl Orchestrator {
                     }
                     Ok::<_, OrchError>((submission, task, agent))
                 })?;
-        let agent_lock = self.inner.agent_execution_lock(&agent.name)?;
         state
             .agents
             .entry(agent.name.clone())
             .and_modify(|current| {
-                if current.steering.is_none() {
+                if current.record.running.is_empty() {
                     current.record.state = agent.state;
+                    current.record.running = agent.running.clone();
                     current.record.current_task = agent.current_task.clone();
                     current.status.send_replace(agent.state);
                 }
@@ -217,9 +217,8 @@ impl Orchestrator {
                 let (status, _) = watch::channel(agent.state);
                 AgentRt {
                     record: agent,
-                    lock: agent_lock,
                     status,
-                    steering: None,
+                    threads: HashSet::new(),
                     models: None,
                     worker: None,
                     default_version: 0,
@@ -241,6 +240,7 @@ impl Orchestrator {
                 answer: None,
                 answered: Default::default(),
                 recovering: false,
+                steering: None,
             }
         });
         drop(state);
@@ -835,6 +835,7 @@ impl Inner {
                         answer: None,
                         answered: Default::default(),
                         recovering: false,
+                        steering: None,
                     },
                 );
                 self.emit(EventKind::TaskCreated {

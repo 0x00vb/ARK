@@ -155,6 +155,8 @@ pub enum ResourceOperationKind {
     ResumeAgent,
     TerminateAgent,
     MessageAgent,
+    AgentConversations,
+    AgentConversationStart,
     Profiles,
     Grants,
     GrantRemove,
@@ -294,6 +296,8 @@ impl ResourceOperationKind {
             | O::ResumeAgent
             | O::TerminateAgent
             | O::MessageAgent
+            | O::AgentConversations
+            | O::AgentConversationStart
             | O::Profiles
             | O::Grants
             | O::GrantRemove

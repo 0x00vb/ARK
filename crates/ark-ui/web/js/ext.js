@@ -18,6 +18,11 @@ import { setAgentIdentity } from "./dom.js";
 //                      { surface, title, location, focus(resourceFocus) }. The surface is its
 //                      existing chatView element; location names the actual runtime/project.
 //                      focus receives a frozen snapshot to include in that recipient's work.
+//                      An `agentConversation` view is an agent's chat: the sidebar lists agents
+//                      only when one is registered. Its params are `{ name, project?, conversation? }`
+//                      (`conversation`: a chat of that agent, "new" for one started on the first
+//                      message, none for its first chat). Its identity() may add
+//                      `agent: { name, project, conversation, program }` and `rename(title)`.
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
 //                      configuration, not one project's. `advanced` lists it under Advanced.
@@ -38,7 +43,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      abort-safe, no saved grant.
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
-//                      `project`: an item in a project's menu in the projects list; `ctx` is
+//                      `project`: an item in the chat's Folder menu (its details); `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })
 //     One consumer handler for explicit New chat actions. createChat keeps the captured origin.
@@ -70,12 +75,11 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.status({ id, render(el, api) })
 //   ark.refreshNavigation() redraws project-dependent app tabs and panel launchers.
 //   ark.sidebar({ id, render(el, api) })
-//                      a row at the top of the projects list, for what the list as a whole
-//                      depends on (an app with runtimes in several places says which here)
-//   ark.rail({ id, render(el, api) })
-//                      buttons in the fixed rail between the app views and the account, for what
-//                      the person pinned. Return `{ dispose() }` to release this mount; the rail
-//                      draws again when extensions change, the render redraws itself otherwise.
+//                      a row above the agents, for what the list as a whole depends on (an app
+//                      with runtimes in several places says which here)
+//   ark.rail, ark.projectSection
+//                      removed (ADR 0110): agents are the sidebar, pinned from a tile's menu.
+//                      Calling either throws a `RemovedExtensionPoint` error.
 //   ark.profile(() => ({ name }) | null)
 //                      who the person is, for the first line of an empty chat. Called each time.
 //   ark.agentIdentity(name => styleKey)
@@ -83,11 +87,6 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.searchSource({ id, load(project, api), open(entry, scopedApi) })
 //                      project search rows: { id, title, description?, updated_at? }.
 //                      Loading never navigates. Opening uses the selected project's API.
-//   ark.projectSection({ id, label, render(el, { project }, api) })
-//                      rows inside the current unfolded project, before its chats. `label`
-//                      names the group for accessibility. Render is synchronous, with `el`
-//                      attached; return `{ dispose() }` to release this mount before removal.
-//                      A focusable child can set data-focus-key to retain focus across remounts.
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The
@@ -131,9 +130,7 @@ export const registry = {
   actions: [],
   statuses: [],
   sidebars: [],
-  rails: [],
   profile: null,
-  projectSections: new Map(),
   searchSources: new Map(),
   newChat: null,
   modelPicker: null,
@@ -183,6 +180,14 @@ export function dispatchExt(name, payload) {
     } catch (e) {
       console.error(`ark: listener for ${name} failed`, e);
     }
+  }
+}
+
+/// A page extension point that no longer exists. The message says what replaced it.
+export class RemovedExtensionPoint extends Error {
+  constructor(point) {
+    super(`ark.${point} was removed (ADR 0110): agents are the sidebar and are pinned from a tile's menu`);
+    this.name = "RemovedExtensionPoint";
   }
 }
 
@@ -263,10 +268,8 @@ export function installApi(api) {
       registry.sidebars.push(s);
       api._changed();
     },
-    rail(s) {
-      need(s, ["id", "render"], "rail");
-      registry.rails.push(s);
-      api._changed();
+    rail() {
+      throw new RemovedExtensionPoint("rail");
     },
     profile(fn) {
       if (typeof fn !== "function" || registry.profile) throw new Error("Invalid or duplicate profile");
@@ -280,14 +283,8 @@ export function installApi(api) {
       }
       registry.searchSources.set(source.id, source);
     },
-    projectSection(s) {
-      need(s, ["id", "label", "render"], "projectSection");
-      if (typeof s.id !== "string" || !s.id.trim() || typeof s.label !== "string" || !s.label.trim()
-        || typeof s.render !== "function" || registry.projectSections.has(s.id)) {
-        throw new Error("Invalid or duplicate project section");
-      }
-      registry.projectSections.set(s.id, { id: s.id, label: s.label, render: s.render });
-      api._changed(true);
+    projectSection() {
+      throw new RemovedExtensionPoint("projectSection");
     },
     extensionReady,
     on: onExt,

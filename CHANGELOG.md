@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+Agent-first window (ADR 0109, ADR 0110).
+
+### Added
+
+- An agent has many chats. `TaskSpec.thread` names the chat a person's task runs in (a session in the agent's scope); none is its first chat, `agent.session`, as before. Host calls `agent_conversation_start {agent}` and `agent_conversations {agent, project?}`; `Orchestrator::start_thread`, `threads`, `message_thread`. A thread is refused when it is not a chat of that agent, and for agents on an agent program.
+- Chats of one agent run at the same time. One task runs per chat; the first chat, Work and automations share one lane as before. Each chat has its own working state, steering, vendor session and browser; identity, tools, memory and folder are shared.
+- `conversations.search` and `conversations.read` (Observe): an agent or ARK looks back at its other chats on request. Word match over titles, gists and stored turns of the newest 200 chats, 40 turns each; at most 5 excerpts and 2,000 characters, one chat read at most 4,000. Offered only when the scope has another chat with turns. Work and automation sessions are never searched, nor another agent's chats.
+- Agents' chats with the person (not tasks another agent delegated) get `memory.suggest` under the same rule as the general chat (asked to remember, or the scope already has memory).
+- Runtime-wide host calls `agents {all: true}` (every top project's agents, with `preview`, `running`, `program`) and `sessions {general: true}` (top projects' chats only, with the project name).
+- `/history [words]`: this agent's chats, newest first; in a general chat, the chats of every top project with their folder.
+- The sidebar lists agents: ARK first, then pinned, then recent, as tiles then rows, with no project tree. The title opens Recent chats; New chat starts a chat with the current agent. Folder actions are in the details pane and the palette.
+
+### Changed
+
+- `AgentRecord.running` lists what runs now and is the only source of it; the agent's state is derived from it. `current_task` is still written (the first entry) for older readers. `Mail.thread` keeps a late message with its chat. Graph: `AgentNode.running`, `TaskNode.thread`. `Control::Message` and `Control::MessageWithContext` take `thread`. **Breaking for struct literals and exhaustive matches** on `TaskSpec`, `TaskRecord`, `AgentRecord`, `Mail`, `AgentNode`, `TaskNode` and `Control`: add the fields (`..Default::default()` where available).
+- `agents {all}` skips a damaged agent or task record instead of failing the whole list.
+- `EventKind::Message` has `thread`: the chat a note went to. A message that names no chat steers the first chat's running task, else the only running task, else the inbox.
+- `PerAgent::release` (default method, does nothing) and `BrowserService::release(owner)`: a chat's browser pages and sign-in lease close when its task ends.
+
+### Removed
+
+- **Breaking:** `ark.rail` and `ark.projectSection` (they throw a named error), the sidebar project tree and its Boards section (the board panel and palette stay). Creating a named project with no folder.
+
 ## [0.41.0] - 2026-11-08
 
 Found in the owner's ARK Desktop traces, 71 turns from 2026-10-03 to 2026-11-07 (ADR 0108).

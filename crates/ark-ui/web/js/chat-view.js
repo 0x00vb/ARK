@@ -25,7 +25,15 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
   }});
   let submitDisabled = false;
   let unavailable = false;
-  api.submit = (text) => submitDisabled ? composer.set(text) : submit(text);
+  // `/new` and `/history [words]` mean the same in every conversation: the window acts on them.
+  const shared = (text) => {
+    const line = String(text || "").trim();
+    if (line === "/new" && base.newSession) { void base.newSession(); return true; }
+    const history = /^\/history(?:\s+([\s\S]*))?$/.exec(line);
+    if (history && base.history) { void base.history((history[1] || "").trim()); return true; }
+    return false;
+  };
+  api.submit = (text) => shared(text) ? undefined : submitDisabled ? composer.set(text) : submit(text);
   api.send = api.submit;
   api.steer = api.submit;
   api.cancel = () => {};

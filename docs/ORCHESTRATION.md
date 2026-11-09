@@ -49,7 +49,8 @@ let done = orch.run("lead", TaskSpec::new("compare the two reviews").artifacts([
 `run(agent, task)` is the whole contract. The orchestrator then:
 
 1. waits for the tasks in `after`, and fails the task if one of them did not finish;
-2. waits for the agent (one task at a time per agent) and for a slot on the agent's account;
+2. waits for the agent's lane (one task at a time per chat of the agent; its first chat, Work and
+   automations share one lane, ADR 0109) and for a slot on the agent's account;
 3. builds the agent's view: its allowed tools, its agent tools, its rules, its own project,
    its conversation carry-over, and a brief of the task;
 4. runs one harness turn in the agent's project, on the agent's models;
@@ -437,3 +438,17 @@ An agent-created colleague inherits the creating turn's resolved model, account 
 when both are omitted. An explicit model uses its own default effort; reasoning alone changes
 the inherited effort. A separate reasoning value cannot accompany a model with @effort.
 Unavailable choices are refused before the colleague is published. Creation starts no task.
+
+## An agent's chats
+
+ADR 0109. An agent keeps one identity (spec, model, tools), one memory (its scope's project
+memory) and one folder, and has many chats.
+
+| Part | Behavior |
+|---|---|
+| A chat | A session in the agent's scope. Its first chat is `agent.session`; `start_thread(agent)` adds one. `threads(agent)` lists them |
+| A person's task | `TaskSpec::new(..).thread(id)` runs in that chat. No thread: the first chat. A thread that is not a chat of this agent is refused, and agents on an agent program have one chat |
+| At once | One task per chat; different chats run at the same time. The first chat, Work and automations share one lane |
+| What runs | `AgentRecord.running`; the agent's state is derived from it (Running, Waiting when all running tasks wait on a delegation, Idle) |
+| Messages | `message_thread(agent, thread, ..)` steers that chat's running task. With no thread: the first chat's running task, else the only running task, else the inbox |
+| Looking back | In a person's chat, an agent with other chats gets `conversations.search` and `conversations.read` (bounded excerpts, on request only) and `memory.suggest` under the general chat's rule. Delegated tasks get neither |

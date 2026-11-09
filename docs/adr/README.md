@@ -154,3 +154,5 @@ Local integration decisions:
 - [0106-images-go-with-the-message](0106-images-go-with-the-message.md)
 - [0107-every-chat-starts-in-auto](0107-every-chat-starts-in-auto.md)
 - [0108-an-agent-checks-what-it-changed-and-sees-what-it-shows](0108-an-agent-checks-what-it-changed-and-sees-what-it-shows.md)
+- [0109-an-agent-has-many-chats-that-run-at-once](0109-an-agent-has-many-chats-that-run-at-once.md)
+- [0110-the-sidebar-lists-agents](0110-the-sidebar-lists-agents.md)

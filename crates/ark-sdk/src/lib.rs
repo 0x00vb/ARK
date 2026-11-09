@@ -539,6 +539,7 @@ impl Ark {
             .map(|g| g.text())
             .unwrap_or_else(|| input.to_string());
         let (engine, rules) = self.with_rules(&project, &execution_project, &goal_text)?;
+        let engine = self.with_conversations(engine, session)?;
         let (engine, catalog) = self.with_skills(engine, &project);
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(&opts.tools, &router, &owner);
@@ -688,22 +689,7 @@ impl Ark {
         input: &str,
     ) -> Result<(Arc<Engine>, Option<RuleSelection>), ArkError> {
         let engine = self.turn_engine(execution_project);
-        let words: Vec<_> = input
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|word| !word.is_empty())
-            .map(str::to_lowercase)
-            .collect();
-        let requested = words
-            .iter()
-            .any(|w| matches!(w.as_str(), "remember" | "memorize"))
-            || words.windows(2).any(|w| w[0] == "learn" && w[1] == "from")
-            || (words.iter().any(|w| w == "save") && words.iter().any(|w| w == "correction"));
-        let enabled = requested
-            || !engine
-                .store
-                .project_memories(project)
-                .map_err(ark_runtime::AgentError::from)?
-                .is_empty();
+        let enabled = ark_runtime::memory::offered(&engine.store, project, input)?;
         let engine = if enabled {
             Arc::new(engine.scoped(engine.registry.clone().with(Arc::new(
                 ark_runtime::memory::MemoryTool::new(engine.store.clone(), project.clone()),
@@ -735,6 +721,33 @@ impl Ark {
         }
         let registry = engine.registry.clone().with(Arc::new(RulesTool::new(sets)));
         Ok((Arc::new(engine.scoped(registry)), Some(selection)))
+    }
+
+    /// The engine that also offers `conversations.search` and `conversations.read` when this
+    /// conversation's project holds another conversation with turns. Else the engine as it was.
+    fn with_conversations(
+        &self,
+        engine: Arc<Engine>,
+        session: &Session,
+    ) -> Result<Arc<Engine>, ArkError> {
+        use ark_runtime::conversations;
+        if !conversations::is_conversation(session.record())
+            || !conversations::has_other_conversations(
+                &engine.store,
+                session.project(),
+                session.id(),
+            )?
+        {
+            return Ok(engine);
+        }
+        let tool = conversations::ConversationsTool::new(
+            engine.store.clone(),
+            session.project().clone(),
+            session.id().clone(),
+        );
+        Ok(Arc::new(
+            engine.scoped(engine.registry.clone().with(Arc::new(tool))),
+        ))
     }
 
     /// The skills a conversation turn may read, and the engine that offers `skills.read` for
@@ -935,6 +948,7 @@ impl Ark {
             .unwrap_or_else(|| task.to_string());
         let router = self.session_router(session).await?;
         let (engine, rules) = self.with_rules(session.project(), &execution_project, &query)?;
+        let engine = self.with_conversations(engine, session)?;
         let (engine, catalog) = self.with_skills(engine, session.project());
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(tools, &router, &owner);
@@ -1568,6 +1582,56 @@ mod tests {
         .await
         .unwrap();
         assert!(model.recorded()[1].system.contains(SUGGEST));
+    }
+
+    #[tokio::test]
+    async fn past_conversations_are_offered_only_when_another_has_turns() {
+        use ark_runtime::conversations::{READ, SEARCH};
+        let dir = tempfile::tempdir().unwrap();
+        let model = Arc::new(MockProvider::new("recall-test", vec![]));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(model.clone())
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("home", "").unwrap();
+        let other = ark.create_project("other", "").unwrap();
+        let offered = |n: usize| {
+            let request = &model.recorded()[n];
+            let named = |name: &str| {
+                request.system.contains(name) || request.tools.iter().any(|t| t.name == name)
+            };
+            assert_eq!(named(SEARCH), named(READ));
+            named(SEARCH)
+        };
+        let mut first = ark.start_session(&project.id).unwrap();
+        let mut elsewhere = ark.start_session(&other.id).unwrap();
+        ark.ask_session(&mut elsewhere, "hello", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        ark.ask_session(&mut first, "hello", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        assert!(
+            !offered(1),
+            "one conversation here, another project's elsewhere"
+        );
+        let mut second = ark.start_session(&project.id).unwrap();
+        ark.ask_session(&mut first, "again", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        assert!(!offered(2), "the other conversation has no turns yet");
+        ark.ask_session(
+            &mut second,
+            "what did we say",
+            TurnOptions::default(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(offered(3));
     }
 
     struct NoBlobs;

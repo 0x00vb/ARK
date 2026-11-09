@@ -111,13 +111,21 @@ const graphemeSegmenter = typeof Intl.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;
 
+function initial(name) {
+  return (graphemeSegmenter?.segment(name)[Symbol.iterator]().next().value?.segment ?? Array.from(name)[0] ?? "?").toUpperCase();
+}
+
+/// One agent's face, `size` pixels square, in the style the app gives that name.
+export function agentFace(name, size) {
+  return h("span.chat-face.agent-face", { "aria-hidden": "true", "data-variant": agentIdentity?.(name), style: { "--face": `${size}px` } }, initial(String(name || "?")));
+}
+
 export function chatAvatar(participants = []) {
   const names = Array.isArray(participants) ? [...new Set(participants.filter(name => typeof name === "string" && name))] : [];
   const mark = h("span.chat-avatar", { "aria-hidden": "true", "data-count": names.length });
   if (!names.length) return h("span.chat-avatar", { "aria-hidden": "true", "data-count": "0" }, icon("chat"));
   for (const name of names.slice(0, 3)) {
-    const first = graphemeSegmenter?.segment(name)[Symbol.iterator]().next().value?.segment ?? Array.from(name)[0];
-    mark.append(h("span.chat-face", { "data-variant": agentIdentity?.(name) }, first.toUpperCase()));
+    mark.append(h("span.chat-face", { "data-variant": agentIdentity?.(name) }, initial(name)));
   }
   if (names.length > 3) mark.append(h("span.chat-overflow", `+${names.length - 3}`));
   return mark;

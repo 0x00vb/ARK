@@ -20,6 +20,9 @@ pub struct Owner<'a> {
     pub model: &'a Arc<dyn Provider>,
 }
 
+/// [`PerAgent::release`] at work.
+pub type Releasing<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+
 /// A source of tools made for one owner.
 pub trait PerAgent: Send + Sync {
     /// The tools as a list shows them, for no owner in particular.
@@ -35,5 +38,10 @@ pub trait PerAgent: Send + Sync {
     /// per owner. Default: none.
     fn acquisition(&self, _owner: &Owner) -> Option<Arc<dyn AcquisitionProvider>> {
         None
+    }
+    /// Free what the source holds for `owner` (its pages), when that owner is done for good.
+    /// Default: nothing held.
+    fn release<'a>(&'a self, _owner: &'a str) -> Releasing<'a> {
+        Box::pin(async {})
     }
 }

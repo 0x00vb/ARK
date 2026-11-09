@@ -344,6 +344,43 @@ impl BrowserService {
         let mut st = self.state.lock().await;
         st.owners.entry(owner.to_string()).or_default().on_signed = signed;
     }
+
+    /// Close `owner`'s pages and give back the signed-in browser it holds. Its next call
+    /// opens new pages.
+    pub async fn release(&self, owner: &str) -> std::result::Result<(), String> {
+        let pages = {
+            let mut st = self.state.lock().await;
+            st.ended_surfaces.remove(owner);
+            if st.lease.as_ref().is_some_and(|(o, _)| o == owner) {
+                st.lease = None;
+            }
+            st.owners.remove(owner)
+        };
+        let Some(pages) = pages else { return Ok(()) };
+        for page in [pages.fresh, pages.signed].into_iter().flatten() {
+            match &page.context {
+                Some(context) => {
+                    page.chrome
+                        .call(
+                            None,
+                            "Target.disposeBrowserContext",
+                            json!({ "browserContextId": context }),
+                        )
+                        .await?
+                }
+                None => {
+                    page.chrome
+                        .call(
+                            None,
+                            "Target.closeTarget",
+                            json!({ "targetId": page.target }),
+                        )
+                        .await?
+                }
+            };
+        }
+        Ok(())
+    }
 }
 
 /// A rendered frame and its accessible state.
@@ -1138,6 +1175,13 @@ impl ark_runtime::per_agent::PerAgent for Browsers {
     fn distiller(&self) -> Option<ark_runtime::Distiller> {
         Some(Arc::new(distill))
     }
+    fn release<'a>(&'a self, owner: &'a str) -> ark_runtime::per_agent::Releasing<'a> {
+        Box::pin(async move {
+            if let Err(error) = self.0.release(owner).await {
+                tracing::warn!(owner, %error, "an owner's browser pages did not close");
+            }
+        })
+    }
 }
 
 /// A new, empty profile folder for a fresh browser, after removing the old ones. A new name
@@ -1166,6 +1210,27 @@ mod tests {
 
     fn url(u: &str) -> reqwest::Url {
         reqwest::Url::parse(u).unwrap()
+    }
+
+    #[tokio::test]
+    async fn releasing_an_owner_forgets_its_pages_and_gives_back_the_signed_in_browser() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = BrowserService::new(dir.path());
+        {
+            let mut st = service.state.lock().await;
+            for owner in ["p/w/thread/s-1", "p/w"] {
+                st.owners.entry(owner.to_string()).or_default().on_signed = true;
+            }
+            st.lease = Some(("p/w/thread/s-1".into(), std::time::Instant::now()));
+        }
+        service.release("p/w/thread/s-1").await.unwrap();
+        assert_eq!(service.signed_in_user().await, None);
+        let st = service.state.lock().await;
+        assert!(!st.owners.contains_key("p/w/thread/s-1"));
+        assert!(
+            st.owners.contains_key("p/w"),
+            "another owner keeps its pages"
+        );
     }
 
     #[tokio::test]

@@ -408,6 +408,47 @@ pub fn project_sessions(
     Ok(sessions)
 }
 
+/// The conversations of the agent `current` runs as, newest first: with turns, or `current`
+/// itself. A chat in a top project is ARK's, so the general conversations of every top project
+/// are listed; a chat in an agent's scope lists that scope's. `words` keeps only titles holding
+/// every word.
+pub fn history(
+    engine: &Engine,
+    project: &ProjectId,
+    current: &str,
+    words: &str,
+) -> anyhow::Result<Vec<SessionSummary>> {
+    use ark_runtime::conversations::is_conversation;
+    let here = engine
+        .store
+        .get_project(project)
+        .map_err(ark_runtime::AgentError::from)?
+        .ok_or_else(|| anyhow::anyhow!("no project with id `{project}`"))?;
+    let scopes = if here.parent.is_none() {
+        top_projects(engine)?
+    } else {
+        vec![here]
+    };
+    let words: Vec<String> = words.split_whitespace().map(str::to_lowercase).collect();
+    let mut records = Vec::new();
+    for p in &scopes {
+        for r in Session::list(engine, Some(&p.id))? {
+            let title = r.title.to_lowercase();
+            if is_conversation(&r)
+                && (r.turn_count > 0 || r.id.as_str() == current)
+                && words.iter().all(|w| title.contains(w.as_str()))
+            {
+                records.push((r, p.name.clone()));
+            }
+        }
+    }
+    records.sort_by_key(|(r, _)| std::cmp::Reverse(r.updated_at));
+    Ok(records
+        .iter()
+        .map(|(r, name)| SessionSummary::of(r, name, r.id.as_str() == current))
+        .collect())
+}
+
 /// [`Interaction::transcript`] of any stored session, without its interaction: a window reads a
 /// chat while that chat's turn runs.
 pub fn transcript(
@@ -1250,6 +1291,16 @@ impl Interaction {
     pub fn sessions(&self, all_projects: bool) -> anyhow::Result<Vec<SessionSummary>> {
         let scope = (!all_projects).then_some(&self.project.id);
         list_sessions(self.engine(), scope, self.session.id().as_str())
+    }
+
+    /// This agent's conversations whose titles hold `words` ([`history`]).
+    pub fn conversations(&self, words: &str) -> anyhow::Result<Vec<SessionSummary>> {
+        history(
+            self.engine(),
+            &self.project.id,
+            self.session.id().as_str(),
+            words,
+        )
     }
 
     /// Rename a session (the current one when `id` is `None`). False when none matches.

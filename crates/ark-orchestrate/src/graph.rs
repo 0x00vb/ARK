@@ -46,7 +46,11 @@ pub struct AgentNode {
     pub role: String,
     pub parent: Option<String>,
     pub state: AgentState,
+    /// The first of `running`, for older readers.
     pub current_task: Option<String>,
+    /// The tasks it runs now, one per conversation at most.
+    #[serde(default)]
+    pub running: Vec<String>,
     pub model: String,
     pub account: String,
     /// Its managed vendor session, when it runs on a subscription.
@@ -81,6 +85,9 @@ pub struct TaskNode {
     pub task: String,
     pub owner: String,
     pub objective: String,
+    /// The agent's own conversation it runs in ([`crate::TaskSpec::thread`]).
+    #[serde(default)]
+    pub thread: Option<String>,
     pub origin: Origin,
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -190,6 +197,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 parent: r.spec.parent.clone(),
                 state: r.state,
                 current_task: r.current_task.clone(),
+                running: r.running.clone(),
                 model: r.model.clone(),
                 account: r.account.clone(),
                 session: sessions
@@ -208,10 +216,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 tools: r.spec.tools.clone(),
                 profile: r.spec.profile_name.clone(),
                 inbox: r.inbox.len(),
-                step: a
-                    .step
-                    .clone()
-                    .filter(|s| r.current_task.as_deref() == Some(s.task.as_str())),
+                step: a.step.clone().filter(|s| r.running.contains(&s.task)),
             }
         })
         .collect();
@@ -227,6 +232,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 task: r.id.clone(),
                 owner: r.owner.clone(),
                 objective: r.objective.clone(),
+                thread: r.thread.clone(),
                 origin: r.origin.clone(),
                 schedule: r.schedule.clone(),
                 parent: r.parent.clone(),

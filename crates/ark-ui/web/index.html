@@ -23,14 +23,13 @@
           <span class="destination-label">Chat</span>
         </button>
         <div class="workspace-destinations" id="workspace-destinations" aria-label="Workspace"></div>
-        <div class="rail-pins" id="rail-pins" aria-label="Pinned"></div>
         <div class="destination-spacer"></div>
         <button class="destination account-destination" type="button" id="open-settings" title="Account and settings" aria-label="Account and settings">
           <span class="account-avatar" aria-hidden="true">V</span>
           <span class="destination-label">Account</span>
         </button>
       </nav>
-      <aside class="sidebar" aria-label="Projects">
+      <aside class="sidebar" aria-label="Sidebar">
         <div class="sidebar-top" data-tauri-drag-region>
           <button class="icon-btn" id="search-chats" title="Search (⇧⌘F)" aria-label="Search" data-icon="search"></button>
           <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
@@ -40,12 +39,11 @@
           <span class="nav-label">New chat</span>
           <kbd>⌘N</kbd>
         </button>
-        <div class="section-label">
-          <span>Projects</span>
-          <button class="icon-btn small" id="add-project" title="Add a project" aria-label="Add a project" data-icon="plus"></button>
-        </div>
         <div class="sidebar-ext" id="sidebar-ext" hidden></div>
-        <div class="projects" id="projects" role="group" aria-label="Projects"></div>
+        <div class="agents-scroll">
+          <div class="agents" id="agents" role="list" aria-label="Agents"></div>
+          <div class="agents-note" id="agents-note" role="status" hidden></div>
+        </div>
         <div class="sidebar-foot">
           <div class="status-ext" id="status-ext"></div>
         </div>

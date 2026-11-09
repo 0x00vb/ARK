@@ -160,6 +160,53 @@ impl Command for Sessions {
     }
 }
 
+pub struct History;
+#[async_trait::async_trait]
+impl Command for History {
+    meta!("history", "List this agent's conversations, newest first");
+    fn usage(&self) -> &str {
+        "[words]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let list = ix.conversations(args)?;
+        if list.is_empty() {
+            return Ok(Report::new()
+                .note(match args.trim() {
+                    "" => "No conversations yet.".to_string(),
+                    words => format!("No conversation title holds `{words}`."),
+                })
+                .data("sessions", &list)
+                .into());
+        }
+        // ARK's conversations span the top projects: each row says which folder it works in.
+        let folders = ix.project().parent.is_none();
+        let mut t = Table::plain(if folders { 4 } else { 3 });
+        for s in list.iter().take(30) {
+            let mut cells = vec![
+                Cell::new(if s.current { "›" } else { " " }, Tone::Accent),
+                match s.title.as_str() {
+                    "" => Cell::new("(empty)", Tone::Muted),
+                    title => Cell::new(crate::fmt::clip(title, 60), Tone::Normal),
+                },
+            ];
+            if folders {
+                cells.push(Cell::new(s.project_name.clone(), Tone::Muted));
+            }
+            cells.push(Cell::new(crate::fmt::ago(s.updated_at), Tone::Muted));
+            t.push(Row {
+                cells,
+                tone: Tone::Normal,
+                command: Some(format!("/resume {}", s.id)),
+            });
+        }
+        let mut r = Report::new().table(t);
+        if list.len() > 30 {
+            r = r.note(format!("… {} more", list.len() - 30));
+        }
+        Ok(r.data("sessions", &list).into())
+    }
+}
+
 pub struct Rename;
 #[async_trait::async_trait]
 impl Command for Rename {

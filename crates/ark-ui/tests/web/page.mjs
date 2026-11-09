@@ -54,8 +54,8 @@ async function manual(page) {
 
 /// The model is chosen in the chat's details; the composer carries no model chip.
 async function openModelMenu(page) {
-  if (!(await page.locator(".identity-row").isVisible())) await page.locator("#chat-identity").click();
-  await page.locator(".identity-row").click();
+  if (!(await page.locator('.identity-row[data-row="model"]').isVisible())) await page.locator("#chat-identity").click();
+  await page.locator('.identity-row[data-row="model"]').click();
 }
 
 const scenarios = {
@@ -82,25 +82,16 @@ const scenarios = {
     assert.equal(calls.filter(call=>call.method==='send').length,0);
   },
 
+  // Projects left the sidebar (ADR 0110): the old extension point says so by name, and the
+  // sidebar lists ARK.
   async "project-sections"(page) {
-    await page.evaluate(() => {
-      window.__projectSectionEvents = [];
-      window.ark.projectSection({ id: "project-notes", label: "Project notes", render(el, { project }) {
-        window.__projectSectionEvents.push(["render", project.id, el.isConnected]);
-        el.textContent = `Notes for ${project.name}`;
-        return { dispose() { window.__projectSectionEvents.push(["dispose", project.id, el.isConnected]); } };
-      } });
+    const error = await page.evaluate(() => {
+      try { window.ark.projectSection({ id: "project-notes", label: "Project notes", render() {} }); return null; }
+      catch (error) { return error.name; }
     });
-    const section = page.getByRole("group", { name: "Project notes", exact: true });
-    await section.waitFor({ state: "visible" });
-    assert.equal(await section.evaluate(el => el.parentElement.querySelector(".project-row").getAttribute("aria-current")), "true");
-    await page.locator('.project-row[aria-current="true"] .project-chev').click();
-    await page.locator('.project-section[data-id="project-notes"]').waitFor({ state: "detached" });
-    await page.locator('.project-row[aria-current="true"] .project-chev').click();
-    await section.waitFor({ state: "visible" });
-    const events = await page.evaluate(() => window.__projectSectionEvents);
-    assert.ok(events.every(event => event[2]), "render and disposal happen before detachment");
-    assert.ok(events.some(event => event[0] === "dispose"));
+    assert.equal(error, "RemovedExtensionPoint");
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor();
+    assert.equal(await page.locator("#projects, .project-row").count(), 0);
   },
   async "devices-startup"(page) {
     const result = await page.evaluate(async () => {
@@ -346,9 +337,11 @@ const scenarios = {
         return original(method, params);
       };
     });
-    await page.locator(".project-row[aria-current='true'] .project-more").click();
-    assert.equal(await page.getByRole("button", { name: "Open Terminal" }).count(), 0);
+    await page.locator("#session-title .identity-face-btn").click();
+    await page.locator('#pane .identity-row[data-row="folder"]').click();
+    assert.equal(await page.getByRole("menuitem", { name: "Open Terminal" }).count(), 0);
     await page.keyboard.press("Escape");
+    await page.locator("#session-title .identity-face-btn").click();
     assert.equal(await page.locator('[data-view="project-terminal"]').count(), 0);
     await page.evaluate(() => window.ark.openPanel("terminal"));
     const view = page.locator(".wb-terminal");
@@ -594,7 +587,9 @@ const scenarios = {
   // interrupted, and offers one Continue on the chat's last turn. Continue is the person's next
   // message; once it is sent the offer is gone.
   async interrupted(page) {
-    await page.locator(".session", { hasText: "Read the notes, then summarize them" }).first().click();
+    const chat = await page.evaluate(() => window.ark.call("sessions", { general: true }).then((chats) => chats.find((c) => c.title.includes("Read the notes, then summarize them"))?.id));
+    assert.ok(chat, "the interrupted chat is listed");
+    await page.evaluate((id) => window.ark.openSession(id), chat);
     const resume = page.locator(".turn .resume");
     await resume.waitFor();
     assert.equal(await resume.count(), 1);
@@ -962,21 +957,26 @@ scenarios["agent-chat"] = agentChat;
 // A board per goal, beside the chat: the chat plans one and it opens by itself; the person adds,
 // drags and completes cards and opens one in its place; an agent given a card moves it by itself;
 // what waits for the person is marked; delete has an undo; the project lists its boards.
+// The boards search lists: open it, wait for the results, hand back the board options.
+async function boardResults(page) {
+  await page.locator("#search-chats").click();
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  return page.getByRole("option").filter({ hasText: "Board," });
+}
+
 async function board(page) {
   // A window wide enough for the pane to show the three columns side by side.
   await page.setViewportSize({ width: 1440, height: 900 });
-  // No fixed place for it: the rail has no Board and the project lists none yet.
+  // No fixed place for it: the rail has no Board and the sidebar lists agents only.
   assert.equal(await page.locator('.workspace-destination[data-view="board"]').count(), 0);
-  assert.equal(await page.locator('.project-section[data-id="boards"] .bd-row').count(), 0);
   await page.locator("#input").fill("plan chapter 3");
   await page.keyboard.press("Enter");
   const bd = page.locator(".pane-view.bd");
   await bd.locator(".bd-card", { hasText: "Edit chapter 2" }).waitFor();
   assert.equal(await bd.locator(".bd-goal").inputValue(), "Chapter 3");
-  const row = page.locator('.project-section[data-id="boards"] .bd-row');
-  await row.filter({ hasText: "0/2" }).waitFor();
-  assert.match(await row.innerText(), /Chapter 3/);
-  assert.equal(await row.getAttribute("aria-current"), "true");
+  // Search finds the board again: its goal and how far it is.
+  await (await boardResults(page)).filter({ hasText: "Chapter 3" }).filter({ hasText: "0/2" }).waitFor();
+  await page.keyboard.press("Escape");
   // The pane has finished opening before anything is dragged in it.
   await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === "running"));
   await shot(page, "board-beside-chat");
@@ -1050,7 +1050,8 @@ async function board(page) {
   await page.locator(".bd-back").click();
   await page.locator('.bd-list[data-state="done"] .bd-card', { hasText: "Draft chapter 3" }).waitFor();
   assert.equal(await page.evaluate(() => document.activeElement?.closest(".bd-card")?.innerText.includes("Draft chapter 3")), true);
-  await row.filter({ hasText: "2/3" }).waitFor();
+  await (await boardResults(page)).filter({ hasText: "2/3" }).waitFor();
+  await page.keyboard.press("Escape");
 
   // A card another client adds appears without a reload; one blocked on the person is marked.
   await page.evaluate(() => window.ark.call("board_add", { title: "Choose the cover", owner: "user", blocked: "needs your photo" }));
@@ -1074,18 +1075,25 @@ async function board(page) {
   // The goal is renamed in place; the project's list follows.
   await bd.locator(".bd-goal").fill("Chapter 3, first draft");
   await page.keyboard.press("Enter");
-  await row.filter({ hasText: "Chapter 3, first draft" }).waitFor();
+  await (await boardResults(page)).filter({ hasText: "Chapter 3, first draft" }).waitFor();
+  await page.keyboard.press("Escape");
   assert.equal((await page.evaluate(async () => (await window.ark.call("board")).boards.map((b) => b.goal))).join(), "Chapter 3, first draft");
 
-  // Closed, it comes back from the project; deleted, it leaves the pane and the list.
+  // Closed, it comes back from search; deleted, it leaves the pane and the search.
   await page.locator(".pane-tab-close").first().click();
-  assert.equal(await row.getAttribute("aria-current"), null);
-  await row.click();
+  await (await boardResults(page)).filter({ hasText: "Chapter 3, first draft" }).click();
   await bd.locator(".bd-card", { hasText: "Pick a title" }).waitFor();
   await bd.locator(".bd-menu").click();
   await page.locator(".popover .menu-item", { hasText: "Delete the board and its 4 items" }).click();
-  await row.waitFor({ state: "detached" });
-  assert.equal(await page.locator(".pane-view.bd").count(), 0);
+  await page.waitForFunction(async () => (await window.ark.call("board")).boards.length === 0);
+  await page.locator(".pane-view.bd").waitFor({ state: "detached" });
+  for (let tries = 0; ; tries++) {
+    const left = await (await boardResults(page)).count();
+    await page.keyboard.press("Escape");
+    if (!left) break;
+    assert.ok(tries < 20, "the deleted board leaves search");
+    await page.waitForTimeout(100);
+  }
   assert.deepEqual(await server(), []);
 }
 scenarios.board = board;
@@ -2653,21 +2661,23 @@ async function background(page) {
   await tray.waitFor();
   assert.match(await tray.innerText(), /^In /, "the tray says which chat asks");
   assert.equal(await page.locator("#thread .approval").count(), 0);
-  const firstRow = page.locator(`.session[data-id="${first}"]`);
-  await firstRow.locator(".session-attention").waitFor();
-  assert.equal(await firstRow.locator(".session-attention").innerText(), "Needs you");
-  assert.equal(await firstRow.locator(".session-working").count(), 0);
+  const ark = page.locator('#agents .agent-btn[data-key="ark"]');
+  await ark.locator('.agent-mark[data-mark="asking"]').waitFor();
+  // The built-in assistant carries the app's name.
+  assert.match(await ark.getAttribute("aria-label"), /^.+, needs you$/);
   assert.equal(await page.locator("#app").getAttribute("data-running"), "false", "the new chat is free");
 
   await finished(page, () => page.locator("#input").fill("And a second question?").then(() => page.keyboard.press("Enter")));
   assert.deepEqual(await shape(page), ["answer: Second answer."]);
 
   await tray.locator("button", { hasText: "Allow once" }).click();
-  await page.locator(`.session[data-id="${first}"] .session-time`).waitFor();
+  await ark.locator('.agent-mark[data-mark="asking"]').waitFor({ state: "detached" });
   assert.equal(await page.locator("#asks .approval").count(), 0);
   assert.deepEqual(await shape(page), ["answer: Second answer."], "the other chat's answer stays out");
 
-  await page.locator(`.session[data-id="${first}"]`).click();
+  // A chat still running its first turn is a recent chat.
+  await page.locator(".identity-title-btn").click();
+  await page.locator(`.recent-menu .recent-row[data-id="${first}"]`).click();
   await page.waitForFunction((id) => window.ark.summary().session.id === id, first);
   await page.locator(".turn.stored .answer", { hasText: "Saved the notes." }).waitFor();
 }
@@ -2745,9 +2755,9 @@ async function visit(page) {
   const row = page.locator("#sidebar-ext .sidebar-item[data-id=place]");
   await row.waitFor();
   assert.equal(await row.innerText(), "This Mac · Cloud");
-  // Above the projects.
-  const [r, p] = await Promise.all([row.boundingBox(), page.locator("#projects").boundingBox()]);
-  assert.ok(r.y < p.y, "the row is above the projects");
+  // Above the agents.
+  const [r, p] = await Promise.all([row.boundingBox(), page.locator("#agents").boundingBox()]);
+  assert.ok(r.y < p.y, "the row is above the agents");
   let asked = null;
   await page.route("https://ark-local.invalid/**", (route) => {
     asked = route.request().url();
@@ -2762,105 +2772,63 @@ async function visit(page) {
 }
 scenarios.visit = visit;
 
-// An app's action on a project: an item in that project's menu, given the project.
+// An app's action on a project: an item in the chat's Folder menu (its details), given the project.
 async function projectAction(page) {
   await page.evaluate(() => {
     window.ark.action({
       id: "copy", label: "Copy elsewhere", where: "project",
-      when: ({ project }) => project.current,
+      when: ({ project }) => project.id === window.ark.summary().project.id,
       run: ({ project }) => { window.copied = project.name; },
     });
   });
-  const current = page.locator(".project-row[aria-current=true]").first();
-  await current.waitFor();
-  const more = current.locator(".project-more");
-  await more.click();
+  await page.locator("#session-title .identity-face-btn").click();
+  await page.locator('#pane .identity-row[data-row="folder"]').click();
   const item = page.locator(".popover .menu-item", { hasText: "Copy elsewhere" });
   await item.waitFor();
   await item.click();
-  const name = await current.locator(".project-name").innerText();
-  assert.equal(await page.evaluate(() => window.copied), name);
-  assert.equal(await page.locator(".popover[open]").count(), 0, "the menu closes");
+  assert.equal(await page.evaluate(() => window.copied), await page.evaluate(() => window.ark.summary().project.name));
+  assert.equal(await page.locator(".popover.open").count(), 0, "the menu closes");
 }
 scenarios["project-action"] = projectAction;
 
-// A project row exposes a direct new-chat action beside its options. It opens a different
-// project before creating the chat, so the new chat belongs to the project the person chose.
+// New chat in another folder: the chat belongs to the folder the person chose.
 async function projectNewChat(page) {
   const before = await page.evaluate(() => window.ark.summary());
   await page.evaluate(() => window.ark.call("add_project", { name: "Other project" }));
   await page.evaluate((project) => window.ark.call("open_project", { id: project }), before.project.id);
   await page.waitForFunction((project) => window.ark.summary().project.id === project, before.project.id);
-  const other = page.locator(".project-row", { hasText: "Other project" });
-  await other.waitFor();
-  const action = other.locator(".project-new-chat");
-  await action.hover();
-  await action.click();
+  const other = await page.evaluate(() => window.ark.call("projects").then((projects) => projects.find((p) => p.name === "Other project").id));
+  await page.evaluate((id) => window.ark.newSession(id), other);
   await page.waitForFunction((session) => window.ark.summary().session.id !== session, before.session.id);
-  assert.notEqual(await page.evaluate(() => window.ark.summary().project.id), before.project.id);
   assert.equal(await page.evaluate(() => window.ark.summary().project.name), "Other project");
 }
 scenarios["project-new-chat"] = projectNewChat;
 
-// Project expansion is independent. Moving to another project keeps every project the person
-// already unfolded open instead of imposing accordion behavior.
+// Moving between folders keeps ARK first and current in the sidebar: projects are not listed.
 async function expandedProjects(page) {
   const original = await page.evaluate(() => window.ark.summary().project);
   await page.evaluate(() => window.ark.call("add_project", { name: "Second project" }));
-  await page.evaluate(() => window.ark.call("add_project", { name: "Third project" }));
   await page.evaluate((id) => window.ark.call("open_project", { id }), original.id);
   await page.waitForFunction((id) => window.ark.summary().project.id === id, original.id);
-
-  const second = page.locator(".project-row", { hasText: "Second project" });
-  const third = page.locator(".project-row", { hasText: "Third project" });
-  await second.waitFor();
-  if (await second.getAttribute("aria-expanded") !== "true") await second.locator(".project-chev").click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".project-row")]
-    .some((row) => row.textContent.includes("Second project") && row.getAttribute("aria-expanded") === "true"));
-
-  await third.click();
-  await page.waitForFunction(() => window.ark.summary().project.name === "Third project");
-  await page.waitForFunction(() => [...document.querySelectorAll('.project-row')]
-    .some(row => row.textContent.includes('Third project') && row.getAttribute('aria-expanded') === 'true'));
-  for (const name of [original.name, "Second project", "Third project"]) {
-    assert.equal(await page.locator(".project-row", { hasText: name }).getAttribute("aria-expanded"), "true", `${name} stays expanded`);
-  }
+  const first = page.locator("#agents .agent-btn").first();
+  assert.equal(await first.getAttribute("data-key"), "ark");
+  assert.equal(await first.getAttribute("aria-current"), "true");
+  assert.equal(await page.locator("#agents").innerText().then((text) => text.includes("Second project")), false);
 }
 scenarios["expanded-projects"] = expandedProjects;
 
-// Removing a project from the sidebar changes only a local presentation preference. Its current
-// chat keeps running, the host still lists the project, the preference survives reload, and the
-// Add project menu provides the recovery path.
+// A folder the person removed from the sidebar earlier stays a local preference: its chats stay
+// out of ARK's recent chats until the palette shows it again; the host still lists it.
 async function hiddenProject(page) {
   await page.evaluate(() => window.ark.ready());
-  const before = await page.evaluate(() => ({
-    project: window.ark.summary().project,
-    session: window.ark.summary().session.id,
-  }));
-  const row = page.locator(".project-row[aria-current='true']");
-  await row.locator(".project-more").click();
-  await page.getByRole("button", { name: "Remove from sidebar", exact: true }).click();
-  await page.waitForFunction((id) => ![...document.querySelectorAll(".project")]
-    .some((project) => project.dataset.id === id), before.project.id);
-  assert.equal(await page.evaluate(() => window.ark.summary().session.id), before.session);
-  assert.equal(await page.evaluate(() => window.ark.summary().project.id), before.project.id);
-  assert.ok(await page.evaluate((id) => window.ark.call("projects").then((projects) => projects.some((project) => project.id === id)), before.project.id));
-
+  const before = await page.evaluate(() => ({ project: window.ark.summary().project, session: window.ark.summary().session.id }));
+  await page.evaluate((project) => localStorage.setItem("ark-hidden-projects", JSON.stringify([{ id: project.id, name: project.name }])), before.project);
   await page.reload();
   await page.locator("#input").waitFor();
-  assert.equal(await page.locator(`.project[data-id="${before.project.id}"]`).count(), 0, "hidden project stays hidden after reload");
-  await page.locator("#add-project").click();
-  const name = page.getByRole("textbox", { name: "New project name" });
-  await name.fill(before.project.name);
-  await name.press("Enter");
-  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor();
-
-  await page.locator(`.project[data-id="${before.project.id}"] .project-more`).click();
-  await page.getByRole("button", { name: "Remove from sidebar", exact: true }).click();
-  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor({ state: "detached" });
-  await page.locator("#add-project").click();
-  await page.getByRole("button", { name: `Restore ${before.project.name}`, exact: true }).click();
-  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor();
+  assert.ok(await page.evaluate((id) => window.ark.call("projects").then((projects) => projects.some((project) => project.id === id)), before.project.id));
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  await page.getByRole("option", { name: new RegExp(`Show ${before.project.name} again`) }).click();
+  assert.equal(await page.evaluate(() => localStorage.getItem("ark-hidden-projects")), "[]");
 }
 scenarios["hidden-project"] = hiddenProject;
 
@@ -2942,7 +2910,10 @@ async function chatWorkspacePolish(page) {
       chatLabel: chats.getAttribute("aria-label"),
       browserHeight,
       nativeHeight,
+      // With tabs, the title keeps only the chip's face and Recent chats chevron (ADR 0110).
       titleDisplay: getComputedStyle(document.querySelector("#session-title")).display,
+      titleName: getComputedStyle(document.querySelector("#session-title .identity-name") || document.body).display,
+      titleRecent: !!document.querySelector("#session-title .identity-title-btn")?.offsetWidth,
       titleBarViewsHidden: views.hidden,
       proofParent: proof.parentElement.id,
       proofLabel: proof.getAttribute("aria-label"),
@@ -2954,7 +2925,7 @@ async function chatWorkspacePolish(page) {
   });
   assert.deepEqual(shell, {
     chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 44, nativeHeight: 44,
-    titleDisplay: "none", titleBarViewsHidden: true, proofParent: "workspace-destinations",
+    titleDisplay: "block", titleName: "none", titleRecent: true, titleBarViewsHidden: true, proofParent: "workspace-destinations",
     proofLabel: "Proof", accountParent: "destinations", accountLabel: "Account and settings",
     railMaterial: "rgb(241, 241, 239)", sidebarMaterial: "rgb(247, 247, 246)",
   });
@@ -3033,17 +3004,10 @@ async function chatWorkspacePolish(page) {
   });
   assert.ok(composerOrder.attach < composerOrder.dictate && composerOrder.dictate < composerOrder.send, JSON.stringify(composerOrder));
 
-  const newChat = page.locator(".project-row[aria-current='true'] .project-new-chat");
-  await newChat.hover();
-  await page.waitForTimeout(140);
-  const hover = await newChat.evaluate((el) => ({
-    button: getComputedStyle(el).backgroundColor,
-    inset: getComputedStyle(el, "::after").inset,
-    opacity: getComputedStyle(el, "::after").opacity,
-  }));
-  assert.equal(hover.button, "rgba(0, 0, 0, 0)", "the 40px hit target is not a 40px hover block");
-  assert.equal(hover.inset, "6px");
-  assert.equal(hover.opacity, "1");
+  const tile = page.locator('#agents .agent-btn[data-key="ark"]');
+  await tile.hover();
+  await page.waitForTimeout(240);
+  assert.equal(await tile.evaluate((el) => getComputedStyle(el).transitionProperty), "background-color, color, scale", "hover changes colour only, press scales");
 
   await page.locator("#close-pane").click();
   const proofDestination = page.locator('.workspace-destination[data-view="split-view-proof"]');
@@ -3431,7 +3395,7 @@ scenarios.places = async (page) => {
   await page.locator(".turn .answer", { hasText: "Done." }).waitFor();
   assert.equal(await chip.getAttribute("aria-disabled"), "true", "fixed after the first message");
   await page.locator("#session-title .place-mark", { hasText: "vps" }).waitFor({ state: "attached" });
-  await page.locator(".session[aria-current='true'] .session-place").waitFor();
+
   const line = page.locator("#place-line");
   await line.getByText("1 file changed on vps").waitFor();
   await shot(page, "places-light");
@@ -3469,7 +3433,7 @@ scenarios.places_away = async (page) => {
   await line.getByText("vps is not answering").waitFor();
   await line.getByRole("button", { name: "Try again" }).waitFor();
   assert.equal(await page.locator("#composer").getAttribute("data-away"), "true");
-  await page.locator(".session-place[data-state]:not([data-state='ok'])").waitFor();
+  await page.locator("#session-title .place-mark").waitFor({ state: "attached" });
   assert.equal(await page.locator(".welcome").count(), 0, "not shown as an empty chat");
   await page.waitForTimeout(400);
   await shot(page, "places-away");
@@ -3651,7 +3615,7 @@ async function agentConversations(page, fromNewChat = false) {
     await page.locator("#thread").getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
     assert.equal(await page.locator('.view[data-view="work-chat"]').count(), 0);
     const original = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
-    await page.locator('.project-section[data-id="boards"] .bd-row').click();
+    await (await boardResults(page)).first().click();
     await page.locator('.pane-view.bd .bd-card', { hasText: original.title }).click();
     await page.locator(".bd-detail:visible").getByRole("textbox", { name: "Title", exact: true }).waitFor();
     assert.equal(await page.locator(".bd-detail:visible").count(), 1, "the board opens its shared ticket detail");

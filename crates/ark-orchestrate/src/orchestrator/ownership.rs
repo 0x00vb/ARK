@@ -33,17 +33,25 @@ impl Drop for ExecutionLease {
 }
 
 impl Inner {
+    /// One task at a time per conversation of an agent (`lane`, see [`Inner::task_lane`]),
+    /// across every orchestrator of this store in the process.
     pub(super) fn agent_execution_lock(
         &self,
         agent: &str,
+        lane: &str,
     ) -> Result<Arc<tokio::sync::Mutex<()>>, OrchError> {
-        type Key = (std::path::PathBuf, String, String);
+        type Key = (std::path::PathBuf, String, String, String);
         type Locks = Mutex<HashMap<Key, Weak<tokio::sync::Mutex<()>>>>;
         static LOCKS: std::sync::OnceLock<Locks> = std::sync::OnceLock::new();
         let root =
             std::fs::canonicalize(self.engine.store.root()).map_err(ark_store::StoreError::from)?;
         let mut locks = LOCKS.get_or_init(Default::default).lock().unwrap();
-        let key = (root, self.project.id.to_string(), agent.to_string());
+        let key = (
+            root,
+            self.project.id.to_string(),
+            agent.to_string(),
+            lane.to_string(),
+        );
         if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
             return Ok(lock);
         }

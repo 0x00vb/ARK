@@ -100,7 +100,7 @@ async function fixture(run, { context: used = 0, model = "mock", width = 1100 } 
   };
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
-    await page.locator('.session[data-id="chat-a"]').waitFor({ state: "attached" });
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
     await run(page, { files, calls, waiting, release: () => release(), settle });
     await settle();
     assert.deepEqual(errors, []);

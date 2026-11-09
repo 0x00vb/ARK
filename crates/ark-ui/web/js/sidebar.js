@@ -1,19 +1,26 @@
-// Projects and their chats. A project is a folder; its chats are listed beneath it. The current
-// project is unfolded, the others fold away and unfold with their chevron. Everything comes from
-// the host (`projects`, `sessions`); nothing is kept here that could drift from the store, except
-// which projects the person folded or unfolded.
+// Who the person works with: ARK first, then the app's agents of every folder (ADR 0110). The
+// first few are tiles, the rest rows. Everything comes from the host (`agents {all}`); nothing is
+// kept here that could drift from the store, except the person's pins and the folders they hid.
 
-import { h, icon, clear, ago, clip, touch, $, chatAvatar } from "./dom.js";
-import { bindContextMenu } from "./context-menu.js";
+import { h, icon, clear, ago, $, agentFace } from "./dom.js";
+import { bindContextMenu, contextMenu } from "./context-menu.js";
 import { registry } from "./ext.js";
 import { SETTINGS } from "./settings.js";
-import { uploadFolder } from "./drop.js";
 
-// Chats listed per project before "Show more".
-const SHOWN = 8;
+export const ARK = "ark";
 const HIDDEN_PROJECTS = "ark-hidden-projects";
+// ARK, then pins, then the most recent, until this many tiles; pins may take it up to MAX_TILES.
+const TILES = 6;
+const MAX_TILES = 9;
+const COLUMNS = 3;
+const LONG_PRESS = 500;
 
-function storedHiddenProjects() {
+export const agentKey = (project, name) => `${project}/${name}`;
+export const pinStorageKey = (runtime) => `ark-pins:${runtime}`;
+
+/// The folders the person removed from the sidebar earlier, id to name. Their agents get no
+/// tile and their chats stay out of ARK's lists.
+export function hiddenProjects() {
   try {
     const entries = JSON.parse(localStorage.getItem(HIDDEN_PROJECTS) || "[]");
     return new Map(Array.isArray(entries)
@@ -24,448 +31,439 @@ function storedHiddenProjects() {
   }
 }
 
+function saveHiddenProjects(hidden) {
+  try {
+    localStorage.setItem(HIDDEN_PROJECTS, JSON.stringify([...hidden].map(([id, name]) => ({ id, name }))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/// Pinned agents of one runtime, in the order they were pinned: `[project, name]` pairs.
+export function readPins(runtime) {
+  if (!runtime) return [];
+  try {
+    const pins = JSON.parse(localStorage.getItem(pinStorageKey(runtime)) || "[]");
+    return Array.isArray(pins) ? pins.filter((pin) => Array.isArray(pin) && pin.length === 2 && pin.every((part) => typeof part === "string" && part)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePins(runtime, pins) {
+  try {
+    if (pins.length) localStorage.setItem(pinStorageKey(runtime), JSON.stringify(pins));
+    else localStorage.removeItem(pinStorageKey(runtime));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export class Sidebar {
-  constructor(api) {
+  /// `nav` is the window's side of it: `runtime()`, `hasAgents()`, `loadAgents()`, `arkName()`,
+  /// `arkFace(size)`, `open(entry, { newTab })` (false when it could not), `newChat()`,
+  /// `newChatWith(entry)` and `history(entry)`.
+  constructor(api, nav) {
     this.api = api;
-    this.tree = $("#projects");
+    this.nav = nav;
+    this.list = $("#agents");
+    this.note = $("#agents-note");
     this.status = $("#status-ext");
     this.top = $("#sidebar-ext");
     this.settings = $("#open-settings");
-    this.gen = 0;
-    this.foldRevision = 0;
-    this.projectSections = [];
-    this.disclosures = new WeakMap();
-    this.projectChats = new WeakMap();
-    // Project id -> unfolded (true) or folded (false), where the person chose; else the
-    // current project is unfolded and the others folded.
-    this.folds = {};
-    this.current = null;
-    this.all = new Set();
-    // This is presentation state only. Hiding a project never changes the host's project,
-    // folder or chats, and can be undone from the Add project menu.
-    this.hidden = storedHiddenProjects();
-    // Chats running a turn now, and their projects (`working` from the host).
+    this.newButton = $("#new-session");
+    this.agents = null;
+    this.failed = false;
+    this.order = null;
+    this.current = ARK;
+    this.pending = null;
     this.working = new Set();
-    this.workingProjects = new Set();
     this.attention = [];
+    this.board = 0;
     this.online = true;
-    $("#new-session").addEventListener("click", () => api.newSession());
-    $("#add-project").addEventListener("click", (e) => this.addMenu(e.currentTarget));
+    this.hidden = hiddenProjects();
+    this.items = new Map();
+    this.gen = 0;
+    this.clickGen = 0;
+    this.drawn = false;
+    this.placeholders = false;
+    this.agentView = false;
+    this.typed = { text: "", at: 0 };
+    this.newButton.addEventListener("click", () => nav.newChat());
     this.settings.addEventListener("click", () => api.openSettings());
+    this.list.addEventListener("keydown", (event) => this.keys(event));
+    this.list.addEventListener("focusin", (event) => this.rove(event.target.closest(".agent-btn")));
+    addEventListener("focus", () => void this.refresh({ reorder: true }));
   }
 
-  /// Mark the chats that are working; a folded project shows it on its row.
   setWorking(list) {
     const ids = new Set(list.map((w) => w.session));
-    const same = ids.size === this.working.size && [...ids].every((x) => this.working.has(x));
+    const same = ids.size === this.working.size && [...ids].every((id) => this.working.has(id));
     this.working = ids;
-    this.workingProjects = new Set(list.map((w) => w.project));
-    if (!same) this.refresh();
+    if (!same) this.draw();
   }
 
   setAttention(list) {
     this.attention = [...new Map(list.map((item) => [item.id, item])).values()];
-    this.refresh();
+    this.draw();
+  }
+
+  /// Board items of the shown folder that wait for the person: ARK's tile says so.
+  setBoardWaiting(count) {
+    if (count === this.board) return;
+    this.board = count;
+    this.draw();
   }
 
   setOnline(online) {
     this.online = online;
-    for (const mark of this.tree.querySelectorAll(".session-progress, .working-dot")) mark.hidden = !online;
+    this.list.dataset.offline = String(!online);
+    this.draw();
   }
 
-  unfolded(p) {
-    return this.folds[p.id] ?? p.current;
+  /// The agent the window shows (`ARK` or `agentKey(project, name)`).
+  markAgent(key) {
+    this.current = key || ARK;
+    if (this.pending === this.current) this.pending = null;
+    this.paintCurrent();
+    this.labelNewChat();
   }
 
-  async fold(p, open, animate = true) {
-    ++this.foldRevision;
-    if (open === p.current) delete this.folds[p.id];
-    else this.folds[p.id] = open;
-    const group = this.tree.querySelector(`.project[data-id="${CSS.escape(p.id)}"]`);
-    if (!group) return;
-    const previous = this.disclosures.get(group);
-    const height = group.getBoundingClientRect().height;
-    previous?.animation?.cancel();
-    const state = {};
-    this.disclosures.set(group, state);
-    const row = group.querySelector(".project-row");
-    group.dataset.instant = String(!animate);
-    row.setAttribute("aria-expanded", String(open));
-    row.querySelector(".project-name")?.setAttribute("aria-expanded", String(open));
-    row.querySelector(".project-chev").setAttribute("aria-label", open ? "Fold" : "Unfold");
-    row.querySelector(".session-attention, .working-dot")?.remove();
-    const badge = this.projectBadge(p, open, this.projectChats.get(group) || []);
-    if (badge) row.insertBefore(badge, row.querySelector(".project-more"));
-    if (open && !group.querySelector(".chats, .project-section")) {
-      let sessions;
-      try { sessions = await this.api.call("sessions", { project: p.id }); }
-      catch (error) {
-        if (group.isConnected && this.disclosures.get(group) === state) {
-          await this.fold(p, false, false);
-          this.api.toast(error.message || String(error));
-        }
-        return;
-      }
-      if (!group.isConnected || this.disclosures.get(group) !== state || !this.unfolded(p)) return;
-      this.mountProject(group, p, sessions);
-    }
-    if (!open && [...group.children].slice(1).some(el => el.contains(document.activeElement))) row.querySelector(".project-name")?.focus({ preventScroll: true });
-    for (const child of [...group.children].slice(1)) {
-      child.inert = !open;
-      child.setAttribute("aria-hidden", String(!open));
-    }
-    const finish = () => {
-      if (this.disclosures.get(group) !== state) return;
-      state.animation = null;
-      if (!open) {
-        this.disposeProject(group);
-        [...group.children].slice(1).forEach(el => el.remove());
-      }
-      group.style.overflow = "";
-    };
-    const target = open ? group.scrollHeight : row.getBoundingClientRect().height;
-    if (!animate || matchMedia("(prefers-reduced-motion: reduce)").matches || height === target) {
-      finish();
+  markView(id) {
+    this.view = id;
+    this.settings.setAttribute("aria-current", String(id === SETTINGS));
+  }
+
+  /// Reads the agents again. `reorder` puts them in order again (load, focus, the person's
+  /// action); otherwise only marks change and nobody moves.
+  async refresh(options) {
+    const reorder = !!options?.reorder;
+    const gen = ++this.gen;
+    this.agentView = !!this.nav.hasAgents();
+    if (!this.agentView) {
+      this.failed = false;
+      this.draw();
       return;
     }
-    group.style.overflow = "clip";
-    state.animation = group.animate([{ height: `${height}px` }, { height: `${target}px` }], {
-      duration: open ? 200 : 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)",
-    });
-    state.animation.onfinish = finish;
-  }
-
-  projectBadge(p, open, sessions = []) {
-    if (open) return null;
-    const waiting = this.attention.filter(item => item.project?.id === p.id || sessions.some(session => session.id === item.session)).length;
-    if (waiting) return h("span.session-attention", { title: "Needs you", "aria-label": `${waiting} pending decision${waiting === 1 ? "" : "s"}` }, icon("alert"), String(waiting));
-    return this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working", hidden: !this.online }) : null;
-  }
-
-  disposeProject(group) {
-    const owned = this.projectSections.filter(section => section.group === group);
-    this.projectSections = this.projectSections.filter(section => section.group !== group);
-    for (const { controller } of owned) {
-      try { controller.dispose?.(); } catch (error) { console.error(error); }
+    if (this.agents === null && !this.loading) {
+      this.loading = setTimeout(() => {
+        this.placeholders = this.agents === null && !this.failed;
+        this.draw();
+      }, 300);
+      this.draw();
     }
-  }
-
-  mountProject(group, p, sessions) {
-    this.projectChats.set(group, sessions);
-    const chats = this.chats(p, sessions);
-    if (chats) group.append(chats);
-    if (!p.current) return;
-    for (const section of registry.projectSections.values()) {
-      const el = h("div.project-section", { role: "group", "aria-label": section.label, "data-id": section.id });
-      group.insertBefore(el, chats);
-      try {
-        const controller = section.render(el, { project: p }, window.ark);
-        if (controller) this.projectSections.push({ group, controller });
-      } catch (error) {
-        console.error(error);
-        el.remove();
-      }
-    }
-  }
-
-  saveHidden() {
+    let rows;
     try {
-      localStorage.setItem(HIDDEN_PROJECTS, JSON.stringify([...this.hidden].map(([id, name]) => ({ id, name }))));
-      return true;
+      rows = await this.nav.loadAgents();
     } catch {
-      return false;
-    }
-  }
-
-  hide(p) {
-    this.hidden.set(p.id, p.name);
-    if (!this.saveHidden()) {
-      this.hidden.delete(p.id);
-      this.api.toast("Could not save the sidebar preference");
+      if (gen !== this.gen) return;
+      clearTimeout(this.loading);
+      this.failed = true;
+      this.placeholders = false;
+      this.draw();
       return;
     }
-    this.refresh();
-    this.api.toast(`${p.name} was removed from the sidebar`);
+    if (gen !== this.gen) return;
+    clearTimeout(this.loading);
+    this.placeholders = false;
+    const first = this.agents === null;
+    this.failed = false;
+    this.agents = Array.isArray(rows) ? rows.filter((row) => row && typeof row.name === "string" && typeof row.project === "string") : [];
+    if (first || reorder) this.order = null;
+    this.draw();
   }
 
+  entries() {
+    const name = this.nav.arkName() || "ARK";
+    const ark = { key: ARK, ark: true, name, label: name };
+    const shown = (this.agents || []).filter((agent) => !this.hidden.has(agent.project));
+    const label = (agent) => agent.title || agent.name;
+    const seen = new Map();
+    for (const agent of shown) seen.set(label(agent).toLocaleLowerCase(), (seen.get(label(agent).toLocaleLowerCase()) || 0) + 1);
+    return [ark, ...shown.map((agent) => ({
+      ...agent, key: agentKey(agent.project, agent.name), label: label(agent), twin: seen.get(label(agent).toLocaleLowerCase()) > 1,
+    }))];
+  }
+
+  pins() {
+    return readPins(this.nav.runtime());
+  }
+
+  /// ARK, pins in pin order, then latest activity. Kept between reorders: an agent that
+  /// appears meanwhile goes last.
+  arrange(entries) {
+    const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+    const pinned = this.pins().map(([project, name]) => agentKey(project, name)).filter((key) => byKey.has(key));
+    if (!this.order) {
+      const rest = entries.filter((entry) => !entry.ark && !pinned.includes(entry.key))
+        .sort((a, b) => (b.updated_ms || 0) - (a.updated_ms || 0) || a.label.localeCompare(b.label));
+      this.order = [ARK, ...pinned, ...rest.map((entry) => entry.key)];
+    } else {
+      this.order = this.order.filter((key) => byKey.has(key));
+      for (const entry of entries) if (!this.order.includes(entry.key)) this.order.push(entry.key);
+    }
+    this.tiles = Math.min(this.order.length, Math.max(TILES, Math.min(MAX_TILES, 1 + pinned.length)));
+    return this.order.map((key) => byKey.get(key));
+  }
+
+  find(key) {
+    return this.entries().find((entry) => entry.key === key) || null;
+  }
+
+  mark(entry) {
+    if (!this.online) return null;
+    if (entry.ark) {
+      if (this.board > 0 || this.attention.some((item) => !item.request?.agent)) return "asking";
+      return this.working.size ? "working" : null;
+    }
+    if (entry.asking || this.attention.some((item) => item.request?.agent === entry.name && (!item.project?.id || item.project.id === entry.project))) return "asking";
+    return ["running", "waiting"].includes(entry.state) || entry.running?.length ? "working" : null;
+  }
+
+  draw() {
+    const entries = this.arrange(this.entries());
+    const focused = this.list.contains(document.activeElement) ? document.activeElement.closest(".agent-btn")?.dataset.key : null;
+    const seen = new Set();
+    let previous = null;
+    entries.forEach((entry, index) => {
+      let item = this.items.get(entry.key);
+      const fresh = !item;
+      if (fresh) {
+        item = this.item(entry.key);
+        this.items.set(entry.key, item);
+      }
+      this.paint(item, entry, index < this.tiles ? "tile" : "row");
+      const next = previous ? previous.nextElementSibling : this.list.firstElementChild;
+      if (next !== item) this.list.insertBefore(item, next);
+      previous = item;
+      if (fresh && this.drawn) this.enter(item);
+      seen.add(entry.key);
+    });
+    for (const [key, item] of this.items) {
+      if (seen.has(key)) continue;
+      this.items.delete(key);
+      this.leave(item);
+    }
+    for (const old of this.list.querySelectorAll(".agent-item.placeholder")) old.remove();
+    if (this.placeholders && this.agents === null) {
+      for (let i = 0; i < 3; i++) this.list.append(h("div.agent-item.placeholder", { "aria-hidden": "true", "data-kind": "tile" }, h("span.agent-face-box", h("span.agent-face-ghost")), h("span.agent-name-ghost")));
+    }
+    clear(this.note);
+    this.note.hidden = !this.failed;
+    if (this.failed) this.note.append(h("span", "Agents unavailable"), h("button.agents-retry", { type: "button", onclick: () => void this.refresh({ reorder: true }) }, "Try again"));
+    this.drawn = entries.length > 1 || !this.agentView || this.agents !== null;
+    this.paintCurrent();
+    this.rove(focused ? this.button(focused) : null);
+    if (focused) this.button(focused)?.focus({ preventScroll: true });
+    this.labelNewChat();
+    $("#reveal-sidebar")?.toggleAttribute("data-attention", entries.some((entry) => this.mark(entry) === "asking"));
+  }
+
+  item(key) {
+    const button = h("button.agent-btn", { type: "button", tabindex: "-1", "data-key": key });
+    button.addEventListener("click", (event) => {
+      if (button.dataset.pressed === "long") { delete button.dataset.pressed; return; }
+      void this.open(key, event);
+    });
+    bindContextMenu(button, () => this.menu(key));
+    // A long press on a touch screen opens the same menu.
+    let timer = null;
+    const cancel = () => clearTimeout(timer);
+    button.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "touch") return;
+      const { clientX, clientY } = event;
+      timer = setTimeout(() => {
+        button.dataset.pressed = "long";
+        contextMenu({ type: "longpress", target: button, defaultPrevented: false, clientX, clientY, preventDefault() {}, stopPropagation() {} }, button, this.menu(key));
+      }, LONG_PRESS);
+    });
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) button.addEventListener(type, cancel);
+    return h("div.agent-item", { role: "listitem", "data-key": key }, button);
+  }
+
+  face(entry, size) {
+    return entry.ark ? this.nav.arkFace(size) : agentFace(entry.name, size);
+  }
+
+  paint(item, entry, kind) {
+    const button = item.firstElementChild;
+    const mark = this.mark(entry);
+    const sub = entry.twin ? entry.project_name : kind === "row" ? entry.preview : null;
+    const end = kind === "row" ? (mark === "asking" ? "Needs you" : entry.updated_ms ? ago(entry.updated_ms) : "") : "";
+    const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : ""]);
+    item.dataset.kind = kind;
+    button.dataset.name = entry.label.toLocaleLowerCase();
+    if (button.dataset.signature !== signature) {
+      button.dataset.signature = signature;
+      button.replaceChildren(
+        h("span.agent-face-box", this.face(entry, kind === "tile" ? 40 : 22),
+          mark ? h("span.agent-mark", { "data-mark": mark }, mark === "asking" ? icon("alert") : null) : null),
+        h("span.agent-text", h("span.agent-name", entry.label), sub ? h("span.agent-sub", sub) : null),
+        end ? h("span.agent-end", { "data-mark": mark || null }, end) : "");
+    }
+    const words = [entry.label, entry.twin ? entry.project_name : null, mark === "asking" ? "needs you" : mark === "working" ? "working" : null];
+    button.setAttribute("aria-label", words.filter(Boolean).join(", "));
+    button.title = entry.twin ? `${entry.label}\n${entry.project_name}` : entry.label;
+    button.setAttribute("aria-disabled", String(!this.online));
+  }
+
+  /// Faces drawn again (an app gave agents their own look).
+  restyle() {
+    for (const item of this.items.values()) delete item.firstElementChild.dataset.signature;
+    this.draw();
+  }
+
+  button(key) {
+    return this.items.get(key)?.firstElementChild || null;
+  }
+
+  buttons() {
+    return [...this.items.values()].filter((item) => item.isConnected).sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1).map((item) => item.firstElementChild);
+  }
+
+  paintCurrent() {
+    const current = this.pending || this.current;
+    for (const [key, item] of this.items) {
+      if (key === current) item.firstElementChild.setAttribute("aria-current", "true");
+      else item.firstElementChild.removeAttribute("aria-current");
+    }
+  }
+
+  /// One tab stop for the whole list: the focused agent, else the current one, else ARK.
+  rove(target) {
+    const buttons = this.buttons();
+    const stop = target && buttons.includes(target) ? target : this.button(this.pending || this.current) || buttons[0];
+    for (const button of buttons) button.tabIndex = button === stop ? 0 : -1;
+  }
+
+  labelNewChat() {
+    const entry = this.find(this.current) || this.find(ARK);
+    const words = `New chat with ${entry?.label || "ARK"}`;
+    this.newButton.setAttribute("aria-label", words);
+    this.newButton.title = words;
+  }
+
+  enter(item) {
+    if (reducedMotion()) return void item.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    item.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+  }
+
+  leave(item) {
+    item.dataset.leaving = "";
+    item.inert = true;
+    const done = () => item.remove();
+    const animation = item.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    animation.onfinish = done;
+    animation.oncancel = done;
+  }
+
+  /// Opens an agent's latest chat. The tile is current at once; the latest click wins.
+  async open(key, event) {
+    if (!this.online) return;
+    const entry = this.find(key);
+    if (!entry) return;
+    const gen = ++this.clickGen;
+    this.pending = key;
+    this.paintCurrent();
+    let ok;
+    try {
+      ok = await this.nav.open(entry, { newTab: !!(event?.metaKey || event?.ctrlKey) });
+    } catch {
+      ok = false;
+    }
+    if (gen !== this.clickGen) return;
+    this.pending = null;
+    if (ok === false) this.api.toast(`Could not open ${entry.label}. Try again.`);
+    this.paintCurrent();
+  }
+
+  /// The nth agent (⌘1 to ⌘9).
+  openNth(index) {
+    const key = this.buttons()[index]?.dataset.key;
+    if (key) void this.open(key);
+  }
+
+  menu(key) {
+    const entry = this.find(key);
+    if (!entry || !this.online) return [];
+    const pinned = !entry.ark && this.pins().some(([project, name]) => project === entry.project && name === entry.name);
+    return [
+      !entry.program && { label: "New chat", run: () => this.nav.newChatWith(entry) },
+      { label: "Chats", run: () => this.nav.history(entry) },
+      !entry.ark && { label: pinned ? "Unpin" : "Pin", run: () => this.pin(entry, !pinned) },
+    ].filter(Boolean);
+  }
+
+  pin(entry, on) {
+    const runtime = this.nav.runtime();
+    const pins = this.pins().filter(([project, name]) => project !== entry.project || name !== entry.name);
+    if (on) pins.push([entry.project, entry.name]);
+    if (!runtime || !writePins(runtime, pins)) return this.api.toast("Could not save the sidebar preference");
+    this.order = null;
+    this.draw();
+  }
+
+  keys(event) {
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+    const buttons = this.buttons();
+    const index = buttons.indexOf(document.activeElement);
+    if (index < 0) return;
+    const tiles = this.tiles;
+    const last = buttons.length - 1;
+    let next = null;
+    if (event.key === "ArrowRight") next = Math.min(last, index + 1);
+    else if (event.key === "ArrowLeft") next = Math.max(0, index - 1);
+    else if (event.key === "ArrowDown") {
+      if (index >= tiles) next = Math.min(last, index + 1);
+      else if (index + COLUMNS < tiles) next = index + COLUMNS;
+      else next = tiles <= last ? tiles : Math.floor(index / COLUMNS) < Math.floor((tiles - 1) / COLUMNS) ? tiles - 1 : index;
+    } else if (event.key === "ArrowUp") {
+      if (index > tiles) next = index - 1;
+      else if (index === tiles) next = tiles - 1;
+      else next = index >= COLUMNS ? index - COLUMNS : index;
+    } else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = last;
+    else if (event.key.length === 1 && event.key !== " ") {
+      const now = performance.now();
+      this.typed.text = now - this.typed.at > 700 ? event.key.toLocaleLowerCase() : this.typed.text + event.key.toLocaleLowerCase();
+      this.typed.at = now;
+      const text = this.typed.text;
+      const repeat = [...text].every((c) => c === text[0]);
+      const order = [...buttons.slice(index + 1), ...buttons.slice(0, index + 1)];
+      const match = order.find((button) => button.dataset.name?.startsWith(text)) || (repeat ? order.find((button) => button.dataset.name?.startsWith(text[0])) : null);
+      if (match) next = buttons.indexOf(match);
+      event.stopPropagation();
+    }
+    if (next === null) return;
+    event.preventDefault();
+    this.rove(buttons[next]);
+    buttons[next].focus();
+  }
+
+  /// Show a hidden folder's agents and chats again.
   restore(id) {
     const name = this.hidden.get(id) || "Project";
     this.hidden.delete(id);
-    if (!this.saveHidden()) {
+    if (!saveHiddenProjects(this.hidden)) {
       this.hidden.set(id, name);
       this.api.toast("Could not save the sidebar preference");
       return;
     }
-    this.refresh();
-    this.api.toast(`${name} was restored to the sidebar`);
+    this.order = null;
+    this.draw();
+    this.api.toast(`${name} is shown again`);
   }
 
-  async addProject(params) {
-    if (!await this.api.addProject(params)) return;
-    await this.restoreOpenedProject();
+  hiddenList() {
+    return [...this.hidden];
   }
 
-  async restoreOpenedProject() {
-    try {
-      const opened = (await this.api.call("projects")).find((p) => p.current);
-      if (opened && this.hidden.has(opened.id)) return this.restore(opened.id);
-    } catch {}
-    this.refresh();
-  }
-
-  async refresh(currentId) {
-    if (currentId !== undefined) this.currentId = currentId;
-    const gen = ++this.gen;
-    const foldRevision = this.foldRevision;
-    let projects;
-    try {
-      projects = await this.api.call("projects");
-    } catch {
-      return; // busy while a turn runs; the list refreshes when it ends
-    }
-    if (gen !== this.gen) return;
-    // A project that stops being current stays unfolded. Project expansion is independent, so
-    // moving between projects never turns the sidebar into a one-open accordion.
-    const current = projects.find((p) => p.current)?.id || null;
-    if (current !== this.current) {
-      if (this.current && this.folds[this.current] === undefined) this.folds[this.current] = true;
-      this.current = current;
-    }
-    // Keep the saved labels current while a project is hidden. Drop old entries if its host no
-    // longer lists the project, so a future project cannot inherit the old presentation state.
-    const known = new Set(projects.map((p) => p.id));
-    for (const id of this.hidden.keys()) if (!known.has(id)) this.hidden.delete(id);
-    projects.forEach((p) => { if (this.hidden.has(p.id)) this.hidden.set(p.id, p.name); });
-    this.saveHidden();
-    const visible = projects.filter((p) => !this.hidden.has(p.id));
-    const locateQuestions = this.attention.some((item) => item.session && !item.project?.id);
-    const chats = await Promise.all(visible.map((p) =>
-      this.unfolded(p) || locateQuestions ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
-    // A newer refresh started meanwhile; it draws.
-    if (gen !== this.gen) return;
-    if (foldRevision !== this.foldRevision) return this.refresh();
-    const active = document.activeElement;
-    const focusedChat = active?.matches(".session") ? active.dataset.id : null;
-    const focusedProject = active?.closest(".project")?.dataset.id;
-    const focusedSection = active?.closest(".project-section")?.dataset.id;
-    const focusedKey = active?.dataset.focusKey;
-    const focusedControl = [".project-name", ".project-chev", ".project-more", ".project-new-chat"].find((selector) => active?.matches(selector));
-    const sections = this.projectSections;
-    this.projectSections = [];
-    for (const { controller } of sections) {
-      try { controller.dispose?.(); } catch (e) { console.error(e); }
-    }
-    clear(this.tree);
-    visible.forEach((p, i) => {
-      const group = this.project(p, chats[i]);
-      this.tree.append(group);
-      if (this.unfolded(p)) this.mountProject(group, p, chats[i] || []);
-    });
-    if (focusedChat) this.tree.querySelector(`.session[data-id="${CSS.escape(focusedChat)}"]`)?.focus({ preventScroll: true });
-    else if (focusedProject && focusedControl) this.tree.querySelector(`.project[data-id="${CSS.escape(focusedProject)}"] ${focusedControl}`)?.focus({ preventScroll: true });
-    else if (focusedProject && focusedSection && focusedKey) this.tree.querySelector(`.project[data-id="${CSS.escape(focusedProject)}"] .project-section[data-id="${CSS.escape(focusedSection)}"] [data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus({ preventScroll: true });
-  }
-
-  project(p, sessions) {
-    const open = this.unfolded(p);
-    const row = h("div.project-row", {
-      "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
-      title: p.workspace || "No folder yet",
-    },
-      h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !this.unfolded(p), e.detail !== 0); } }, icon("chevron-right")),
-      h("button.project-name", { type: "button", "aria-expanded": String(open), "aria-current": p.current ? "true" : null }, p.name),
-      this.projectBadge(p, open, sessions || []),
-      h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")),
-      h("button.icon-btn.small.project-new-chat", { type: "button", title: `New chat in ${p.name}`, "aria-label": `New chat in ${p.name}`, onclick: (e) => { e.stopPropagation(); this.newChat(p); } }, icon("plus")));
-    // The current project folds; another one opens where it left off.
-    const pick = (animate) => (p.current ? this.fold(p, !this.unfolded(p), animate) : this.openProject(p));
-    row.addEventListener("click", (e) => pick(e.detail !== 0));
-    row.addEventListener("dblclick", (e) => { e.preventDefault(); this.renameProject(row, p); });
-    const group = h("div.project", { role: "group", "data-id": p.id }, row);
-    this.projectChats.set(group, sessions || []);
-    const projectRow = group.querySelector(".project-row");
-    bindContextMenu(projectRow, () => [
-      { label: "New chat", run: () => this.newChat(p) },
-      { label: "Rename project", run: () => this.renameProject(projectRow, p) },
-      { label: "Remove from sidebar", run: () => this.hide(p) },
-    ]);
-    return group;
-  }
-
-  chats(p, sessions) {
-    // A chat shows once it has a turn, or while its first one runs.
-    const shown = sessions.filter((s) => s.turns > 0 || s.working || this.working.has(s.id) || this.attention.some((item) => item.session === s.id));
-    if (!shown.length) return null;
-    const box = h("div.chats", { role: "group", "aria-label": "Chats" });
-    const all = this.all.has(p.id);
-    (all ? shown : shown.slice(0, SHOWN)).forEach((s) => box.append(this.chat(s)));
-    if (shown.length > SHOWN) {
-      box.append(h("button.chats-more", { type: "button", onclick: () => { all ? this.all.delete(p.id) : this.all.add(p.id); this.refresh(); } },
-        all ? "Show less" : `Show ${shown.length - SHOWN} more`));
-    }
-    return box;
-  }
-
-  chat(s) {
-    const title = s.title || "Untitled";
-    const waiting = this.attention.some((item) => item.session === s.id);
-    const row = h("div.session", {
-      role: "button", tabindex: "0", "data-id": s.id, "aria-current": s.id === this.currentId ? "true" : null,
-    },
-      chatAvatar(s.participants),
-      h("span.session-title", clip(title, 60)),
-      // A chat that runs on another computer: its mark, muted while that computer is away.
-      s.place ? h("span.session-place", { title: `Runs on ${s.place.name}`, "data-state": s.place.state }, icon("server")) : null,
-      // A chat working in the background: a spinner where its time would be.
-      waiting ? h("span.session-attention", { title: "Needs you" }, icon("alert"), "Needs you")
-        : s.working || this.working.has(s.id)
-        ? h("span.session-progress", { role: "status", hidden: !this.online }, h("span.session-working", { "aria-hidden": "true" }), "Working")
-        : h("span.session-time", ago(s.updated_at)));
-    if (s.participants?.length) row.setAttribute("aria-description", `Assigned agents: ${s.participants.join(", ")}`);
-    row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
-    row.addEventListener("click", () => this.api.openSession(s.id));
-    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.api.openSession(s.id); } });
-    row.addEventListener("dblclick", () => this.inline(row, ".session-title", s.title || "", "Chat title", (title) => this.api.call("rename_session", { id: s.id, title })));
-    bindContextMenu(row, () => [
-      { label: "Open chat", run: () => this.api.openSession(s.id) },
-      { label: "Rename chat", run: () => this.inline(row, ".session-title", s.title || "", "Chat title", title => this.api.call("rename_session", { id: s.id, title })) },
-    ]);
-    return row;
-  }
-
-  /// Mark the view the main column shows (none: the conversation).
-  markView(id) {
-    this.view = id;
-    this.tree.dataset.dim = String(!!id);
-    this.settings.setAttribute("aria-current", String(id === SETTINGS));
-  }
-
-  openProject(p) {
-    return this.api.openProject(p.id);
-  }
-
-  newChat(p) {
-    return this.api.newSession(p.id);
-  }
-
-  renameProject(row, p) {
-    this.inline(row, ".project-name", p.name, "Project name", (name) => this.api.call("rename_project", { id: p.id, name }));
-  }
-
-  /// Edit a row's label in place; `save` gets the new text when it changed.
-  inline(row, sel, value, label, save) {
-    const el = row.querySelector(sel);
-    if (!el) return;
-    const input = h("input.session-rename", { value, "aria-label": label });
-    input.addEventListener("click", (e) => e.stopPropagation());
-    el.replaceWith(input);
-    input.focus();
-    input.select();
-    let done = false;
-    const finish = async (keep) => {
-      if (done) return;
-      done = true;
-      const text = input.value.trim();
-      if (keep && text && text !== value) {
-        try {
-          await save(text);
-        } catch (e) {
-          this.api.toast(e.message);
-        }
-      }
-      this.refresh();
-    };
-    input.addEventListener("blur", () => finish(true));
-    input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") finish(true);
-      if (e.key === "Escape") finish(false);
-    });
-  }
-
-  projectMenu(anchor, p) {
-    const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
-    const menu = this.api.popover(anchor, [
-      h("div.menu-sub.pad", { title: p.workspace || "" }, p.workspace ? tail(p.workspace, 44) : "No folder yet"),
-      item("New chat", () => this.newChat(p)),
-      item("Rename", () => {
-        const row = this.tree.querySelector(`.project[data-id="${p.id}"] .project-row`);
-        if (row) this.renameProject(row, p);
-      }),
-      item(p.workspace ? "Change folder…" : "Choose folder…", async () => {
-        const path = await this.folder(anchor, "Choose the folder this project works in");
-        if (!path) return;
-        try {
-          await this.api.call("project_folder", { id: p.id, path });
-        } catch (e) {
-          this.api.toast(e.message);
-        }
-      }),
-      h("div.menu-sep"),
-      item("Remove from sidebar", () => this.hide(p)),
-      // The app's own actions on a project (`ark.action({ where: "project" })`).
-      ...registry.actions
-        .filter((a) => {
-          if (a.where !== "project") return false;
-          try { return !a.when || a.when({ project: p }); } catch { return false; }
-        })
-        .map((a) => item(a.label, async () => {
-          try { await a.run({ project: p }, window.ark); } catch (e) { this.api.toast(e.message || String(e)); }
-        })),
-    ]);
-  }
-
-  addMenu(anchor) {
-    const name = h("input.menu-input", { placeholder: "New project…", "aria-label": "New project name" });
-    const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
-    // A folder on the runtime's computer: picked in the window, typed in a browser there. A
-    // folder on this device, wherever the runtime runs: sent (a browser cannot name a path).
-    const hidden = [...this.hidden];
-    const menu = this.api.popover(anchor, [
-      (this.api.canPickFolder || this.api.isLocal()) && item("Choose a folder…", async () => {
-        const path = await this.folder(anchor, "Open a folder as a project");
-        if (path) this.addProject({ path });
-      }),
-      !this.api.canPickFolder && item("Upload a folder…", () => uploadFolder({
-        ...this.api,
-        addProject: (params) => this.addProject(params),
-        openProject: async (id) => {
-          if (await this.api.openProject(id)) await this.restoreOpenedProject();
-        },
-      })),
-      h("div.menu-sep"),
-      ...hidden.map(([id, projectName]) => item(`Restore ${projectName}`, () => this.restore(id))),
-      hidden.length ? h("div.menu-sep") : null,
-      name,
-    ].filter(Boolean));
-    name.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && name.value.trim()) {
-        menu.close();
-        this.addProject({ name: name.value.trim() });
-      }
-    });
-    if (!touch()) name.focus();
-  }
-
-  /// A folder from the window's picker; where there is none (a browser), a typed path.
-  async folder(anchor, title) {
-    const picked = await this.api.pickFolder({ title });
-    if (picked !== undefined) return picked;
-    return new Promise((done) => {
-      const input = h("input.menu-input", { placeholder: "/full/path/to/folder", "aria-label": title, spellcheck: "false" });
-      const menu = this.api.popover(anchor, [h("div.menu-head", title), input]);
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && input.value.trim()) {
-          menu.close();
-          done(input.value.trim());
-        }
-      });
-      input.focus();
-    });
-  }
-
-  /// The app's rows above the projects and status items. The account entry lives in the fixed
-  /// rail, and appears once an app has registered a settings section.
+  /// The app's rows above the agents and its status items. The account entry lives in the
+  /// fixed rail, and appears once an app has registered a settings section.
   renderExtensions() {
     this.settings.hidden = !registry.settings.size;
     clear(this.top);
@@ -481,10 +479,6 @@ export class Sidebar {
       this.status.append(el);
       try { s.render(el, window.ark); } catch (e) { console.error(e); }
     }
+    if (!!this.nav.hasAgents() !== this.agentView) void this.refresh({ reorder: true });
   }
-}
-
-/// The end of a path, which names the folder: `…/code/project`.
-function tail(path, n) {
-  return path.length > n ? `…${path.slice(path.length - n + 1)}` : path;
 }

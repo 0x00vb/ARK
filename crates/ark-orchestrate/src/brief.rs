@@ -185,6 +185,7 @@ mod tests {
             execution_step: None,
             execution_owner: None,
             conversation: None,
+            thread: None,
             id: id.into(),
             project: "p".into(),
             owner: owner.into(),

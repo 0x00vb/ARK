@@ -22,6 +22,12 @@ async function shoot(page, name) {
   }
 }
 
+// ARK's tile carries the marks of its chats: working while one works, needs you while one asks.
+const ARK = '#agents .agent-btn[data-key="ark"]';
+const ARK_WORKING = `${ARK} .agent-mark[data-mark="working"]`;
+const ARK_ASKING = `${ARK} .agent-mark[data-mark="asking"]`;
+const markShown = (page) => page.locator(`${ARK} .agent-mark`).evaluateAll((marks) => marks.filter((mark) => getComputedStyle(mark).display !== "none").map((mark) => mark.dataset.mark));
+
 async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, chosenMode = false, tabs = null, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
@@ -38,6 +44,8 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
     if (method === "hello") return { summary, ui: {}, commands: [], seq: 0, working: [{ session: "chat-b", project: "a" }], approvals, runtime: "fixture" };
     if (method === "projects") return projects;
     if (method === "sessions") return params.project === "a" ? sessions : [];
+    if (method === "agents") return [];
+    if (method === "rename_session") return null;
     if (method === "summary") return summary;
     if (method === "send") { sendCalls.push({ params, modeCalls: modeCalls.length, mode: summary.execution_mode }); return { started: true }; }
     if (method === "execution_mode" || method === "chat_execution_mode") {
@@ -91,7 +99,7 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
   page.on("pageerror", error => errors.push(error.message));
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html${detached ? "?detached=chat-b" : ""}`);
-    await page.locator('.session[data-id="chat-b"] .session-working').waitFor();
+    await page.locator(ARK_WORKING).waitFor();
     await run(page, { modeCalls, sendCalls, emit, request, snapshot: items => { approvals = items; }, assign: (id, names) => { sessions.find(session => session.id === id).participants = names; }, hold: () => { holdRead = true; }, reading, release: () => releaseRead() });
     assert.deepEqual(errors, []);
   } finally {
@@ -100,55 +108,49 @@ async function fixture(run, { detached = false, empty = false, coarse = false, r
   }
 }
 
-test("pending decisions take precedence over work, deduplicate, resolve and reconcile on reload", () => fixture(async (page, { emit, request, snapshot }) => {
-  const chat = page.locator('.session[data-id="chat-b"]');
-  await chat.focus();
+test("pending decisions take precedence over work on ARK's tile, resolve and reconcile on reload", () => fixture(async (page, { emit, request, snapshot }) => {
+  const ark = page.locator(ARK);
+  await ark.focus();
   emit({ kind: "approval", ...request });
-  await chat.getByText("Needs you", { exact: true }).waitFor();
-  assert.equal(await chat.evaluate(node => document.activeElement === node), true);
-  assert.equal(await chat.locator(".session-working").count(), 0);
+  await page.locator(ARK_ASKING).waitFor();
+  assert.equal(await ark.getAttribute("aria-label"), "ARK, needs you");
+  assert.equal(await ark.evaluate(node => document.activeElement === node), true, "a new mark keeps the focus");
+  assert.equal(await page.locator(ARK_WORKING).count(), 0, "needs you wins over working");
   emit({ kind: "approval", ...request });
-  await page.locator('.project[data-id="a"] .project-chev').click();
-  await page.locator('.project[data-id="a"] > .project-row .session-attention').waitFor();
-  assert.equal(await page.locator('.project[data-id="a"] > .project-row .session-attention').innerText(), "1");
-  assert.equal(await page.locator('.project[data-id="b"] .session-attention').count(), 0);
-  const project = page.locator('.project[data-id="a"] .project-row .project-name');
-  await project.focus();
   emit({ kind: "approval", ...request, id: 8 });
-  await page.locator('.project[data-id="a"] > .project-row .session-attention').getByText("2", { exact: true }).waitFor();
-  assert.equal(await project.evaluate(node => document.activeElement === node), true);
   emit({ kind: "approval_closed", id: 8, session: request.session });
-  await page.locator('.project[data-id="a"] .project-chev').click();
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator(ARK_ASKING).count(), 1);
   emit({ kind: "approval_closed", id: request.id, session: request.session });
-  await chat.locator(".session-working").waitFor();
-  assert.equal(await chat.locator(".session-attention").count(), 0);
+  await page.locator(ARK_WORKING).waitFor();
+  assert.equal(await page.locator(ARK_ASKING).count(), 0);
   emit({ kind: "reconnecting", delay: 1000 });
-  await chat.locator(".session-progress").waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.querySelector("#agents").dataset.offline === "true");
+  assert.deepEqual(await markShown(page), []);
   emit({ kind: "working", working: [{ session: "chat-b", project: "a" }] });
-  assert.equal(await chat.locator(".session-progress").isVisible(), false);
+  assert.deepEqual(await markShown(page), [], "no mark while the connection is down");
   snapshot([request]);
   await page.reload();
-  await chat.getByText("Needs you", { exact: true }).waitFor();
+  await page.locator(ARK_ASKING).waitFor();
   snapshot([]);
   await page.reload();
-  await chat.locator(".session-working").waitFor();
-  assert.equal(await chat.locator(".session-attention").count(), 0);
+  await page.locator(ARK_WORKING).waitFor();
+  assert.equal(await page.locator(ARK_ASKING).count(), 0);
 }));
 
 test("detached chat decisions survive snapshot reload and clear when answered", () => fixture(async (page, { emit, request, snapshot }) => {
   snapshot([request]);
   await page.reload();
-  const chat = page.locator('.session[data-id="chat-b"]');
-  await chat.getByText("Needs you", { exact: true }).waitFor();
+  await page.locator(ARK_ASKING).waitFor();
   emit({ kind: "approval_closed", id: request.id, session: request.session });
-  await chat.locator(".session-working").waitFor();
-  assert.equal(await chat.locator(".session-attention").count(), 0);
+  await page.locator(ARK_WORKING).waitFor();
+  assert.equal(await page.locator(ARK_ASKING).count(), 0);
 }, { detached: true }));
 
 test("detached snapshot keeps pending decisions from other chats", () => fixture(async (page, { request, snapshot }) => {
   snapshot([{ ...request, session: "chat-a", chat: "Quarterly review" }]);
   await page.reload();
-  await page.locator('.session[data-id="chat-a"]').getByText("Needs you", { exact: true }).waitFor();
+  await page.locator(ARK_ASKING).waitFor();
 }, { detached: true }));
 
 test("a late snapshot cannot restore Working after a newer disconnect", () => fixture(async (page, { emit, hold, reading, release }) => {
@@ -156,30 +158,26 @@ test("a late snapshot cannot restore Working after a newer disconnect", () => fi
   emit({ kind: "resync" });
   await reading;
   emit({ kind: "reconnecting", delay: 1000 });
-  const progress = page.locator('.session[data-id="chat-b"] .session-progress');
-  await progress.waitFor({ state: "hidden" });
-  await progress.evaluate(node => { window.disconnectedMark = node; });
+  await page.waitForFunction(() => document.querySelector("#agents").dataset.offline === "true");
   const response = page.waitForResponse(response => response.url().endsWith("/rpc") && response.request().postDataJSON().method === "transcript");
   release();
   await response;
-  await page.waitForFunction(() => document.querySelector('.session[data-id="chat-b"] .session-progress') !== window.disconnectedMark);
-  assert.equal(await progress.isVisible(), false);
+  await page.waitForTimeout(100);
+  assert.deepEqual(await markShown(page), []);
 }));
 
 test("Working returns after transport resync then connected and fresh snapshot", () => fixture(async (page, { emit, hold, reading, release }) => {
-  const progress = page.locator('.session[data-id="chat-b"] .session-progress');
   emit({ kind: "reconnecting", delay: 1000 });
-  await progress.waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.querySelector("#agents").dataset.offline === "true");
   hold();
   emit({ kind: "resync" });
   await reading;
-  await progress.evaluate(node => { window.disconnectedMark = node; });
   emit({ kind: "connected" });
   const response = page.waitForResponse(response => response.url().endsWith("/rpc") && response.request().postDataJSON().method === "transcript");
   release();
   await response;
-  await page.waitForFunction(() => document.querySelector('.session[data-id="chat-b"] .session-progress') !== window.disconnectedMark);
-  await progress.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.querySelector("#agents").dataset.offline === "false");
+  await page.locator(ARK_WORKING).waitFor();
 }));
 
 test("files expose an open action and preserve removed state across light, dark and narrow layouts", () => fixture(async page => {
@@ -294,46 +292,23 @@ test("the sole local computer stays quiet while a real destination choice remain
 });
 
 
-test("background decisions preserve project-section keyboard focus across sidebar remounts", () => fixture(async (page, { emit, request }) => {
-  await page.evaluate(() => {
-    window.sectionMounts = 0;
-    window.ark.projectSection({ id: "contacts", label: "Agent conversations", render(el) {
-      window.sectionMounts++;
-      const button = document.createElement("button"); button.textContent = "Chat with Writer"; button.dataset.focusKey = "Writer"; el.append(button);
-    } });
-  });
-  const contact = page.getByRole("button", { name: "Chat with Writer", exact: true });
-  await contact.waitFor(); await contact.focus();
-  const mounts = await page.evaluate(() => window.sectionMounts);
+test("background decisions keep the keyboard focus in the agent list", () => fixture(async (page, { emit, request }) => {
+  const ark = page.locator(ARK);
+  await ark.focus();
   emit({ kind: "approval", ...request });
-  await page.locator('.session[data-id="chat-b"]').getByText("Needs you", { exact: true }).waitFor();
-  assert.ok(await page.evaluate(() => window.sectionMounts) > mounts);
-  assert.equal(await contact.evaluate(el => document.activeElement === el), true);
+  await page.locator(ARK_ASKING).waitFor();
+  assert.equal(await ark.evaluate(el => document.activeElement === el), true);
 }));
 
-
-test("chat identity distinguishes neutral, individual and group assignments without changing status", () => fixture(async page => {
-  const group = page.locator('.session[data-id="chat-b"]');
-  assert.equal(await group.locator(".chat-face").count(), 3);
-  assert.equal(await group.locator(".chat-overflow").innerText(), "+1");
-  assert.match(await group.getAttribute("aria-description"), /Editor, Lead, Reader, Writer/);
-  assert.equal(await group.locator(".session-working").count(), 1);
-  assert.equal(await page.locator('.session[data-id="chat-a"] .chat-avatar[data-count="0"]').count(), 1);
+test("chat avatars distinguish neutral, individual and group assignments", () => fixture(async page => {
   const result = await page.evaluate(async () => {
     const { chatAvatar } = await import("./js/dom.js");
-    const single = chatAvatar(["Writer"]); const duplicate = chatAvatar(["Writer", "Writer"]);
-    return { single: single.dataset.count, duplicate: duplicate.dataset.count, hidden: single.getAttribute("aria-hidden") };
+    const none = chatAvatar([]); const single = chatAvatar(["Writer"]); const duplicate = chatAvatar(["Writer", "Writer"]); const group = chatAvatar(["Editor", "Lead", "Reader", "Writer"]);
+    return { none: none.dataset.count, single: single.dataset.count, duplicate: duplicate.dataset.count, hidden: single.getAttribute("aria-hidden"),
+      faces: group.querySelectorAll(".chat-face").length, overflow: group.querySelector(".chat-overflow").textContent };
   });
-  assert.deepEqual(result, { single: "1", duplicate: "1", hidden: "true" });
+  assert.deepEqual(result, { none: "0", single: "1", duplicate: "1", hidden: "true", faces: 3, overflow: "+1" });
 }));
-
-
-test("a new delegation refreshes participant identities before the chat turn ends", () => fixture(async (page, { emit, assign }) => {
-  assign("chat-a", ["Lead", "Writer"]);
-  emit({ kind: "orch", event: { type: "task_created", project: "a", task: "new-task" } });
-  await page.locator('.session[data-id="chat-a"] .chat-avatar[data-count="2"]').waitFor();
-}));
-
 
 test("touch keeps comfortable targets despite smaller pointer controls", () => fixture(async page => {
   await page.setViewportSize({ width: 390, height: 800 });
@@ -352,7 +327,6 @@ test("an app identity resolver is shared by individual and group chat avatars", 
     return [chatAvatar(["Writer"]), chatAvatar(["Writer", "Editor"])].map(mark => mark.querySelector(".chat-face").dataset.variant);
   });
   assert.deepEqual(result, ["agent-Writer", "agent-Writer"]);
-  await page.locator('.session[data-id="chat-b"] .chat-face[data-variant="agent-Editor"]').waitFor();
 }));
 
 
@@ -499,31 +473,33 @@ test("the greeting uses the first word of the profile name and none of the model
 }));
 
 test("the title bar names who the chat is with and opens the details in the side pane", () => fixture(async page => {
-  const chip = page.locator("#session-title .identity-chip");
+  const chip = page.locator("#session-title .identity-face-btn");
   await chip.waitFor();
-  assert.match(await chip.getAttribute("aria-label"), /Quarterly review: details/);
+  assert.equal(await chip.getAttribute("aria-label"), "ARK: details");
+  assert.match(await page.locator("#session-title .identity-title-btn").getAttribute("aria-label"), /Quarterly review: recent chats/);
   await chip.click();
   const panel = page.locator("#pane .identity-panel");
   await panel.waitFor();
   await shoot(page, "calm-details-pane");
   assert.equal(await panel.locator("h2").textContent(), "ARK");
-  assert.equal(await panel.locator(".identity-row-label").textContent(), "Model");
-  assert.equal(await panel.locator(".identity-row").isEnabled(), true);
+  assert.deepEqual(await panel.locator(".identity-row-label").allTextContents(), ["Model", "Title", "Folder"]);
+  assert.deepEqual((await panel.locator(".identity-row-value").allTextContents()).slice(1), ["Quarterly review", "Operations"]);
+  const model = panel.locator('.identity-row[data-row="model"]');
+  assert.equal(await model.isEnabled(), true);
   assert.equal(await chip.getAttribute("aria-expanded"), "true");
-  await panel.locator(".identity-row").focus();
+  await model.focus();
   await page.evaluate(() => window.ark.refreshViewTitle());
-  assert.equal(await panel.locator(".identity-row").evaluate(el => document.activeElement === el), true, "a redraw with the same data keeps the focus");
+  assert.equal(await model.evaluate(el => document.activeElement === el), true, "a redraw with the same data keeps the focus");
+  // The folder menu changes the folder of all its chats or renames it; the title renames in place.
+  await panel.locator('.identity-row[data-row="folder"]').click();
+  await page.locator(".popover .menu-item").first().waitFor();
+  assert.deepEqual(await page.locator(".popover .menu-item").allInnerTexts(), ["Change folder…\nAll chats in Operations", "Rename"]);
+  await page.keyboard.press("Escape");
+  await panel.locator('.identity-row[data-row="title"]').click();
+  await panel.getByRole("textbox", { name: "Title" }).fill("Quarterly plan");
+  await panel.getByRole("textbox", { name: "Title" }).press("Enter");
+  await panel.locator('.identity-row[data-row="title"]').getByText("Quarterly plan").waitFor();
   await chip.click();
   await panel.waitFor({ state: "detached" });
   assert.equal(await chip.getAttribute("aria-expanded"), "false");
-}));
-
-test("an app pins items in the fixed rail and they leave when the render is released", () => fixture(async page => {
-  await page.evaluate(() => { window.__released = false; });
-  await page.evaluate(() => window.ark.rail({ id: "pins", render(el) { el.innerHTML = '<button class="destination" id="pin-a" aria-label="Pin A"></button>'; return { dispose() { window.__released = true; } }; } }));
-  await page.locator("#rail-pins #pin-a").waitFor();
-  const order = await page.locator("#destinations button").evaluateAll(nodes => nodes.map(n => n.getAttribute("aria-label") || n.dataset.destination));
-  assert.deepEqual(order, ["home", "Plugins", "Pin A", "Account and settings"]);
-  await page.evaluate(() => window.ark.refreshNavigation());
-  await page.waitForFunction(() => window.__released === true);
 }));

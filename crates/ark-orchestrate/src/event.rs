@@ -93,6 +93,10 @@ pub enum EventKind {
         text: String,
         /// Delivered into a running task (true) or kept for the next one.
         delivered: bool,
+        /// The conversation of `to` it went to ([`crate::TaskSpec::thread`]); none for the
+        /// default one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<String>,
     },
     RulesApplied {
         task: String,

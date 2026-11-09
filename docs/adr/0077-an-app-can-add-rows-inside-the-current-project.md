@@ -1,6 +1,6 @@
 # 0077. An app can add rows inside the current project
 
-Date: 2026-10-17. Status: Accepted for implementation.
+Date: 2026-10-17. Status: Superseded by 0110 (2026-11-09).
 
 ## Context
 

@@ -50,6 +50,7 @@ use crate::resource::{
     ResourceAuthority, ResourceKind, ResourceLocation, ResourceOperation, ResourceOperationKind,
     ResourceRef, ResourceSubscribers,
 };
+use agent_conversations::thread_of;
 use ark_interact::activity::describe;
 use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
 use ark_interact::inspect::{
@@ -3200,9 +3201,19 @@ impl Host {
                         .collect(),
                 ))
             }
+            O::Agents if input["all"].as_bool() == Some(true) => self.all_agents(),
             O::Agents => Ok(serde_json::to_value(
                 self.resource_orchestrator(&r).await?.agents(),
             )?),
+            O::AgentConversations if !s("project").is_empty() => {
+                self.project_agent_conversations(&s("project"), &s("agent"))
+            }
+            O::AgentConversations => Ok(serde_json::to_value(
+                self.resource_orchestrator(&r).await?.threads(&s("agent"))?,
+            )?),
+            O::AgentConversationStart => Ok(json!({
+                "conversation": self.resource_orchestrator(&r).await?.start_thread(&s("agent"))?,
+            })),
             O::CreateAgent => {
                 let o = self.resource_orchestrator(&r).await?;
                 let request_id = s("request_id");
@@ -3790,15 +3801,15 @@ impl Host {
                         .ok_or_else(|| anyhow::anyhow!("a chat turn needs an objective"))?;
                     anyhow::ensure!(
                         task.keys()
-                            .all(|key| matches!(key.as_str(), "objective" | "context")),
-                        "idempotent chat turns accept only objective and context"
+                            .all(|key| matches!(key.as_str(), "objective" | "context" | "thread")),
+                        "idempotent chat turns accept only objective, context and thread"
                     );
                     let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
                     anyhow::ensure!(
                         !task.objective.trim().is_empty(),
                         "a task needs an objective"
                     );
-                    let original = serde_json::to_vec(&(&r.location, request_id))?;
+                    let original = serde_json::to_vec(&(&r.location, request_id, &task.thread))?;
                     let request = format!("chat-turn:{:x}", Sha256::digest(original));
                     return Ok(
                         json!({ "task": o.submit_once(&s("agent"), task, &request).await? }),
@@ -4003,6 +4014,7 @@ impl Host {
                         None => Control::Message {
                             agent: s("agent"),
                             text: s("text"),
+                            thread: thread_of(&input)?,
                         },
                         Some(context) => {
                             let context = context
@@ -4016,6 +4028,7 @@ impl Host {
                                 agent: s("agent"),
                                 text: s("text"),
                                 context: context.into(),
+                                thread: thread_of(&input)?,
                             }
                         }
                     },
@@ -4916,6 +4929,10 @@ impl Host {
                 Ok(serde_json::to_value(
                     ark_interact::ark_orchestrate::agent_contacts(&self.engine.store, &project)?,
                 )?)
+            }
+            "agents" if params["all"].as_bool() == Some(true) => self.all_agents(),
+            "sessions" if params["general"].as_bool() == Some(true) => {
+                Ok(serde_json::to_value(self.general_sessions()?)?)
             }
             "sessions" => {
                 use ark_interact::interaction::{list_sessions, project_sessions};

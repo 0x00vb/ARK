@@ -232,7 +232,7 @@ test("while the agent works a picture queues with its words instead of steering"
 
 test("a picture put in a split chat is sent from that chat", () => fixture(async (page, { calls, settle }) => {
   // Chat B opens (the tab strip appears), then chat A splits off from its tab.
-  await page.locator('.session[data-id="chat-b"]').click();
+  await page.evaluate(id => window.ark.openSession(id), "chat-b");
   await page.locator('.chat-tab-item[data-key="chat-a"]').waitFor();
   await page.locator('.chat-tab-item[data-key="chat-a"]').click({ button: "right" });
   await page.getByRole("menuitem", { name: "Split right" }).click();
@@ -251,10 +251,10 @@ test("a picture put in a split chat is sent from that chat", () => fixture(async
 test("a picture stays with its chat while another chat is shown", () => fixture(async (page) => {
   await dropFiles(page, [["shot.png", "image/png"]]);
   await chips(page).first().waitFor();
-  await page.locator('.session[data-id="chat-b"]').click();
+  await page.evaluate(id => window.ark.openSession(id), "chat-b");
   await page.waitForFunction(() => document.querySelector("#composer").dataset.empty === "true");
   assert.equal(await chips(page).count(), 0, "chat B does not carry chat A's picture");
-  await page.locator('.session[data-id="chat-a"]').click();
+  await page.evaluate(id => window.ark.openSession(id), "chat-a");
   await chips(page).first().waitFor();
   assert.equal(await chips(page).count(), 1, "chat A has it back");
 }));

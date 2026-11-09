@@ -1640,3 +1640,98 @@ async fn a_fresh_chat_receives_the_current_correction_and_preview_matches_the_re
         .content
         .contains("== PROJECT MEMORY =="));
 }
+
+/// A stored conversation in `project` with one turn per entry of `turns`.
+fn stored_chat(
+    ix: &Interaction,
+    project: &ProjectId,
+    title: &str,
+    turns: u32,
+    work: bool,
+) -> String {
+    use ark_runtime::{CarryPolicy, SessionRecord};
+    let id = ark_core::SessionId::new();
+    let mut record =
+        SessionRecord::empty(id.clone(), project.clone(), CarryPolicy::default(), None);
+    record.title = title.into();
+    record.turn_count = turns;
+    if work {
+        record.work_item = Some("w-1".into());
+    }
+    ix.engine()
+        .store
+        .create_session(
+            id.as_str(),
+            project,
+            &serde_json::to_value(&record).unwrap(),
+        )
+        .unwrap();
+    id.as_str().to_string()
+}
+
+fn listed(reply: &ark_interact::Reply) -> Vec<(String, String)> {
+    reply
+        .report
+        .data
+        .as_ref()
+        .unwrap()
+        .value
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["id"].as_str().unwrap().to_string(),
+                s["project_name"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn history_lists_this_agents_conversations_across_top_projects() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ix = open(dir.path());
+    let home = ix.project().clone();
+    let second = ix.engine().create_project("second", "").unwrap();
+    let mut scope = Project::new("helper", "");
+    scope.parent = Some(home.id.clone());
+    ix.engine().store.put_project(&scope).unwrap();
+
+    let old = stored_chat(&ix, &home.id, "Harbour budget", 2, false);
+    let other = stored_chat(&ix, &second.id, "Garden plan", 1, false);
+    let newest = stored_chat(&ix, &home.id, "Latest", 1, false);
+    let _empty = stored_chat(&ix, &second.id, "", 0, false);
+    let _work = stored_chat(&ix, &home.id, "Harbour work", 3, true);
+    let agent_old = stored_chat(&ix, &scope.id, "Helper harbour notes", 4, false);
+
+    let reply = ix.execute("/history").await;
+    assert!(
+        reply.report.plain_text().contains("second"),
+        "{}",
+        reply.report.plain_text()
+    );
+    let rows = listed(&reply);
+    let ids: Vec<_> = rows.iter().map(|(id, _)| id.clone()).collect();
+    assert!(rows.contains(&(other.clone(), "second".to_string())));
+    assert!(
+        !ids.contains(&agent_old),
+        "an agent's conversation is not ARK's"
+    );
+    let current = ix.session().id().as_str().to_string();
+    assert_eq!(
+        ids,
+        vec![newest, other.clone(), old.clone(), current],
+        "newest first across projects, no empty or work conversations, the current one kept"
+    );
+
+    let filtered = listed(&ix.execute("/history HARBOUR").await);
+    assert_eq!(filtered, vec![(old.clone(), home.name.clone())]);
+
+    // In an agent's scope, only that scope's conversations.
+    assert!(ix.resume(&agent_old).unwrap());
+    let rows = listed(&ix.execute("/history").await);
+    assert_eq!(rows, vec![(agent_old.clone(), "helper".to_string())]);
+    let row = &ix.execute("/history").await.report;
+    assert!(!row.plain_text().contains("second"));
+}

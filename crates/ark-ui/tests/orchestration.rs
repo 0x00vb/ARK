@@ -27,9 +27,22 @@ impl std::ops::Deref for Client {
 impl Client {
     async fn call(&self, method: &str, input: Value) -> anyhow::Result<Value> {
         let operation = match method {
-            "tools" | "spawn_agent" | "agents" | "submit_task" | "orch_events" | "task"
-            | "task_call" | "message_agent" | "graph" | "suspend_agent" | "resume_agent"
-            | "cancel_task" | "workspace" | "unschedule" => Some(("project", method, "")),
+            "tools"
+            | "spawn_agent"
+            | "agents"
+            | "submit_task"
+            | "orch_events"
+            | "task"
+            | "task_call"
+            | "message_agent"
+            | "graph"
+            | "suspend_agent"
+            | "resume_agent"
+            | "cancel_task"
+            | "workspace"
+            | "unschedule"
+            | "agent_conversations"
+            | "agent_conversation_start" => Some(("project", method, "")),
             "artifact" => Some(("artifact", method, input["id"].as_str().unwrap_or(""))),
             _ => None,
         };
@@ -891,4 +904,149 @@ async fn work_and_automation_lists_subscribe_to_project_changes_without_opening_
         .await;
         assert_eq!(event["ref"]["location"], location);
     }
+}
+
+#[tokio::test]
+async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_and_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = Arc::new(
+        MockProvider::new("m", vec![]).with_fallback(|_| Completion {
+            content: "Done.".into(),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        }),
+    );
+    let host = open_with(dir.path(), Arc::new(AtomicUsize::new(0)), model).await;
+    host.call(
+        "spawn_agent",
+        json!({"spec":{"name":"writer","title":"Writer"}}),
+    )
+    .await
+    .unwrap();
+    let location = host.call("summary", json!({})).await.unwrap()["location"].clone();
+    let project = location["project"].as_str().unwrap().to_string();
+
+    let started = host
+        .call("agent_conversation_start", json!({"agent":"writer"}))
+        .await
+        .unwrap();
+    let conversation = started["conversation"].as_str().unwrap().to_string();
+    let empty = host
+        .call("agent_conversations", json!({"agent":"writer"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        empty,
+        json!([]),
+        "a conversation without turns is not listed"
+    );
+
+    let input = json!({"agent":"writer","request_id":"m1","task":{"objective":"Draft it","thread":conversation}});
+    let task = host.call("submit_task", input.clone()).await.unwrap()["task"].clone();
+    let retry = host.call("submit_task", input.clone()).await.unwrap()["task"].clone();
+    assert_eq!(task, retry);
+    let mut elsewhere = input.clone();
+    elsewhere["task"]["thread"] = json!(location["session"]);
+    assert!(
+        host.call("submit_task", elsewhere).await.is_err(),
+        "the person's own chat is no conversation of the agent's"
+    );
+    let mut done = Value::Null;
+    for _ in 0..500 {
+        done = host.call("task", json!({"task":task})).await.unwrap()["task"].clone();
+        if done["state"] == "done" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(done["state"], "done", "{done}");
+    assert_eq!(done["thread"], conversation.as_str());
+
+    let rows = host
+        .call("agent_conversations", json!({"agent":"writer"}))
+        .await
+        .unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1, "{rows}");
+    assert_eq!(rows[0]["id"], conversation.as_str());
+    assert_eq!(rows[0]["turns"], 1);
+    assert_eq!(rows[0]["running"], Value::Null);
+    assert_eq!(rows[0]["asking"], false);
+    assert_eq!(rows[0]["default"], false);
+    let read = host
+        .call(
+            "agent_conversations",
+            json!({"agent":"writer","project":project}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(read, rows, "read from the store alike");
+    assert!(host
+        .call(
+            "agent_conversations",
+            json!({"agent":"writer","project":"missing"}),
+        )
+        .await
+        .is_err());
+
+    let m = host
+        .call(
+            "message_agent",
+            json!({"agent":"writer","text":"shorter next time","thread":conversation}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(m["delivered"], false);
+    let agents = host.call("agents", json!({})).await.unwrap();
+    assert_eq!(agents[0]["inbox"][0]["thread"], conversation.as_str());
+
+    let scope = agents[0]["scope"].as_str().unwrap().to_string();
+    for all in [
+        host.call("agents", json!({"all":true})).await.unwrap(),
+        host.0.call("agents", json!({"all":true})).await.unwrap(),
+    ] {
+        let rows = all.as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{all}");
+        let row = &rows[0];
+        assert_eq!(row["project"], project.as_str());
+        assert!(row["project_name"].is_string());
+        assert_eq!(row["name"], "writer");
+        assert_eq!(row["title"], "Writer");
+        assert_eq!(row["state"], "idle");
+        assert_eq!(row["asking"], false);
+        assert_eq!(row["program"], false);
+        assert_eq!(row["running"], json!([]));
+        assert!(row["preview"].is_string(), "{row}");
+        assert!(row["updated_ms"].as_u64().unwrap() > 0);
+    }
+    {
+        let ark = Ark::builder().store_root(dir.path()).build().unwrap();
+        ark.engine()
+            .store
+            .put_record(
+                "orch_task",
+                "t-damaged",
+                &project,
+                &json!({"damaged": true}),
+            )
+            .unwrap();
+    }
+    let all = host.call("agents", json!({"all":true})).await.unwrap();
+    assert_eq!(
+        all.as_array().unwrap().len(),
+        1,
+        "a damaged task record hides no agent: {all}"
+    );
+
+    let general = host
+        .call("sessions", json!({"general":true}))
+        .await
+        .unwrap();
+    let general = general.as_array().unwrap();
+    assert!(general.iter().any(|r| r["id"] == location["session"]));
+    assert!(general
+        .iter()
+        .all(|r| r["project"] == project.as_str() && r["project_name"].is_string()));
+    assert!(general
+        .iter()
+        .all(|r| r["project"] != scope.as_str() && r["id"] != conversation.as_str()));
 }

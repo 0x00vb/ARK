@@ -9,8 +9,9 @@ import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { createChatSurface } from "./chat-surface.js";
 import { chatView } from "./chat-view.js";
-import { acceptDrops } from "./drop.js";
-import { Sidebar } from "./sidebar.js";
+import { acceptDrops, uploadFolder } from "./drop.js";
+import { Sidebar, ARK, agentKey, hiddenProjects } from "./sidebar.js";
+import { openRecent } from "./recent.js";
 import { Destinations } from "./destinations.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
@@ -22,7 +23,7 @@ import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerMarketplace } from "./marketplace.js";
 import { registerSkills } from "./skills.js";
-import { registerBoard } from "./board.js";
+import { registerBoard, boardWaiting } from "./board.js";
 import { registerCalendar } from "./calendar.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
@@ -44,7 +45,7 @@ const TAB_STORAGE_VERSION = 1;
 const LAYOUT_STORAGE_VERSION = 1;
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
-const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], online: true, connectionEpoch: 0, extChanged: false, projectSectionsChanged: false, view: null, homeView: null };
+const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], online: true, connectionEpoch: 0, extChanged: false, restyle: false, view: null, homeView: null, agent: null };
 const secondaryChats = new Map();
 let activeSession = null;
 const resourceOnline = new Map();
@@ -63,7 +64,7 @@ const api = {
   h, icon, markdown,
   fileSnapshots: () => !!state.fileSnapshots,
   on: onExt,
-  call: (method, params = {}) => RESOURCE_METHODS[method]
+  call: (method, params = {}) => resourceMethod(method, params)
     ? scopedApi(currentLocation()).call(method, params)
     : transport.call(method, params),
   windowCall: (method, params = {}) => transport.call(method, params),
@@ -130,48 +131,36 @@ const api = {
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
   newChatView: el => renderNewChatView(el, currentLocation()),
-  newSession: async (project) => {
-    await api.ready();
-    if (registry.newChat && project && project !== currentLocation().project) {
-      const runtime = currentLocation().runtime;
-      let off, timer;
-      const observed = new Promise((resolve, reject) => {
-        const inspect = () => {
-          const now = currentLocation();
-          if (now.runtime !== runtime) reject(new Error("The computer changed. Open New chat again."));
-          else if (now.project === project) resolve();
-        };
-        off = onExt("ark:summary", inspect);
-        timer = setTimeout(() => reject(new Error("The project did not open. Try again.")), 4000);
-        inspect();
-      });
-      try {
-        await Promise.all([observed, api.openProject(project).then(ok => { if (!ok) throw new Error("Could not open the project"); })]);
-      } catch (error) { toast(error.message); return false; }
-      finally { off?.(); clearTimeout(timer); }
-    }
-    const location = { ...currentLocation() };
-    const createChat = () => {
-      const current = currentLocation();
-      if (current.runtime !== location.runtime || current.project !== location.project) throw new Error("The project changed. Open New chat again.");
-      return createGeneralSession(project);
-    };
-    return registry.newChat ? registry.newChat.open({ project: project || location.project, location, createChat }) : createChat();
-  },
+  /// New chat: in `project`, a new ARK chat there; without one, a new chat with the agent the
+  /// window shows (ARK at start).
+  newSession: (project) => project ? arkNewChat(project) : newChatWithCurrent(),
   // A code to sign in another device (Settings › Devices, ADR 0047).
   pairCode: () => transport.pairCode(),
   openSession: (id) => {
     return openChatTab(id);
   },
-  openAgentChat(name, conversation) {
+  /// An agent's chat in the app's `agentConversation` view. `options` is `{ project,
+  /// conversation }` (another folder: the window goes there first), or, as before, a session
+  /// that opens as a plain chat when no app draws agents' chats.
+  async openAgentChat(name, options) {
+    const { project, conversation, fallback } = options && typeof options === "object" ? options : { fallback: options };
+    const view = [...registry.views.values()].find(view => view.agentConversation);
+    if (!view) return fallback ? this.openSession(fallback) : false;
+    const params = { name, ...(project ? { project } : {}), ...(conversation ? { conversation } : {}) };
+    if (project) {
+      try { await arriveAt(project); } catch (error) { toast(error.message); return false; }
+      await showView(view.id, params);
+      return true;
+    }
     const current = currentLocation();
     if (this.location && (this.location.runtime !== current.runtime || this.location.project !== current.project)) {
       toast("Open the original project to continue.");
       return false;
     }
-    const view = [...registry.views.values()].find(view => view.agentConversation);
-    return view ? this.openView(view.id, { name }) : this.openSession(conversation);
+    return this.openView(view.id, params);
   },
+  /// `/history [words]`: this agent's chats in the search overlay.
+  history: (words = "") => openHistory(currentEntry(), words),
   openView: (id, params) => showView(id, params),
   contextMenu,
   present: directive => present(directive),
@@ -261,16 +250,16 @@ const api = {
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
   refreshViewTitle: () => showTitle(),
-  _changed: (projectSections = false) => {
+  _changed: (restyle = false) => {
     state.extChanged = true;
-    state.projectSectionsChanged ||= projectSections;
+    state.restyle ||= restyle;
     queueMicrotask(() => {
       if (!state.extChanged) return;
       state.extChanged = false;
       sidebar?.renderExtensions();
-      if (state.projectSectionsChanged) {
-        state.projectSectionsChanged = false;
-        sidebar?.refresh();
+      if (state.restyle) {
+        state.restyle = false;
+        sidebar?.restyle();
       }
       topbar?.render();
       composer?.setModel(state.summary?.model);
@@ -297,6 +286,7 @@ const RESOURCE_METHODS = {
   workspace: ["project", "workspace"], state: ["project", "state"], call: ["project", "call_detail"],
   graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], task_call: ["project", "task_call"], orch_events: ["project", "orch_events"],
   agents: ["project", "agents"], create_agent: ["project", "create_agent"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
+  agent_conversation_start: ["project", "agent_conversation_start"], agent_conversations: ["project", "agent_conversations"],
   work_admit: ["project", "work_admit"], work_receipt: ["project", "work_receipt"], work_execute: ["project", "work_execute"],
   work_answer: ["project", "work_answer"], work_cancel: ["project", "work_cancel"],
   work_get: ["project", "work_get"],
@@ -331,6 +321,12 @@ const RESOURCE_METHODS = {
   artifacts: ["artifact", "artifacts"], artifact: ["artifact", "artifact"], invocation: ["invocation", "invocation"],
   picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
 };
+
+/// Which calls are resource operations of the chat's location. `agents {all}` reads every
+/// folder's agents from the runtime, like `projects`.
+function resourceMethod(method, params) {
+  return method === "agents" && params?.all ? null : RESOURCE_METHODS[method];
+}
 
 /// Pictures waiting in a chat's composer while another chat is shown, by chat.
 const imageStash = new Map();
@@ -389,7 +385,7 @@ function scopedApi(location) {
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
   if (scoped.destinationBrowser) scoped.browserView = undefined;
   scoped.call = (method, params = {}) => {
-    const spec = RESOURCE_METHODS[method];
+    const spec = resourceMethod(method, params);
     if (!spec) return (window.ark || api).call(method, params);
     const [kind, operation] = spec;
     const id = kind === "terminal" ? (params.session || "")
@@ -695,9 +691,12 @@ function renderChatTabs() {
   const list = $("#chat-tab-list");
   if (!bar || !list) return;
   const conversationView = !!state.view && !!registry.views.get(state.view)?.agentConversation;
+  // An agent's chat names itself in the title, whose menu holds its other chats; ARK's open
+  // chats stay as tabs over its new chat.
+  const agentChat = conversationView && !!views.get(state.view)?.ctl?.identity?.()?.agent;
   const draftTitle = conversationView ? views.get(state.view)?.ctl?.title?.() || "New chat" : null;
-  const keys = [...chatTabs.ids, ...(conversationView ? [DRAFT_TAB] : [])];
-  bar.hidden = keys.length < 2 && visibleChats(chatLayout).length < 2;
+  const keys = agentChat ? [] : [...chatTabs.ids, ...(conversationView ? [DRAFT_TAB] : [])];
+  bar.hidden = agentChat || keys.length < 2 && visibleChats(chatLayout).length < 2;
   if (conversationView) appEl.dataset.conversationView = "true";
   else delete appEl.dataset.conversationView;
   const active = state.view ? null : activeSession || state.sessionId;
@@ -1369,6 +1368,7 @@ async function submit(text, { images = [], named = false } = {}) {
   if (!text) return;
   // A slash word that is not a command in this chat is ordinary message text. In particular,
   // selecting another computer must never make a hidden command mutate the local empty chat.
+  if (sharedCommand(text)) return;
   if (text.startsWith("/") && (viewForCommand(text, api.project()) || composer.commandAvailable(text))) return runCommand(text);
   if (state.running) return composer.enqueue(text, images, named);
   // No model chosen yet: the text waits in the composer while the person picks one.
@@ -1417,7 +1417,7 @@ async function steer(text) {
 }
 
 async function runCommand(line) {
-  if (registry.newChat && line.trim() === "/new") return api.newSession();
+  if (sharedCommand(line)) return;
   const view = viewForCommand(line, api.project());
   if (view) return showView(view.id);
   if (state.running) return composer.enqueue(line);
@@ -1436,6 +1436,218 @@ async function runCommand(line) {
     setRunning(true);
   }
   thread.report(line, reply);
+}
+
+// ---- agents: who the window shows and opening their chats (ADR 0110) -----------------------
+
+/// Resolves once the window shows `project` on the same computer, opening it when it does not.
+async function arriveAt(project) {
+  const now = currentLocation();
+  if (now.project === project) return;
+  const runtime = now.runtime;
+  let off, timer;
+  const observed = new Promise((resolve, reject) => {
+    const inspect = () => {
+      const at = currentLocation();
+      if (at.runtime !== runtime) reject(new Error("The computer changed. Try again."));
+      else if (at.project === project) resolve();
+    };
+    off = onExt("ark:summary", inspect);
+    timer = setTimeout(() => reject(new Error("The project did not open. Try again.")), 4000);
+    inspect();
+  });
+  try {
+    await Promise.all([observed, api.openProject(project).then(ok => { if (!ok) throw new Error("Could not open the project"); })]);
+  } finally { off?.(); clearTimeout(timer); }
+}
+
+/// A new chat with ARK: in `project`, else in the folder shown now.
+async function arkNewChat(project) {
+  await api.ready();
+  if (registry.newChat && project && project !== currentLocation().project) {
+    try { await arriveAt(project); } catch (error) { toast(error.message); return false; }
+  }
+  const location = { ...currentLocation() };
+  const createChat = () => {
+    const current = currentLocation();
+    if (current.runtime !== location.runtime || current.project !== location.project) throw new Error("The project changed. Open New chat again.");
+    return createGeneralSession(project);
+  };
+  return registry.newChat ? registry.newChat.open({ project: project || location.project, location, createChat }) : createChat();
+}
+
+const arkName = () => state.summary?.name || "ARK";
+
+function arkFace(size) {
+  return state.ui.logo
+    ? h("img.identity-logo", { src: state.ui.logo, alt: "", width: size, height: size })
+    : h("span.identity-logo.fallback", { style: { width: `${size}px`, height: `${size}px` } }, icon("chat"));
+}
+
+/// The agent in view, or the last one shown; ARK at start.
+function currentEntry() {
+  const key = state.agent ? agentKey(state.agent.project, state.agent.name) : ARK;
+  return sidebar?.find(key) || (state.agent
+    ? { key, name: state.agent.name, label: state.agent.name, project: state.agent.project }
+    : { key: ARK, ark: true, name: arkName(), label: arkName() });
+}
+
+function setAgent(agent) {
+  state.agent = agent;
+  sidebar?.markAgent(agent ? agentKey(agent.project, agent.name) : ARK);
+}
+
+const hasAgentView = () => [...registry.views.values()].some(view => view.agentConversation);
+
+/// ARK's chats that have a turn or are running their first, newest first, without hidden folders.
+async function arkChats() {
+  const hidden = hiddenProjects();
+  const asking = new Set([...state.approvals.values()].filter(item => !item.request?.agent).map(item => item.session));
+  const running = (chat) => chat.working || state.working.some(w => w.session === chat.id);
+  return (await transport.call("sessions", { general: true }) || [])
+    .filter(chat => (chat.turns > 0 || running(chat)) && !hidden.has(chat.project))
+    .map(chat => ({ id: chat.id, title: chat.title || "Untitled chat", updated_at: chat.updated_at, project: chat.project, folder: chat.project_name,
+      mark: asking.has(chat.id) ? "asking" : running(chat) ? "working" : null }));
+}
+
+async function agentChats(entry) {
+  const rows = await api.call("agent_conversations", { agent: entry.name, project: entry.project });
+  return (Array.isArray(rows) ? rows : []).map(row => ({ id: row.id, title: row.title || "Untitled chat", updated_at: row.updated_at, default: !!row.default,
+    mark: row.asking ? "asking" : row.running ? "working" : null }));
+}
+
+/// A tile or row: the agent's latest chat in its own folder. ARK: its newest chat of any folder,
+/// in a chat tab of its own with `newTab` (⌘-click). An agent with no chat yet opens its first
+/// one, which becomes its default chat.
+async function openEntry(entry, { newTab = false } = {}) {
+  if (entry.ark) {
+    const newest = (await arkChats())[0];
+    if (!newest) return arkNewChat();
+    if (newTab) {
+      await openChatTab(newest.id);
+      return true;
+    }
+    if (newest.id === state.sessionId && !detachedWindow) return showConversation();
+    await api.openSession(newest.id);
+    return true;
+  }
+  const latest = (await agentChats(entry))[0];
+  // The default chat opens without an id: the view knows it before it lists the agent's chats.
+  return api.openAgentChat(entry.name, { project: entry.project, conversation: latest && !latest.default ? latest.id : undefined });
+}
+
+/// New chat with `entry`. An agent on an agent program has one chat: that one opens. Until an
+/// agent has its default chat, a new chat is that one (the phone shows only the default chat).
+async function newChatWith(entry) {
+  if (!entry || entry.ark) return arkNewChat();
+  if (entry.program) return api.openAgentChat(entry.name, { project: entry.project });
+  let chats;
+  try { chats = await agentChats(entry); } catch (error) { toast(error.message); return false; }
+  return api.openAgentChat(entry.name, { project: entry.project, ...(chats.some(chat => chat.default) ? { conversation: "new" } : {}) });
+}
+
+function newChatWithCurrent() {
+  return newChatWith(currentEntry());
+}
+
+function openHistory(entry, words = "") {
+  return searchChats({ scope: entry, words });
+}
+
+/// The title's menu: New chat and the last chats with the agent in view.
+function recentMenu(anchor, { keyboard, onClose }) {
+  const entry = currentEntry();
+  const agent = chatIdentity()?.agent;
+  const program = entry.program || agent?.program;
+  const conversation = agent?.conversation || null;
+  return openRecent(anchor, {
+    keyboard, onClose, popover, online: state.online, key: entry.key,
+    load: () => entry.ark ? arkChats() : agentChats(entry),
+    current: row => entry.ark ? !state.view && row.id === state.sessionId : row.id === conversation || (!conversation && row.default),
+    newChat: program ? null : () => newChatWith(entry),
+    open: row => entry.ark ? api.openSession(row.id) : api.openAgentChat(entry.name, { project: entry.project, conversation: row.default ? undefined : row.id }),
+    more: () => openHistory(entry),
+  });
+}
+
+/// `/new` and `/history [words]` act on the agent in view, in every conversation.
+function sharedCommand(text) {
+  const line = String(text || "").trim();
+  if (line === "/new") { void newChatWithCurrent(); return true; }
+  const history = /^\/history(?:\s+([\s\S]*))?$/.exec(line);
+  if (history) { void openHistory(currentEntry(), (history[1] || "").trim()); return true; }
+  return false;
+}
+
+/// A folder from the window's picker; where there is none (a browser), a typed path.
+async function askFolder(anchor, title) {
+  const picked = await api.pickFolder({ title });
+  if (picked !== undefined) return picked;
+  return new Promise((done) => {
+    const input = h("input.menu-input", { placeholder: "/full/path/to/folder", "aria-label": title, spellcheck: "false" });
+    const menu = popover(anchor, [h("div.menu-head", title), input], { onClose: () => done(null) });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && input.value.trim()) {
+        const path = input.value.trim();
+        done(path);
+        menu.close();
+      }
+    });
+    input.focus();
+  });
+}
+
+/// A new ARK chat in a folder the person picks (it becomes a project if it was not one).
+async function openFolder(anchor) {
+  const path = await askFolder(anchor || $("#session-title"), "Open a folder");
+  if (!path || !await api.addProject({ path })) return;
+  const opened = (await transport.call("projects").catch(() => [])).find(project => project.current);
+  await arkNewChat(opened?.id);
+}
+
+function projectActions(project) {
+  return registry.actions.filter((a) => {
+    if (a.where !== "project") return false;
+    try { return !a.when || a.when({ project }); } catch { return false; }
+  });
+}
+
+/// The details pane's Folder menu. An agent's chat offers the app's actions only.
+function folderMenu(anchor, { agent = false } = {}) {
+  const summary = activeSummary();
+  const project = summary?.project;
+  if (!project) return;
+  const item = (text, run, sub) => h("button.menu-item", { type: "button", role: "menuitem", onclick: () => { menu.close(); run(); } },
+    sub ? h("span.menu-item-main", h("span", text), h("span.menu-item-sub", sub)) : h("span", text));
+  const own = agent ? [] : [
+    !summary.session?.turns && (api.canPickFolder || api.isLocal()) && item("Choose folder…", () => void openFolder(anchor)),
+    item("Change folder…", async () => {
+      const path = await askFolder(anchor, `Choose the folder for all chats in ${project.name}`);
+      if (!path) return;
+      try { await api.call("project_folder", { id: project.id, path }); } catch (e) { toast(e.message); }
+    }, `All chats in ${project.name}`),
+    item("Rename", () => renameFolder(anchor, project)),
+    project.workspace && item("Copy path", () => navigator.clipboard?.writeText(project.workspace).then(() => toast("Copied"), e => toast(e.message))),
+  ].filter(Boolean);
+  const actions = projectActions(project).map((a) => item(a.label, async () => {
+    try { await a.run({ project }, window.ark); } catch (e) { toast(e.message || String(e)); }
+  }));
+  if (!own.length && !actions.length) return;
+  const menu = popover(anchor, [...own, own.length && actions.length ? h("div.menu-sep") : null, ...actions].filter(Boolean));
+  menu.querySelector("button")?.focus({ preventScroll: true });
+}
+
+function renameFolder(anchor, project) {
+  const input = h("input.menu-input", { value: project.name, "aria-label": "Folder name", maxlength: "120" });
+  const menu = popover(anchor, [input]);
+  input.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter" || !input.value.trim()) return;
+    menu.close();
+    if (input.value.trim() === project.name) return;
+    try { await api.call("rename_project", { id: project.id, name: input.value.trim() }); } catch (error) { toast(error.message); }
+  });
+  input.focus();
+  input.select();
 }
 
 async function createGeneralSession(project) {
@@ -1713,7 +1925,7 @@ function onEvent(msg) {
       document.querySelector(`#asks .approval[data-id="${msg.id}"]`)?.remove();
       break;
     case "orch":
-      if (msg.event?.type === "task_created") sidebar.refresh(state.sessionId);
+      if (/^(task_|agent)/.test(msg.event?.type || "")) refreshAgentsSoon();
       break;
     case "working":
       state.working = msg.working || [];
@@ -1769,6 +1981,13 @@ function onEvent(msg) {
       boot(true);
       break;
   }
+}
+
+// Agents' marks follow their tasks; a burst of events reads them once.
+let agentsTimer = 0;
+function refreshAgentsSoon() {
+  clearTimeout(agentsTimer);
+  agentsTimer = setTimeout(() => sidebar.refresh(), 250);
 }
 
 function ask(msg) {
@@ -1910,6 +2129,8 @@ async function showView(id, params) {
   for (const [k, x] of views) x.el.hidden = k !== id;
   state.view = id;
   entry.ctl.show?.();
+  if (v.agentConversation && params?.name) setAgent({ name: params.name, project: params.project || location.project });
+  else if (v.agentConversation && params?.draft) setAgent(null);
   if (id !== SETTINGS) state.homeView = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
@@ -1934,6 +2155,7 @@ async function showConversation(focusComposer = true) {
   const request = ++viewRequest;
   if (state.view && views.get(state.view)?.ctl?.beforeRemove && (!await leaveCurrentView() || request !== viewRequest)) return false;
   state.homeView = null;
+  setAgent(null);
   if (!state.view) {
     destinations?.mark("home");
     pane?.syncConversation();
@@ -1996,25 +2218,39 @@ async function openDestination(destination, { keyboard = false } = {}) {
 /// the project's name; else the view's title (Settings).
 /// Who this chat is with. An app view supplies its own; a plain chat is with ARK itself.
 function chatIdentity() {
-  if (state.view) return views.get(state.view)?.ctl?.identity?.() || null;
+  if (state.view) {
+    const identity = views.get(state.view)?.ctl?.identity?.() || null;
+    // An agent's chat works in the agent's folder: the app's folder actions only.
+    if (identity?.agent && !identity.folder) {
+      const project = activeSummary()?.project;
+      if (project) identity.folder = { name: project.name, path: project.workspace || "", open: projectActions(project).length ? (anchor) => folderMenu(anchor, { agent: true }) : null };
+    }
+    return identity;
+  }
   const summary = activeSummary();
   if (!summary?.session) return null;
   const active = secondaryChats.get(activeSession)?.composer || composer;
   const picker = registry.modelPicker;
   const spec = summary.model;
+  const sessionId = summary.session.id;
   return {
     name: summary.name || "ARK",
     title: secondaryChats.get(activeSession)?.summary?.session?.title || state.title || "New chat",
     description: summary.tagline || "",
-    avatar: (size) => state.ui.logo
-      ? h("img.identity-logo", { src: state.ui.logo, alt: "", width: size, height: size })
-      : h("span.identity-logo.fallback", { style: { width: `${size}px`, height: `${size}px` } }, icon("chat")),
+    avatar: arkFace,
     model: {
       label: active.model.textContent,
       mark: () => picker?.mark?.(spec) || null,
       disabled: secondaryChats.get(activeSession)?.running ?? state.running,
       open: (anchor) => active.modelMenu(anchor),
     },
+    rename: async (title) => {
+      await transport.call("rename_session", { id: sessionId, title });
+      if (sessionId === state.sessionId) state.title = title;
+      chatTabs.titles.set(sessionId, title);
+      showTitle();
+    },
+    folder: summary.project ? { name: summary.project.name, path: summary.project.workspace || "", open: (anchor) => folderMenu(anchor) } : null,
   };
 }
 
@@ -2082,6 +2318,12 @@ function palette() {
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
     { label: "New chat", hint: label("⌘N"), run: () => api.newSession() },
+    ...((api.canPickFolder || api.isLocal()) ? [{ label: "Open folder…", hint: "folder", run: () => void openFolder() }] : []),
+    ...(!api.canPickFolder ? [{ label: "Upload a folder…", hint: "folder", run: () => uploadFolder({
+      ...api,
+      openProject: async (id) => { if (await api.openProject(id)) await arkNewChat(id); },
+    }) }] : []),
+    ...sidebar.hiddenList().map(([id, name]) => ({ label: `Show ${name} again`, hint: "folder", run: () => sidebar.restore(id) })),
     ...[...registry.views.values()]
       .filter((v) => !v.when || v.when({ project: api.project() }))
       .map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
@@ -2130,14 +2372,18 @@ function closePalette() {
 }
 
 let searchGeneration = 0;
-async function searchChats() {
+/// ⇧⌘F: chats and the app's results across folders. With `scope` (an agent, or ARK), only that
+/// agent's chats (`/history`, All chats), filtered by `words`.
+async function searchChats({ scope = null, words = "" } = {}) {
   const overlay = $("#overlay");
-  if (!overlay.hidden) return closePalette();
+  if (!overlay.hidden && !scope) return closePalette();
   const restore = document.activeElement;
   const generation = ++searchGeneration;
   const location = { ...currentLocation() };
   const searchRuntime = state.runtime;
-  const input = h("input.palette-input", { placeholder: "Search chats and agents", "aria-label": "Search chats and agents", role: "combobox", "aria-autocomplete": "list", "aria-controls": "chat-search-results", "aria-expanded": "true" });
+  const placeholder = scope ? `Search chats with ${scope.label || scope.name}` : "Search chats and agents";
+  const input = h("input.palette-input", { placeholder, "aria-label": placeholder, role: "combobox", "aria-autocomplete": "list", "aria-controls": "chat-search-results", "aria-expanded": "true" });
+  input.value = words;
   const list = h("div.palette-list", { id: "chat-search-results", role: "listbox", "aria-busy": "true" }, h("div.palette-empty", "Searching…"));
   let items = [];
   let failedProjects = 0;
@@ -2152,6 +2398,10 @@ async function searchChats() {
   };
   const open = async (item) => {
     close();
+    if (item.open) {
+      try { await item.open(); } catch (error) { api.toast(error.message || "Could not open the chat"); }
+      return;
+    }
     try {
       if (state.runtime !== searchRuntime || currentLocation()?.runtime !== location.runtime) throw new Error("The computer changed. Search again.");
       if (currentLocation()?.project !== item.project.id || currentLocation()?.runtime !== searchRuntime) {
@@ -2182,7 +2432,7 @@ async function searchChats() {
   };
   const paint = () => {
     const query = input.value.trim().toLocaleLowerCase();
-    const shown = items.filter((item) => !query || [item.title, item.description, item.project.name].some(text => text?.toLocaleLowerCase().includes(query))).slice(0, 100);
+    const shown = items.filter((item) => !query || [item.title, item.description, item.project?.name].some(text => text?.toLocaleLowerCase().includes(query))).slice(0, 100);
     selected = Math.min(selected, Math.max(0, shown.length - 1));
     clear(list);
     list.setAttribute("aria-busy", String(loadState === "loading"));
@@ -2200,13 +2450,16 @@ async function searchChats() {
     if (!shown.length) {
       const message = failedProjects
         ? (items.length ? "No matching available results" : "Some results could not be searched")
+        : scope ? (items.length ? "No matching chats" : "No chats yet")
         : (items.length ? "No matching chats or agents" : "No chats or agents yet");
       list.append(h("div.palette-empty", message));
     }
     shown.forEach((item, index) => {
       const row = h("div.palette-item", { id: `chat-search-${index}`, role: "option", "aria-selected": String(index === selected) },
-        h("span.palette-item-main", h("span", item.title || "Untitled"), h("span.palette-hint", [item.project.name, item.description].filter(Boolean).join(" · "))),
-        h("span.palette-hint", item.source ? (item.source.label || "") : ago(item.session.updated_at)));
+        h("span.palette-item-main", h("span", item.title || "Untitled"), h("span.palette-hint", [item.project?.name, item.description].filter(Boolean).join(" · "))),
+        item.mark === "asking" ? h("span.palette-hint.palette-mark", "Needs you")
+          : item.mark === "working" ? h("span.palette-hint.palette-mark", h("span.working-dot", { "aria-hidden": "true" }), "Working")
+            : h("span.palette-hint", item.source ? (item.source.label || "") : item.updated_at ? ago(item.updated_at) : ""));
       row.addEventListener("mousedown", (event) => { event.preventDefault(); void open(item); });
       list.append(row);
     });
@@ -2235,6 +2488,18 @@ async function searchChats() {
     failedProjects = 0;
     paint();
     try {
+      if (scope) {
+        const rows = scope.ark ? await arkChats() : await agentChats(scope);
+        if (generation !== searchGeneration) return;
+        items = rows.map(row => ({
+          title: row.title, updated_at: row.updated_at, mark: row.mark,
+          project: scope.ark ? { id: row.project, name: row.folder } : null,
+          open: () => scope.ark ? api.openSession(row.id) : api.openAgentChat(scope.name, { project: scope.project, conversation: row.id }),
+        }));
+        loadState = "ready";
+        paint();
+        return;
+      }
       const projects = await api.call("projects");
       const sources = [...registry.searchSources.values()];
       const groups = await Promise.all(projects.map(async (project) => {
@@ -2317,6 +2582,11 @@ function keys(e) {
   if (mod && Object.hasOwn(MENU_KEYS, key)) {
     e.preventDefault();
     return MENU_KEYS[key]();
+  }
+  // ⌘1 to ⌘9: the nth agent of the sidebar. In a browser these keys are the browser's tabs.
+  if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && transport.shell === "desktop") {
+    e.preventDefault();
+    return sidebar.openNth(Number(e.key) - 1);
   }
   if (mod && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); return searchChats(); }
   if (mod && e.key === "," && registry.settings.size) { e.preventDefault(); return api.openSettings(); }
@@ -2501,6 +2771,7 @@ async function bootOnce(again) {
     });
     // The project's board, when the app runs agents.
     registerBoard(window.ark);
+    boardWaiting((count) => sidebar.setBoardWaiting(count));
     registerCalendar(window.ark);
   }
   if (detachedWindow) {
@@ -2579,11 +2850,22 @@ async function start() {
       return { uploadApi: target, appendDraft: captureDraft(target.location), attachImages: true };
     },
   });
-  sidebar = new Sidebar(api);
+  sidebar = new Sidebar(api, {
+    runtime: () => state.runtime,
+    hasAgents: hasAgentView,
+    loadAgents: () => transport.call("agents", { all: true }),
+    arkName,
+    arkFace,
+    arkFaceKey: () => state.ui.logo || "",
+    open: (entry, options) => openEntry(entry, options),
+    newChat: () => api.newSession(),
+    newChatWith,
+    history: (entry) => openHistory(entry),
+  });
   destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);
   topbar = new Topbar(api, destinations);
-  identity = new Identity(api, chatIdentity);
+  identity = new Identity(api, chatIdentity, recentMenu);
   pane = new Pane(appEl, api, { conversation: () => {
     const entry = state.view && views.get(state.view);
     const liveConversation = entry?.ctl?.conversation?.();
@@ -2609,11 +2891,11 @@ async function start() {
     if (appEl.dataset.drawer !== "open") return;
     const inside = e.target.closest(".sidebar");
     if (e.target.closest("#reveal-sidebar, #toggle-sidebar")) return;
-    if (e.target.closest(".project-chev, .project-more, #add-project, .chats-more")) return;
-    if (!inside || e.target.closest("button, a, .session")) appEl.dataset.drawer = "closed";
+    if (e.target.closest(".agents-retry")) return;
+    if (!inside || e.target.closest("button, a")) appEl.dataset.drawer = "closed";
   });
   $("#toggle-sidebar").addEventListener("click", toggleSidebar);
-  $("#search-chats").addEventListener("click", searchChats);
+  $("#search-chats").addEventListener("click", () => searchChats());
   $("#chat-split").addEventListener("click", () => {
     if (visibleChats(chatLayout).length > 1) return closeOtherPanes();
     const other = [...chatTabs.ids].reverse().find((id) => !visibleChats(chatLayout).includes(id));

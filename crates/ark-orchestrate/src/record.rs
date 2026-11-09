@@ -226,8 +226,12 @@ pub struct AgentRecord {
     pub creation_root: Option<String>,
     pub spec: AgentSpec,
     pub state: AgentState,
+    /// The first of `running`, written for older readers. Read only to migrate a record.
     #[serde(default)]
     pub current_task: Option<String>,
+    /// The tasks it runs now, at most one per conversation. The only record of what runs.
+    #[serde(default)]
+    pub running: Vec<String>,
     /// Its ARK conversation session (carry-over between its tasks).
     #[serde(default)]
     pub session: Option<String>,
@@ -254,6 +258,31 @@ pub struct AgentRecord {
     pub updated_ms: u64,
 }
 
+impl AgentRecord {
+    /// It runs on an agent program (`agent:<name>`), which holds one conversation.
+    pub fn on_program(&self) -> bool {
+        self.spec
+            .model
+            .as_deref()
+            .and_then(ark_runtime::worker::parse_spec)
+            .is_some()
+    }
+
+    /// `task` runs now.
+    pub(crate) fn start_running(&mut self, task: &str) {
+        if !self.running.iter().any(|t| t == task) {
+            self.running.push(task.to_string());
+        }
+        self.current_task = self.running.first().cloned();
+    }
+
+    /// `task` no longer runs.
+    pub(crate) fn stop_running(&mut self, task: &str) {
+        self.running.retain(|t| t != task);
+        self.current_task = self.running.first().cloned();
+    }
+}
+
 /// A message between agents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mail {
@@ -264,6 +293,9 @@ pub struct Mail {
     #[serde(default)]
     pub task: Option<String>,
     pub at_ms: u64,
+    /// The conversation it is for ([`TaskRecord::thread`]); `None`: the default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -285,6 +317,9 @@ pub struct TaskRecord {
     pub execution_owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<String>,
+    /// The agent's own conversation it runs in ([`crate::TaskSpec::thread`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
     pub objective: String,
     #[serde(default)]
     pub context: String,
@@ -411,6 +446,7 @@ impl TaskRecord {
             execution_step: None,
             execution_owner: None,
             conversation: None,
+            thread: spec.thread.clone(),
             objective: spec.objective.clone(),
             context: spec.context.clone(),
             origin,

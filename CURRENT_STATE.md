@@ -1,3 +1,15 @@
+# Agent-first window, unreleased (branch `agent-first`, 2026-11-09)
+
+| State | Value |
+| --- | --- |
+| Change | ADR 0109: an agent has many chats (`TaskSpec.thread`), they run at once (lane lock per chat), `AgentRecord.running` with derived state, steering and late mail per chat. ADR 0110: the sidebar lists agents (ARK first), Recent chats in the title, `/history`, folders in the details pane and palette, `conversations.search`/`read` recall, `memory.suggest` for agents' chats with the person. `ark.rail` and `ark.projectSection` removed |
+| Found from | The owner's request of 2026-11-09 (agent-first navigation, a reference screenshot). Owner chose: every existing chat becomes ARK's; one agent's chats run in parallel |
+| Gates | Plan (fail, then pass after revision), design (pass after revision) and implementation reviews by `qa`; findings fixed with tests. Rust: fmt, clippy `-D warnings` workspace, `cargo test --workspace` pass. Web fixtures 128 of 129 (1 skipped). Real-host page suite 66 of 68: the 2 failures are on the v0.36.0 to v0.41.0 known list. Release build pass. Simulated benchmark: `board` +51 tokens (one new chat sees the recall tool), baseline regenerated |
+| Dogfood | Desktop runtime on a copy of the owner's store (272 chats, 8 agents): tiles across folders, ARK Recent chats and `/history` across 7 folders, agent chat opens in its folder, New chat with the agent. Found and fixed: agent chat titles showed the rendered brief. No model call made |
+| Evidence | `../board/evidence/agent-first-nav-20261109/` (PLAN, DESIGN, CONTRACT, gate logs, screens, dogfood) |
+| Not verified | A live model using recall; the native Desktop window by hand; a physical phone; iPhone client calls (session aiengineering-e9 adds `client/v1` on top) |
+| Next | Owner: OK to commit, release Core and pin Desktop. Uncommitted in this worktree |
+
 # Core 0.41.0 release
 
 | Release state | Value |

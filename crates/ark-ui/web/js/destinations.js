@@ -11,8 +11,6 @@ export class Destinations {
     this.openView = openView;
     this.el = $("#destinations");
     this.workspace = $("#workspace-destinations");
-    this.pins = $("#rail-pins");
-    this.mounts = [];
     this.buttons = $$(".destination[data-destination]", this.el);
     for (const button of this.buttons) {
       button.addEventListener("click", (event) => {
@@ -33,27 +31,6 @@ export class Destinations {
       this.workspace.append(button);
     }
     this.markWorkspace(null);
-  }
-
-  /// What the app pinned to the rail. Each mount draws into its own element and is released
-  /// before the next drawing, so a pin that left cannot keep listening.
-  setRails() {
-    for (const mount of this.mounts) {
-      try { mount.dispose?.(); } catch (error) { console.error(error); }
-    }
-    this.mounts = [];
-    clear(this.pins);
-    for (const rail of registry.rails) {
-      const el = h("div.rail-item", { "data-id": rail.id });
-      this.pins.append(el);
-      try {
-        const mount = rail.render(el, window.ark);
-        if (mount) this.mounts.push(mount);
-      } catch (error) {
-        console.error(error);
-        el.remove();
-      }
-    }
   }
 
   markWorkspace(id) {

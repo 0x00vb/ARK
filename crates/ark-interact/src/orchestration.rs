@@ -42,15 +42,25 @@ fn agent_word(s: AgentState) -> &'static str {
 /// question it waits on, what its task waits for, or its current call in words. `None` when it
 /// has no task. Every front-end shows this line; none works it out from events.
 pub fn doing(g: &Graph, agent: &ark_orchestrate::AgentNode, labels: &Labels) -> Option<String> {
-    // Its task, or one of its tasks waiting for the person (after a restart the agent is free
-    // while that task waits).
-    let task = match agent.current_task.as_deref() {
-        Some(id) => g.tasks.iter().find(|t| t.task == id)?,
-        None => g
-            .tasks
-            .iter()
-            .find(|t| t.owner == agent.name && t.question.is_some())?,
-    };
+    // A task of its own that asks the person, else the first it runs (after a restart the
+    // agent is free while a task waits for an answer).
+    let running = |t: &&ark_orchestrate::TaskNode| agent.running.contains(&t.task);
+    let task = g
+        .tasks
+        .iter()
+        .filter(running)
+        .find(|t| t.question.is_some())
+        .or_else(|| {
+            agent
+                .running
+                .first()
+                .and_then(|id| g.tasks.iter().find(|t| t.task == *id))
+        })
+        .or_else(|| {
+            g.tasks
+                .iter()
+                .find(|t| t.owner == agent.name && t.question.is_some())
+        })?;
     if let Some(q) = &task.question {
         return Some(format!(
             "Waiting for your answer: {}",
@@ -68,7 +78,7 @@ pub fn doing(g: &Graph, agent: &ark_orchestrate::AgentNode, labels: &Labels) -> 
     }) {
         return Some(format!("Waiting for {on}"));
     }
-    Some(match &agent.step {
+    Some(match agent.step.as_ref().filter(|s| s.task == task.task) {
         Some(s) => labels.call_label(&s.action, &s.input),
         None => clip(&task.objective, 80),
     })
@@ -942,14 +952,17 @@ pub enum Control {
         agent: String,
     },
     /// A note from the person: into the agent's running task, else its next one.
+    /// `thread`: one of the agent's conversations; `None`: its default one.
     Message {
         agent: String,
         text: String,
+        thread: Option<String>,
     },
     MessageWithContext {
         agent: String,
         text: String,
         context: String,
+        thread: Option<String>,
     },
     /// Stop a schedule (a run already started goes on).
     Unschedule {
@@ -1080,19 +1093,24 @@ pub async fn control(
             o.terminate(&agent).await?;
             ControlOutcome::Done(format!("{agent} ended"))
         }
-        Control::Message { agent, text } => {
+        Control::Message {
+            agent,
+            text,
+            thread,
+        } => {
             if text.trim().is_empty() {
                 anyhow::bail!("a message needs text");
             }
-            let delivered = o.message("user", &agent, &text)?;
+            let delivered = o.message_thread("user", &agent, thread.as_deref(), &text, "")?;
             ControlOutcome::Messaged { agent, delivered }
         }
         Control::MessageWithContext {
             agent,
             text,
             context,
+            thread,
         } => {
-            let delivered = o.message_with_context("user", &agent, &text, &context)?;
+            let delivered = o.message_thread("user", &agent, thread.as_deref(), &text, &context)?;
             ControlOutcome::Messaged { agent, delivered }
         }
         Control::Unschedule { schedule } => {
@@ -1232,6 +1250,7 @@ pub fn parse_agent(args: &str) -> Result<Control, String> {
         "message" => Control::Message {
             agent: need(name)?,
             text: it.collect::<Vec<_>>().join(" "),
+            thread: None,
         },
         _ => {
             return Err(

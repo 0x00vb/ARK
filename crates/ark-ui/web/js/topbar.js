@@ -20,7 +20,6 @@ export class Topbar {
     clear(this.tabs);
     this.tabs.hidden = true;
     this.destinations?.setWorkspaceViews(views);
-    this.destinations?.setRails();
     clear(this.launchers);
     if ([...registry.panels.values()].some((p) => p.nav && (!p.when || p.when({ project })))) {
       this.launchers.append(h("button.icon-btn", {

@@ -278,6 +278,10 @@ pub struct TaskSpec {
     /// that continues that work finds it instead of handing it off again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work: Option<String>,
+    /// One of the agent's own conversations (a session in its scope) to run in. `None`: its
+    /// default conversation. Conversations of one agent run at the same time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 impl TaskSpec {
@@ -329,6 +333,11 @@ impl TaskSpec {
     /// Post the result into the chat `session` when the task ends.
     pub fn report_to(mut self, session: impl Into<String>) -> Self {
         self.report_to = Some(session.into());
+        self
+    }
+    /// Run in the agent's conversation `session` ([`TaskSpec::thread`]).
+    pub fn thread(mut self, session: impl Into<String>) -> Self {
+        self.thread = Some(session.into());
         self
     }
 }

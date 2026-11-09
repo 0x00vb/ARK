@@ -16,7 +16,7 @@
 //! | A task waiting on tasks it delegated gives back its capacity | a parent never blocks its own children |
 //! | Delegating up the chain that is waiting is refused | it would wait on itself |
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -70,6 +70,8 @@ mod ownership;
 mod resolution;
 mod results;
 pub use resolution::{WorkFailure, WorkRunRef};
+mod threads;
+pub use threads::{agent_threads, latest_thread_title, person_tasks, AgentThread};
 mod work;
 mod work_snapshot;
 pub use work_snapshot::{WorkEntry, WorkPage, WorkTemplate};
@@ -500,6 +502,7 @@ impl Orchestrator {
             if task.owner != agent
                 || task.objective != spec.objective
                 || task.context != spec.context
+                || task.thread != spec.thread
             {
                 return Err(OrchError::NotAllowed(
                     "the request already names another message".into(),
@@ -735,7 +738,29 @@ impl Orchestrator {
     ) -> Result<bool, OrchError> {
         self.inner.require_agent_control(agent)?;
         self.inner
-            .send_with_context(from, agent, text, None, context)
+            .send_with_context(from, agent, text, None, context, None)
+    }
+
+    /// [`message_with_context`](Self::message_with_context) into one conversation of `agent`
+    /// ([`TaskSpec::thread`]): its running task, else that conversation's next one. `None`: the
+    /// default conversation.
+    pub fn message_thread(
+        &self,
+        from: &str,
+        agent: &str,
+        thread: Option<&str>,
+        text: &str,
+        context: &str,
+    ) -> Result<bool, OrchError> {
+        self.inner.require_agent_control(agent)?;
+        if let Some(thread) = thread {
+            let record = self
+                .agent(agent)
+                .ok_or_else(|| OrchError::UnknownAgent(agent.into()))?;
+            self.inner.check_thread(&record, thread)?;
+        }
+        self.inner
+            .send_with_context(from, agent, text, None, context, thread)
     }
 
     /// Live events, including streamed text (which is not stored).
@@ -918,7 +943,7 @@ impl Orchestrator {
         let used = self.schedules().iter().any(|s| s.agent == rec.agent);
         let busy = self
             .agent(&rec.agent)
-            .is_some_and(|a| a.current_task.is_some() || a.state == AgentState::Running);
+            .is_some_and(|a| !a.running.is_empty() || a.state == AgentState::Running);
         if rec.own_agent && !used && !busy {
             self.terminate(&rec.agent).await?;
         }
@@ -1230,10 +1255,10 @@ struct Slots {
 
 pub(crate) struct AgentRt {
     pub record: AgentRecord,
-    lock: Arc<tokio::sync::Mutex<()>>,
     status: watch::Sender<AgentState>,
-    steering: Option<Steering>,
     pub models: Option<Arc<AgentModels>>,
+    /// Model lanes its conversations hold open now ([`Inner::thread_lane`]).
+    threads: HashSet<String>,
     /// The agent program its tasks run on, when its model names one (ADR 0043).
     worker: Option<Arc<dyn ark_runtime::worker::Worker>>,
     /// The resolver's default version when `models` was resolved.
@@ -1258,6 +1283,8 @@ pub(crate) struct TaskRt {
     answered: Arc<tokio::sync::Notify>,
     /// Picked up again after a restart: its next run continues the interrupted one.
     recovering: bool,
+    /// Messages into its run, while it runs.
+    steering: Option<Steering>,
 }
 
 #[derive(Default)]
@@ -2103,9 +2130,12 @@ impl Inner {
                 let Ok(mut r) = serde_json::from_value::<AgentRecord>(v) else {
                     continue;
                 };
-                let live = match &r.current_task {
-                    Some(id) => store
-                        .get_record(TASK, id)?
+                // A record from before `running` names its one task in `current_task`.
+                let mut candidates = std::mem::take(&mut r.running);
+                candidates.extend(r.current_task.take());
+                for id in candidates {
+                    let live = store
+                        .get_record(TASK, &id)?
                         .map(serde_json::from_value::<TaskRecord>)
                         .transpose()?
                         .is_some_and(|task| {
@@ -2113,24 +2143,23 @@ impl Inner {
                                 && task
                                     .pid
                                     .is_some_and(|pid| process::writer_alive(pid, task.pid_start))
-                        }),
-                    None => false,
-                };
-                if !live {
-                    if matches!(r.state, AgentState::Running | AgentState::Waiting) {
-                        r.state = AgentState::Idle;
+                        });
+                    if live {
+                        r.start_running(&id);
                     }
-                    r.current_task = None;
+                }
+                if r.running.is_empty()
+                    && matches!(r.state, AgentState::Running | AgentState::Waiting)
+                {
+                    r.state = AgentState::Idle;
                 }
                 let (status, _) = watch::channel(r.state);
-                let agent_lock = self.agent_execution_lock(&r.name)?;
                 st.agents.insert(
                     r.name.clone(),
                     AgentRt {
                         record: r,
-                        lock: agent_lock,
                         status,
-                        steering: None,
+                        threads: HashSet::new(),
                         models: None,
                         worker: None,
                         default_version: 0,
@@ -2229,6 +2258,7 @@ impl Inner {
                         answer: None,
                         answered: Default::default(),
                         recovering,
+                        steering: None,
                     },
                 );
             }
@@ -2402,6 +2432,7 @@ impl Inner {
                     spec: spec.clone(),
                     state: AgentState::Idle,
                     current_task: None,
+                    running: Vec::new(),
                     session: None,
                     model: models.model.clone(),
                     account: models.account.clone(),
@@ -2490,9 +2521,8 @@ impl Inner {
                         spec.name.clone(),
                         AgentRt {
                             record: record.clone(),
-                            lock: self.agent_execution_lock(&spec.name)?,
                             status,
-                            steering: None,
+                            threads: HashSet::new(),
                             models: Some(models.clone()),
                             worker: worker.clone(),
                             default_version,
@@ -2562,10 +2592,10 @@ impl Inner {
             if a.record.state == AgentState::Terminated {
                 return Err(OrchError::Terminated(agent.into()));
             }
-            a.record.current_task.clone()
+            a.record.running.clone()
         };
         self.set_agent_state(agent, AgentState::Suspended);
-        if let Some(t) = current {
+        for t in current {
             self.stop(&t, Stop::Suspend);
         }
         Ok(())
@@ -2581,7 +2611,7 @@ impl Inner {
                 .state
         };
         if state == AgentState::Suspended {
-            self.set_agent_state(agent, AgentState::Idle);
+            self.settle_agent_state(agent, true);
         }
         Ok(())
     }
@@ -2603,6 +2633,7 @@ impl Inner {
             self.cancel_tree(&t, Stop::Cancel);
         }
         self.models.close(&self.lane(agent)).await;
+        self.close_all_thread_models(agent).await;
         Ok(())
     }
 
@@ -2657,7 +2688,7 @@ impl Inner {
         parent: Option<&str>,
         handoff_key: Option<&str>,
     ) -> Result<String, OrchError> {
-        let (agent_budget, state) = {
+        let (agent_budget, agent) = {
             let st = self.state.lock().unwrap();
             let a = st
                 .agents
@@ -2668,10 +2699,13 @@ impl Inner {
                     return Err(OrchError::UnknownTask(d.clone()));
                 }
             }
-            (a.record.spec.budget.clone(), a.record.state)
+            (a.record.spec.budget.clone(), a.record.clone())
         };
-        if state == AgentState::Terminated {
+        if agent.state == AgentState::Terminated {
             return Err(OrchError::Terminated(owner.into()));
+        }
+        if let Some(thread) = &spec.thread {
+            self.check_thread(&agent, thread)?;
         }
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
@@ -2767,6 +2801,7 @@ impl Inner {
                     answer: None,
                     answered: Default::default(),
                     recovering: false,
+                    steering: None,
                 },
             );
             if let Some(parent) = parent.and_then(|p| st.tasks.get_mut(p)) {
@@ -2983,11 +3018,7 @@ impl Inner {
                 return Final::cancelled("cancelled");
             }
             // The agent must take work.
-            let (lock, mut status) = {
-                let st = self.state.lock().unwrap();
-                let a = &st.agents[&owner];
-                (a.lock.clone(), a.status.subscribe())
-            };
+            let mut status = self.state.lock().unwrap().agents[&owner].status.subscribe();
             let state = *status.borrow();
             match state {
                 AgentState::Terminated => return Final::cancelled("the agent was terminated"),
@@ -3016,7 +3047,11 @@ impl Inner {
                     }
                 }
             }
-            // One task at a time per agent.
+            // One task at a time per conversation of an agent.
+            let lock = match self.agent_execution_lock(&owner, &self.task_lane(id)) {
+                Ok(lock) => lock,
+                Err(error) => return Final::failed(error.to_string()),
+            };
             let cancel = self.cancel_token(id);
             let guard = match lock.clone().try_lock_owned() {
                 Ok(g) => g,
@@ -3035,18 +3070,32 @@ impl Inner {
                 drop(guard);
                 continue;
             }
-            let models = match self.task_models_for(id, &owner).await {
+            let thread = self.task_thread(id);
+            let models = match &thread {
+                Some(thread) => self.thread_models(&owner, thread).await,
+                None => self.task_models_for(id, &owner).await,
+            };
+            let models = match models {
                 Ok(m) => m,
                 Err(e) => return Final::failed(e.to_string()).holding(guard),
             };
             if !self.acquire(id, &models.account).await {
+                if let Some(thread) = &thread {
+                    self.close_thread_models(&owner, thread).await;
+                }
                 return self.stopped_before_start(id).holding(guard);
             }
             if self.engine.is_stopping() {
                 self.release(id).await;
+                if let Some(thread) = &thread {
+                    self.close_thread_models(&owner, thread).await;
+                }
                 return Final::left().holding(guard);
             }
             let attempt = self.attempt(id, &owner, &models, resumed).await;
+            if let Some(thread) = &thread {
+                self.close_thread_models(&owner, thread).await;
+            }
             // Answers carry only into the run that continues one the process stopped in.
             if !matches!(attempt, Attempt::Stopped(Stop::Restart)) {
                 self.update_task(id, |t| t.decisions.iter_mut().for_each(|d| d.carry = false));
@@ -3494,6 +3543,7 @@ impl Inner {
         resumed: bool,
     ) -> Attempt {
         let worker;
+        let thread;
         let (task, mut agent, deps, children, inbox, cancel, roster, item) = {
             let mut st = self.state.lock().unwrap();
             let task = st.tasks[id].record.clone();
@@ -3521,10 +3571,24 @@ impl Inner {
                 })
                 .collect();
             let a = st.agents.get_mut(owner).expect("the owner exists");
+            let session = a.record.session.clone();
+            thread = threads::own_thread(&task, session.as_deref()).map(str::to_string);
             let inbox = if task.conversation.is_some() {
                 Vec::new()
             } else {
-                std::mem::take(&mut a.record.inbox)
+                // Only the mail of its own conversation.
+                let (mine, rest) =
+                    std::mem::take(&mut a.record.inbox)
+                        .into_iter()
+                        .partition(|m: &Mail| {
+                            threads::same_thread(
+                                m.thread.as_deref(),
+                                thread.as_deref(),
+                                session.as_deref(),
+                            )
+                        });
+                a.record.inbox = rest;
+                mine
             };
             worker = if task.conversation.is_some() {
                 None
@@ -3561,6 +3625,11 @@ impl Inner {
                 Ok(Some(_)) => {}
                 Ok(None) => return Attempt::Fatal("the selected agent is missing".into()),
                 Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        }
+        if let Some(thread) = &thread {
+            if let Err(error) = self.check_thread(&agent, thread) {
+                return Attempt::Fatal(error.to_string());
             }
         }
         let scope = ProjectId(
@@ -3654,6 +3723,8 @@ impl Inner {
                 self.project.id,
                 task.conversation.as_deref().unwrap_or(id)
             )
+        } else if let Some(thread) = &thread {
+            self.thread_lane(owner, thread)
         } else {
             format!("{}/{owner}", self.project.id)
         };
@@ -3718,6 +3789,37 @@ impl Inner {
         let catalog = skills::catalog(&skills, skills::CATALOG_BUDGET).map(|c| c.text);
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
+        }
+        // A person's chat with the agent shares its memory and can look back at its other chats.
+        // A task another agent delegated is not that chat: it works from its brief alone.
+        if task.submission.is_none() && task.run.is_none() && task.origin == Origin::External {
+            let input = format!("{}\n{}", task.objective, task.context);
+            match ark_runtime::memory::offered(&self.engine.store, &scope, &input) {
+                Ok(true) => registry.register(Arc::new(ark_runtime::memory::MemoryTool::new(
+                    self.engine.store.clone(),
+                    scope.clone(),
+                ))),
+                Ok(false) => {}
+                Err(e) => return Attempt::Failed(e.to_string()),
+            }
+            if let Some(current) = task.thread.clone().or_else(|| agent.session.clone()) {
+                let current = ark_core::SessionId(current);
+                match ark_runtime::conversations::has_other_conversations(
+                    &self.engine.store,
+                    &scope,
+                    &current,
+                ) {
+                    Ok(true) => registry.register(Arc::new(
+                        ark_runtime::conversations::ConversationsTool::new(
+                            self.engine.store.clone(),
+                            scope.clone(),
+                            current,
+                        ),
+                    )),
+                    Ok(false) => {}
+                    Err(e) => return Attempt::Failed(e.to_string()),
+                }
+            }
         }
         let engine = if task.submission.is_some() {
             self.engine.for_work(id).scoped_for(&scope, registry)
@@ -3803,6 +3905,12 @@ impl Inner {
                 Ok(None) => return Attempt::Fatal("the work conversation was deleted".into()),
                 Err(error) => return Attempt::Fatal(error.to_string()),
             }
+        } else if let Some(thread) = &thread {
+            match Session::open(&self.engine, thread) {
+                Ok(Some(s)) => s,
+                Ok(None) => return Attempt::Fatal("the conversation was deleted".into()),
+                Err(e) => return Attempt::Failed(e.to_string()),
+            }
         } else {
             match agent
                 .session
@@ -3863,7 +3971,7 @@ impl Inner {
             .stopping(Some(self.engine.stopping()))
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
-            .chat(if task.conversation.is_some() {
+            .chat(if task.conversation.is_some() || thread.is_some() {
                 session.id().as_str()
             } else {
                 task.id.as_str()
@@ -3914,19 +4022,17 @@ impl Inner {
             });
             rec.map(|r| r.attempts).unwrap_or(1)
         };
-        {
-            let mut st = self.state.lock().unwrap();
-            if let Some(a) = st.agents.get_mut(owner) {
-                a.steering = Some(steer.clone());
-            }
+        if let Some(t) = self.state.lock().unwrap().tasks.get_mut(id) {
+            t.steering = Some(steer.clone());
         }
+        let opened_default = task.conversation.is_none() && task.thread.is_none();
         self.update_agent(owner, |a| {
-            a.current_task = Some(id.to_string());
-            if task.conversation.is_none() {
+            a.start_running(id);
+            if opened_default {
                 a.session = Some(session_id.clone());
             }
         });
-        self.set_agent_state(owner, AgentState::Running);
+        self.sync_agent_state(owner);
         self.emit(EventKind::TaskStarted {
             task: id.to_string(),
             agent: owner.to_string(),
@@ -3968,19 +4074,7 @@ impl Inner {
             if let Some(t) = timer {
                 t.abort();
             }
-            if let Some(a) = self.state.lock().unwrap().agents.get_mut(owner) {
-                a.steering = None;
-                // A program takes no messages while it works: they wait for the next task.
-                for input in steer.take_undelivered_inputs() {
-                    a.record.inbox.push(Mail {
-                        from: "?".into(),
-                        text: input.text,
-                        context: input.context,
-                        task: None,
-                        at_ms: now_ms(),
-                    });
-                }
-            }
+            self.keep_late_inputs(id, owner, &steer, &task.thread);
             return ran;
         }
         if let Err(e) = session.begin_turn(&self.engine, &conversation_input) {
@@ -4016,22 +4110,8 @@ impl Inner {
         }
         let ran = started.elapsed().as_millis() as u64;
         self.update_task(id, |t| t.run_ms += ran);
-        {
-            let mut st = self.state.lock().unwrap();
-            if let Some(a) = st.agents.get_mut(owner) {
-                a.steering = None;
-                // Messages that arrived too late for this task wait for the next one.
-                for input in steer.take_undelivered_inputs() {
-                    a.record.inbox.push(Mail {
-                        from: "?".into(),
-                        text: input.text,
-                        context: input.context,
-                        task: None,
-                        at_ms: now_ms(),
-                    });
-                }
-            }
-        }
+        // Messages that arrived too late for this task wait for the next one.
+        self.keep_late_inputs(id, owner, &steer, &task.thread);
         self.collect_outputs(id, owner, &scope);
         match result {
             Ok(outcome) if !outcome.cancelled => {
@@ -4094,6 +4174,27 @@ impl Inner {
                     None if final_error(&e) => Attempt::Fatal(e.to_string()),
                     None => Attempt::Failed(e.to_string()),
                 }
+            }
+        }
+    }
+
+    /// Stop steering task `id`; what was not delivered waits in the inbox for the next task of
+    /// the same conversation.
+    fn keep_late_inputs(&self, id: &str, owner: &str, steer: &Steering, thread: &Option<String>) {
+        let mut st = self.state.lock().unwrap();
+        if let Some(t) = st.tasks.get_mut(id) {
+            t.steering = None;
+        }
+        if let Some(a) = st.agents.get_mut(owner) {
+            for input in steer.take_undelivered_inputs() {
+                a.record.inbox.push(Mail {
+                    from: "?".into(),
+                    text: input.text,
+                    context: input.context,
+                    task: None,
+                    at_ms: now_ms(),
+                    thread: thread.clone(),
+                });
             }
         }
     }
@@ -4331,26 +4432,15 @@ impl Inner {
         self.save_task(&rec);
         token.release_drained_children();
         let owner = rec.owner.clone();
-        let current = self
-            .state
-            .lock()
-            .unwrap()
-            .agents
-            .get(&owner)
-            .and_then(|a| a.record.current_task.clone());
         self.update_agent(&owner, |a| {
-            if current.as_deref() == Some(id) {
-                a.current_task = None;
-            }
+            a.stop_running(id);
             match f.state {
                 TaskState::Done => a.tasks_done += 1,
                 TaskState::Failed => a.tasks_failed += 1,
                 _ => {}
             }
         });
-        if current.as_deref() == Some(id) && self.agent_state(&owner) == Some(AgentState::Running) {
-            self.set_agent_state(&owner, AgentState::Idle);
-        }
+        self.sync_agent_state(&owner);
         // Results go back up: the parent's agent can use what this task produced.
         if let (Some(parent), true) = (&rec.parent, rec.run.is_none() && !rec.outputs.is_empty()) {
             let parent_owner = {
@@ -4369,11 +4459,13 @@ impl Inner {
         // Nobody is waiting for a task delegated without `wait` whose parent has ended: tell
         // the parent's agent in its next brief.
         if let Origin::Agent { agent, task } = &rec.origin {
-            let parent_open = {
+            let (parent_open, parent_thread) = {
                 let st = self.state.lock().unwrap();
-                st.tasks
-                    .get(task)
-                    .is_some_and(|t| !t.record.state.is_final())
+                let parent = st.tasks.get(task);
+                (
+                    parent.is_some_and(|t| !t.record.state.is_final()),
+                    parent.and_then(|t| t.record.thread.clone()),
+                )
             };
             if !parent_open {
                 let text = format!(
@@ -4393,6 +4485,7 @@ impl Inner {
                         text,
                         task: Some(rec.id.clone()),
                         at_ms: now_ms(),
+                        thread: parent_thread,
                     })
                 });
             }
@@ -4506,17 +4599,16 @@ impl Inner {
         });
         let Some(rec) = rec else { return };
         let owner = rec.owner.clone();
-        let current = {
-            let st = self.state.lock().unwrap();
-            st.agents
-                .get(&owner)
-                .and_then(|a| a.record.current_task.clone())
-        };
-        if current.as_deref() == Some(id) {
-            self.update_agent(&owner, |a| a.current_task = None);
-            if self.agent_state(&owner) == Some(AgentState::Running) {
-                self.set_agent_state(&owner, AgentState::Idle);
-            }
+        let running = self
+            .state
+            .lock()
+            .unwrap()
+            .agents
+            .get(&owner)
+            .is_some_and(|a| a.record.running.iter().any(|t| t == id));
+        if running {
+            self.update_agent(&owner, |a| a.stop_running(id));
+            self.sync_agent_state(&owner);
         }
         if rec.state == TaskState::Queued {
             self.emit(EventKind::TaskQueued {
@@ -4869,7 +4961,7 @@ impl Inner {
             t.state = TaskState::Waiting;
             t.waiting_on = Some(waiting_text(&on));
         });
-        self.set_agent_state(&owner, AgentState::Waiting);
+        self.sync_agent_state(&owner);
         if ids.iter().any(|i| i != ANSWER) {
             self.emit(EventKind::TaskWaiting {
                 task: parent.to_string(),
@@ -4925,7 +5017,7 @@ impl Inner {
             t.state = TaskState::Running;
             t.waiting_on = None;
         });
-        self.set_agent_state(&owner, AgentState::Running);
+        self.sync_agent_state(&owner);
         self.emit(EventKind::TaskResumed {
             task: parent.to_string(),
         });
@@ -4940,7 +5032,7 @@ impl Inner {
         text: &str,
         task: Option<&str>,
     ) -> Result<bool, OrchError> {
-        self.send_with_context(from, to, text, task, "")
+        self.send_with_context(from, to, text, task, "", None)
     }
 
     fn send_with_context(
@@ -4950,6 +5042,7 @@ impl Inner {
         text: &str,
         task: Option<&str>,
         context: &str,
+        thread: Option<&str>,
     ) -> Result<bool, OrchError> {
         if text.trim().is_empty() {
             return Err(OrchError::NotAllowed("an empty message".into()));
@@ -4959,8 +5052,10 @@ impl Inner {
                 "message context exceeds its size limit".into(),
             ));
         }
-        let delivered = {
+        let (delivered, went) = {
             let mut st = self.state.lock().unwrap();
+            let st = &mut *st;
+            let from_agent_name = from != to && st.agents.contains_key(from);
             let a = st
                 .agents
                 .get_mut(to)
@@ -4968,8 +5063,20 @@ impl Inner {
             if a.record.state == AgentState::Terminated {
                 return Err(OrchError::Terminated(to.into()));
             }
+            let session = a.record.session.clone();
+            let lane = thread.filter(|t| Some(*t) != session.as_deref());
+            let steering: Vec<(Option<&str>, &Steering)> = a
+                .record
+                .running
+                .iter()
+                .filter_map(|id| st.tasks.get(id))
+                .filter_map(|t| {
+                    let own = threads::own_thread(&t.record, session.as_deref());
+                    t.steering.as_ref().map(|s| (own, s))
+                })
+                .collect();
             let queued: usize = a.record.inbox.iter().map(|mail| mail.context.len()).sum();
-            let running = a.steering.as_ref().map_or(0, Steering::context_bytes);
+            let running: usize = steering.iter().map(|(_, s)| s.context_bytes()).sum();
             if queued.saturating_add(running).saturating_add(context.len())
                 > ark_runtime::steer::MAX_QUEUED_CONTEXT
             {
@@ -4977,11 +5084,24 @@ impl Inner {
                     "pending message context is full".into(),
                 ));
             }
-            match &a.steering {
-                Some(s) => {
+            // No conversation named: its default one; from another agent, else the one task that
+            // runs. A person's note without a chat stays in the default one, which every client shows.
+            let target = steering
+                .iter()
+                .find(|(own, _)| *own == lane)
+                .or_else(|| {
+                    (from_agent_name
+                        && thread.is_none()
+                        && a.record.running.len() == 1
+                        && steering.len() == 1)
+                        .then(|| &steering[0])
+                })
+                .copied();
+            match target {
+                Some((own, s)) => {
                     s.push_with_context(format!("Message from {from}: {text}"), context)
                         .map_err(OrchError::NotAllowed)?;
-                    true
+                    (true, own.map(str::to_string))
                 }
                 None => {
                     a.record.inbox.push(Mail {
@@ -4990,8 +5110,9 @@ impl Inner {
                         context: context.to_string(),
                         task: task.map(str::to_string),
                         at_ms: now_ms(),
+                        thread: lane.map(str::to_string),
                     });
-                    false
+                    (false, lane.map(str::to_string))
                 }
             }
         };
@@ -5017,6 +5138,7 @@ impl Inner {
             task: task.map(str::to_string),
             text: clip(text, 1000),
             delivered,
+            thread: went,
         });
         Ok(delivered)
     }

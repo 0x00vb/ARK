@@ -180,39 +180,31 @@ export function registerBoard(ark) {
     store.tasks = first.tasks || {};
     store.agents = first.agents || [];
     ark.panel({ id: "board", title: "Board", icon: "board", builtin: true, presents: ["board"], wide: true, fill: true, closesWithProject: true, render: (el, params) => boardView(el, params) });
-    ark.projectSection({ id: "boards", label: "Boards", render: (el) => boardsSection(el) });
+    // With no project list in the sidebar, search (⇧⌘F) is where a person finds a board again.
+    // Board calls reach the shown folder only, so other folders list none.
+    ark.searchSource({
+      id: "boards",
+      load: (project) => project.id !== store.project ? [] : store.boards.map((b) => {
+        const on = itemsOn(b.id).filter((w) => !store.removing.has(w.id));
+        const done = on.filter((w) => w.state === "done").length;
+        const waiting = on.filter(needsYou).length;
+        return { id: b.id, title: b.goal, description: waiting ? `Board, ${waiting} waiting for you` : `Board, ${done}/${on.length}`, updated_at: b.updated_at };
+      }),
+      open: (entry, scoped) => scoped.openPanel("board", { board: entry.id }),
+    });
+    store.changed();
   })();
 }
 
-// ---- the project's boards, in the sidebar ---------------------------------------------------------
+// ---- what waits for the person, for the sidebar -----------------------------------------------
 
-function boardsSection(el) {
-  const ark = store.ark;
-  const draw = () => {
-    clear(el);
-    el.hidden = !store.boards.length;
-    for (const b of store.boards) {
-      const on = itemsOn(b.id).filter((w) => !store.removing.has(w.id));
-      const done = on.filter((w) => w.state === "done").length;
-      const waiting = on.filter(needsYou).length;
-      el.append(h("div.session.bd-row", {
-        role: "button",
-        tabindex: "0",
-        "data-focus-key": b.id,
-        "aria-current": store.shown === b.id ? "true" : null,
-        title: b.goal,
-        onclick: () => ark.openPanel("board", { board: b.id }),
-        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ark.openPanel("board", { board: b.id }); } },
-      },
-      icon("board"),
-      h("span.session-title", b.goal),
-      waiting ? h("span.session-attention", { title: `${waiting} waiting for you` }, icon("alert"), String(waiting)) : null,
-      on.length ? h("span.session-time", `${done}/${on.length}`) : null));
-    }
-  };
-  store.listeners.add(draw);
-  draw();
-  return { dispose: () => store.listeners.delete(draw) };
+/// `fn(count)` with the number of the shown folder's board items that wait for the person, now
+/// and after each change. Returns a function that stops it.
+export function boardWaiting(fn) {
+  const report = () => fn(store.items.filter((w) => !store.removing.has(w.id) && needsYou(w)).length);
+  store.listeners.add(report);
+  report();
+  return () => store.listeners.delete(report);
 }
 
 // ---- small pieces ---------------------------------------------------------------------------------

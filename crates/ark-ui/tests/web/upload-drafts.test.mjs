@@ -100,7 +100,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
   };
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
-    await page.locator('.session[data-id="chat-a"]').waitFor();
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
     await run(page, { files, calls, waiting, release: () => release(), settle });
     await settle();
     assert.deepEqual(errors, []);
@@ -127,8 +127,8 @@ for (const runtime of ["fixture", "window"]) for (const other of ["chat-b", "cha
     await input.fill("Origin draft");
     await drop(page);
     await upload.waiting;
-    if (other === "chat-c") await page.locator(".project-row", { hasText: "Writing" }).click();
-    else await page.locator(`.session[data-id="${other}"]`).click();
+    if (other === "chat-c") await page.evaluate(() => window.ark.openProject("b"));
+    else await page.evaluate(id => window.ark.openSession(id), other);
     await page.waitForFunction(id => window.ark.summary().session.id === id, other);
     await input.fill("Unrelated draft");
     await input.evaluate(el => el.setSelectionRange(3, 6));
@@ -139,13 +139,13 @@ for (const runtime of ["fixture", "window"]) for (const other of ["chat-b", "cha
     assert.equal(await page.locator("#dictate").evaluate(el => document.activeElement === el), true);
     assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [3, 6]);
     assert.deepEqual(upload.files, [{ location: { runtime: "fixture", project: "a", session: "chat-a" }, path: "notes.txt" }]);
-    if (other === "chat-c") await page.locator(".project-row", { hasText: "Notes" }).click();
-    else await page.locator('.session[data-id="chat-a"]').click();
+    if (other === "chat-c") await page.evaluate(() => window.ark.openProject("a"));
+    else await page.evaluate(id => window.ark.openSession(id), "chat-a");
     await page.waitForFunction(() => window.ark.summary().session.id === "chat-a");
     assert.equal(await input.inputValue(), "Origin draft\nAdded to the project: notes.txt");
     await upload.settle();
     await page.reload();
-    await page.locator('.session[data-id="chat-a"]').waitFor();
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
     assert.equal(await input.inputValue(), "Origin draft\nAdded to the project: notes.txt");
     if (runtime === "window") assert.equal(await page.evaluate(() => localStorage.getItem("ark-draft:fixture:chat-a")), null);
   }, "success", runtime));
@@ -177,13 +177,13 @@ test("same-chat upload keeps the cursor above its saved attachment line", async 
   assert.equal(await input.evaluate(el => el.selectionStart), "Compare them".length);
   await upload.settle();
   await page.reload();
-  await page.locator('.session[data-id="chat-a"]').waitFor();
+  await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
   assert.equal(await input.inputValue(), "Compare them\nAdded to the project: notes.txt");
 }));
 
 for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "disposed", "promoted"]) {
   test(`upload completion follows a ${state} secondary origin on ${runtime}`, async () => fixture(async (page, upload) => {
-    await page.locator('.session[data-id="chat-b"]').click();
+    await page.evaluate(id => window.ark.openSession(id), "chat-b");
     await page.waitForFunction(() => window.ark.summary().session.id === "chat-b");
     await page.locator("#chat-split").click();
     const origin = page.locator(".secondary textarea");
@@ -214,14 +214,14 @@ for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "di
     assert.equal(await page.locator("#dictate").evaluate(el => document.activeElement === el), true);
     if (state === "mounted") assert.equal(await origin.inputValue(), expected);
     if (state === "disposed") {
-      await page.locator('.session[data-id="chat-a"]').click();
+      await page.evaluate(id => window.ark.openSession(id), "chat-a");
       await page.waitForFunction(() => window.ark.summary().session.id === "chat-a");
       assert.equal(await input.inputValue(), expected);
     }
     assert.deepEqual(upload.files, [{ location: { runtime: "fixture", project: "a", session: "chat-a" }, path: "notes.txt" }]);
     await upload.settle();
     await page.reload();
-    await page.locator('.session[data-id="chat-a"]').waitFor();
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
     if (state === "mounted") await page.locator(".secondary textarea").waitFor();
     assert.equal(await (state === "mounted" ? page.locator(".secondary textarea") : input).inputValue(), expected);
     if (runtime === "window") assert.equal(await page.evaluate(() => localStorage.getItem("ark-draft:fixture:chat-a")), null);
@@ -275,7 +275,7 @@ for (const next of ["general", "other-project"]) {
     });
     await upload.waiting;
     if (next === "other-project") {
-      await page.locator('.project-row', { hasText: 'Writing' }).click();
+      await page.evaluate(() => window.ark.openProject("b"));
       await page.waitForFunction(() => window.ark.summary().project.id === "b");
       assert.equal(await page.evaluate(() => window.mainConversations[0].disposed), true);
       await page.evaluate(() => window.ark.openView("project-chat"));

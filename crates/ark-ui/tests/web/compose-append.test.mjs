@@ -100,7 +100,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
   };
   try {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
-    await page.locator('.session[data-id="chat-a"]').waitFor();
+    await page.locator('#agents .agent-btn[data-key="ark"]').waitFor({ state: "attached" });
     await run(page, { files, calls, waiting, release: () => release(), settle });
     await settle();
     assert.deepEqual(errors, []);
@@ -123,12 +123,12 @@ for (const other of ["chat-b", "chat-c"]) {
     assert.equal(await input.inputValue(), combined);
     assert.equal(await input.evaluate(el => document.activeElement === el), true);
     assert.equal(host.calls.some(call => ["send", "submit", "ask"].includes(call.method)), false);
-    if (other === "chat-c") await page.locator(".project-row", { hasText: "Writing" }).click();
-    else await page.locator('.session[data-id="chat-b"]').click();
+    if (other === "chat-c") await page.evaluate(() => window.ark.openProject("b"));
+    else await page.evaluate(id => window.ark.openSession(id), "chat-b");
     await page.waitForFunction(id => window.ark.summary().session.id === id, other);
     assert.equal(await input.inputValue(), "");
-    if (other === "chat-c") await page.locator(".project-row", { hasText: "Notes" }).click();
-    else await page.locator('.session[data-id="chat-a"]').click();
+    if (other === "chat-c") await page.evaluate(() => window.ark.openProject("a"));
+    else await page.evaluate(id => window.ark.openSession(id), "chat-a");
     await page.waitForFunction(() => window.ark.summary().session.id === "chat-a");
     assert.equal(await input.inputValue(), combined);
     await page.evaluate(() => window.ark.compose("Replace explicitly"));
@@ -137,7 +137,7 @@ for (const other of ["chat-b", "chat-c"]) {
 }
 
 test("primary, split and app conversations share the same canvas and composer", async () => fixture(async (page) => {
-  await page.locator('.session[data-id="chat-b"]').click();
+  await page.evaluate(id => window.ark.openSession(id), "chat-b");
   await page.waitForFunction(() => window.ark.summary().session.id === "chat-b");
   await page.locator("#chat-split").click();
   await page.locator(".secondary textarea").waitFor();

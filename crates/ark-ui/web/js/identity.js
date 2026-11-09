@@ -7,7 +7,8 @@
 //     model?: { label, mark?() -> Node, disabled?, open(anchor) },
 //     rename?(name) -> Promise, pet?: { open(anchor) },
 //     computer?: { name, open?(anchor) }, folder?: { name, path?, open?(anchor) },
-//     agent?: { name, project, conversation, program } }
+//     agent?: { name, project, conversation, program }, chats?: false }
+// `chats: false` (a group's one chat): no recent chats under the title; it opens the details.
 // `title` is what the chip says (the chat's title; `name` when it has none). The pane's Name row
 // renames what `rename` names: the agent, or the chat when there is no agent.
 
@@ -50,13 +51,17 @@ export class Identity {
     this.face.setAttribute("aria-label", `${identity.name}: details`);
     this.face.setAttribute("aria-expanded", String(!!this.api.panelOpen?.(DETAILS)));
     this.face.title = identity.name;
-    clear(this.titleButton).append(h("span.identity-name", label), icon("chevron-down"));
-    this.titleButton.setAttribute("aria-label", `${label}: recent chats`);
+    // A conversation with one chat (a group) has no recent chats: the title opens its details.
+    this.single = identity.chats === false;
+    clear(this.titleButton).append(...[h("span.identity-name", label), this.single ? null : icon("chevron-down")].filter(Boolean));
+    this.titleButton.setAttribute("aria-label", this.single ? `${label}: details` : `${label}: recent chats`);
+    this.titleButton.setAttribute("aria-haspopup", this.single ? "false" : "menu");
     for (const redraw of this.redraws) redraw(identity);
     return this.chip;
   }
 
   openRecent(keyboard) {
+    if (this.single) return this.toggle();
     this.titleButton.setAttribute("aria-expanded", "true");
     const closed = () => this.titleButton.setAttribute("aria-expanded", "false");
     if (!this.recent?.(this.titleButton, { keyboard, onClose: closed })) closed();
@@ -97,7 +102,7 @@ export class Identity {
         identity.description ? h("p.identity-description", identity.description) : null,
         h("button.identity-row", {
           type: "button", disabled: !identity.rename, "data-row": "name", "aria-label": `Name: ${named}${identity.rename ? ", rename" : ""}`,
-          onclick: (event) => this.rename(event.currentTarget, latest, named),
+          onclick: (event) => this.rename(event.currentTarget, latest),
         }, h("span.identity-row-label", "Name"), h("span.identity-row-value", h("span", named))),
         model ? h("button.identity-row", {
           type: "button", "aria-haspopup": "menu", disabled: !!model.disabled, title: model.disabled ? model.disabledReason : null, "data-row": "model",
@@ -126,8 +131,10 @@ export class Identity {
   }
 
   /// The Name row turns into a field: Enter or leaving it saves, Escape keeps the old name.
-  rename(row, identity, before) {
+  rename(row, identity) {
     if (!identity?.rename) return;
+    // What the row shows now: a rename just made is there before the pane draws again.
+    const before = row.querySelector(".identity-row-value > span")?.textContent || "";
     const input = h("input.identity-input", { value: before, "aria-label": "Name", maxlength: "120" });
     const editing = h("div.identity-row.editing", h("span.identity-row-label", "Name"), input);
     row.replaceWith(editing);

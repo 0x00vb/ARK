@@ -2593,7 +2593,9 @@ button.ticket-property:hover { background: var(--hover); }
 .composer .model-chip:not([data-missing="true"]) { display: none; }
 
 /* An app with only its own agents and none yet: one New agent button where the chat would be. */
-.app[data-no-agents="true"] .main > :not(.topbar):not(#no-agents) { display: none; }
+.app[data-no-agents="true"] .main > :not(.topbar):not(#no-agents):not(#stage) { display: none; }
+.app[data-no-agents="true"] .topbar > :not(.reveal-sidebar) { visibility: hidden; }
+#stage:not([hidden]) ~ #no-agents { display: none !important; }
 .no-agents { display: none; }
 .app[data-no-agents="true"] .no-agents { display: grid; place-items: center; flex: 1; }
 .no-agents-new { display: inline-flex; align-items: center; gap: 8px; }

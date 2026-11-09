@@ -1,6 +1,11 @@
-# Phone threads on top of 0.42.0 (branch phone-threads, 2026-11-09)
+# Core 0.42.1 release: the phone lists agents and their chats (2026-11-09)
 
-Client protocol 1.11 for ARK for iPhone: agent list, an agent's chats, start a chat, and sends into the right chat (`docs/MOBILE.md`, Protocol1.11). Local commit, not released. Next: tag, then the phone and Desktop pin it.
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.42.1 (2026-11-09), over v0.42.0 (79dc80e). Client protocol 1.11 (ADR 0111) |
+| Change | `GET /client/v1/agents`, `GET /client/v1/agents/{project}/{name}/conversations`, mutation `agent.conversation.start`; `GET /client/v1/chats` lists each agent's chats; a send to a non-default chat runs in or steers that chat (`TaskSpec.thread`) |
+| Consumer | Desktop 0.13.1 pins this tag; ARK for iPhone builds on protocol 1.11 |
+| Gates | pending |
 
 # Core 0.42.0 release: agent-first window (2026-11-09)
 

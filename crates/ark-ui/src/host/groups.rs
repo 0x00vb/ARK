@@ -100,6 +100,7 @@ impl Host {
                     store.delete_record("group_msg", &m.id)?;
                 }
                 store.delete_record("group", &group.id)?;
+                self.groups.locks.lock().unwrap().remove(&group.id);
                 self.emitter().emit("ark:group", json!({ "id": group.id }));
                 Ok(json!({}))
             }
@@ -166,6 +167,8 @@ impl Host {
         text: &str,
         failed: bool,
     ) -> anyhow::Result<GroupMessage> {
+        // A group deleted while a member was answering takes no more messages.
+        self.group_get(group)?;
         let at_ms = crate::notify::now_ms();
         let msg = GroupMessage {
             id: sortable_id("m-", at_ms),
@@ -394,6 +397,8 @@ impl Host {
             }
         };
         let messages = self.group_msgs(gid).map_err(|e| e.to_string())?;
+        // What this turn saw: a message that comes in while it runs reaches the next turn.
+        let seen = messages.last().map(|m| m.id.clone());
         let objective = brief(
             roster,
             &messages,
@@ -428,7 +433,7 @@ impl Host {
             .group_store_msg(gid, Some(member.clone()), &reply, false)
             .map_err(|e| e.to_string())?;
         let _ = self.group_edit(gid, |g| {
-            g.cursors.insert(key, stored.id);
+            g.cursors.insert(key, seen.unwrap_or(stored.id));
         });
         self.emitter().emit("ark:group", json!({ "id": gid }));
         Ok(Some(reply))

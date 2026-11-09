@@ -688,6 +688,11 @@ test("an app with only its agents: no ARK tile, the latest agent opens, groups a
   // A group's tile opens the app's group view and becomes the current one.
   await page.locator('#agents .agent-btn[data-key="group:g1"]').click();
   await page.getByText("Group g1").waitFor();
+  // A group tile's menu holds the app's `where: "group"` actions.
+  await page.evaluate(() => window.ark.action({ id: "g-del", label: "Delete", where: "group", run: ({ group }) => { window.deleted = group; } }));
+  await page.locator('#agents .agent-btn[data-key="group:g1"]').click({ button: "right" });
+  await page.locator(".popover .menu-item", { hasText: "Delete" }).click();
+  await page.waitForFunction(() => window.deleted?.id === "g1" && window.deleted.name === "Launch team");
   assert.equal(await page.locator('#agents .agent-btn[data-key="group:g1"]').getAttribute("aria-current"), "true");
   assert.ok(calls.some((call) => call.method === "groups"));
 }, { agents: agentRows(3) }));
@@ -703,4 +708,8 @@ test("an app with only its agents and none yet shows one New agent button", () =
   await start.click();
   await page.waitForFunction(() => /no-agents-new/.test(window.madeFrom || ""));
   await page.waitForFunction(() => !document.querySelector('#agents [data-key="ark"]'), null, { timeout: 2000 });
+  // Settings (or a chat from Search) opened from the start state replaces it.
+  await page.evaluate(() => window.ark.openSettings());
+  await page.locator("#stage").waitFor({ state: "visible" });
+  await page.locator("#no-agents").waitFor({ state: "hidden" });
 }, { agents: [] }));

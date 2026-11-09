@@ -434,7 +434,11 @@ export class Sidebar {
   menu(key) {
     const entry = this.find(key);
     if (!entry || !this.online) return [];
-    if (entry.group) return [{ label: "Delete", run: () => this.nav.deleteGroup?.(entry) }];
+    if (entry.group) {
+      const ctx = { group: { id: entry.id, name: entry.label } };
+      return registry.actions.filter((action) => action.where === "group" && (!action.when || action.when(ctx)))
+        .map((action) => ({ label: action.label, run: () => action.run(ctx, window.ark) }));
+    }
     const pinned = !entry.ark && this.pins().some(([project, name]) => project === entry.project && name === entry.name);
     return [
       !entry.program && { label: "New chat", run: () => this.nav.newChatWith(entry) },

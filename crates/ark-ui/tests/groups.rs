@@ -21,6 +21,8 @@ struct Script {
     failing: Mutex<Vec<String>>,
     asked: Mutex<Vec<String>>,
     seen: Mutex<Vec<(String, String)>>,
+    /// How long an agent's answer takes, in milliseconds.
+    slow_ms: std::sync::atomic::AtomicU64,
 }
 
 struct Model(Arc<Script>);
@@ -62,6 +64,10 @@ impl Provider for Model {
                 provider: "test".into(),
                 detail: "the model is down".into(),
             });
+        }
+        let slow = s.slow_ms.load(Ordering::SeqCst);
+        if slow > 0 {
+            tokio::time::sleep(Duration::from_millis(slow)).await;
         }
         let reply = s.replies.lock().unwrap().get(who).cloned();
         Ok(text(reply.unwrap_or_else(|| format!("{who} here"))))
@@ -324,4 +330,21 @@ async fn a_group_needs_two_live_agents() {
     assert!(t.host.call("group_create", one).await.is_err());
     let ghost = json!({ "name": "G", "members": [member(&t.project, "scout"), member(&t.project, "ghost")] });
     assert!(t.host.call("group_create", ghost).await.is_err());
+}
+
+#[tokio::test]
+async fn a_message_sent_while_a_member_answers_reaches_its_next_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path()).await;
+    t.script.slow_ms.store(600, Ordering::SeqCst);
+    t.send("@scout alpha").await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    t.send("@ana beta").await;
+    t.settle(4).await;
+    t.script.slow_ms.store(0, Ordering::SeqCst);
+    t.send("@scout gamma").await;
+    t.settle(6).await;
+    let seen = t.script.seen.lock().unwrap().clone();
+    let last = seen.iter().rev().find(|(who, _)| who == "Scout").unwrap();
+    assert!(last.1.contains("@ana beta"), "{}", last.1);
 }

@@ -137,6 +137,7 @@ const api = {
   // A code to sign in another device (Settings › Devices, ADR 0047).
   pairCode: () => transport.pairCode(),
   openSession: (id) => {
+    leaveStart();
     return openChatTab(id);
   },
   /// An agent's chat in the app's `agentConversation` view. `options` is `{ project,
@@ -1511,10 +1512,18 @@ const assistant = () => registry.newAgent?.assistant !== false;
 /// With no built-in assistant: no agent yet is one New agent button in the window; at start,
 /// the latest agent opens instead of the assistant's chat.
 let openedFirst = false;
+/// Settings, a search result or any view opened from the start state replaces it.
+let startLeft = false;
+function leaveStart() {
+  if (appEl.dataset.noAgents !== "true") return;
+  startLeft = true;
+  appEl.dataset.noAgents = "false";
+}
 async function agentsSettled(entries) {
   if (assistant()) return;
   const none = entries.length === 0;
-  appEl.dataset.noAgents = String(none);
+  if (!none) startLeft = false;
+  appEl.dataset.noAgents = String(none && !startLeft);
   if (none) {
     let start = $("#no-agents");
     if (!start) {
@@ -2138,6 +2147,7 @@ function retireResourceView(id, entry) {
 async function showView(id, params) {
   const v = id === SETTINGS ? settingsView : registry.views.get(id);
   if (!v) return toast(`No view named ${id}`);
+  leaveStart();
   const request = ++viewRequest;
   const previous = state.view && views.get(state.view);
   if (previous && state.view !== id && previous.ctl?.beforeRemove) {
@@ -2889,11 +2899,6 @@ async function start() {
     hasAgents: hasAgentView,
     loadAgents: () => transport.call("agents", { all: true }),
     loadGroups: () => groupView() ? transport.call("groups") : Promise.resolve([]),
-    deleteGroup: async (entry) => {
-      try { await transport.call("group_delete", { id: entry.id }); } catch (error) { toast(error.message || String(error)); return; }
-      if (state.view && state.view === groupView()) showConversation();
-      sidebar.refresh();
-    },
     assistant: () => registry.newAgent?.assistant !== false,
     arkName,
     arkFace,

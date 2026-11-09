@@ -618,7 +618,16 @@ impl Engine {
                 None => break,
             }
         }
+        // An agent's own folder that is gone (a drive away, moved) is an error, not an empty
+        // folder made in its place.
+        let own = p.as_ref().is_some_and(|x| x.parent.is_some());
         let configured = p.and_then(|p| p.workspace).map(std::path::PathBuf::from);
+        if let Some(dir) = configured.as_ref().filter(|d| own && !d.is_dir()) {
+            return Err(AgentError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} is not there", dir.display()),
+            )));
+        }
         let dir =
             configured.unwrap_or_else(|| self.store.root().join("workspaces").join(id.as_str()));
         std::fs::create_dir_all(&dir)?;

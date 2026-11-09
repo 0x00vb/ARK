@@ -4758,3 +4758,87 @@ async fn a_deleted_agent_and_its_chats_leave_the_phone() {
         assert_eq!(scouts(&listed), 0, "{path} still lists it: {listed}");
     }
 }
+
+#[tokio::test]
+async fn the_phone_names_a_new_agent_and_gives_it_a_pet() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let address = format!("127.0.0.1:{}", served.port);
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n");
+    let response = raw(served.port, get("/client/v1/hello")).await;
+    let hello: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let mutation = |counter: u64, operation: &str, target: &str, input: Value| {
+        json!({
+        "epoch": hello["mutationEpoch"], "counter": counter.to_string(), "operation": operation, "target": target,
+        "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())), "input": input,
+    }).to_string()
+    };
+    let first: u64 = hello["nextMutationCounter"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let create = mutation(first, "project.create", "", json!({"name":"Phone project"}));
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &create),
+    )
+    .await;
+    let receipt: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let project = receipt["resourceId"].as_str().unwrap();
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    // The phone names an agent the way the person typed it and gives it a pet.
+    let named = mutation(
+        first + 1,
+        "agent.create",
+        project,
+        json!({"name":"sales-bot", "role":"", "title":"Sales Bot", "look":"pebble-green"}),
+    );
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &named),
+    )
+    .await;
+    assert!(response.contains("\"completed\""), "{response}");
+    let made = store
+        .list_records("orch_agent", Some(project))
+        .unwrap()
+        .into_iter()
+        .find(|a| a["name"] == "sales-bot")
+        .unwrap();
+    assert_eq!(made["spec"]["title"], "Sales Bot");
+    assert_eq!(made["spec"]["look"], "pebble-green");
+    let too_long = mutation(
+        first + 2,
+        "agent.create",
+        project,
+        json!({"name":"other", "role":"", "look":"x".repeat(65)}),
+    );
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &too_long),
+    )
+    .await;
+    assert!(!response.contains("\"completed\""), "{response}");
+    let extra = mutation(
+        first + 3,
+        "agent.create",
+        project,
+        json!({"name":"other", "role":"", "colour":"red"}),
+    );
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &extra),
+    )
+    .await;
+    assert!(!response.contains("\"completed\""), "{response}");
+}

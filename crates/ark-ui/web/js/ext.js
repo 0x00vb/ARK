@@ -45,6 +45,7 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project" | "agent", when(ctx), run(ctx, api) })
 //                      `agent`: an item in an agent tile's menu (not ARK's); `ctx` is
 //                      `{ agent: { name, project, title } }`
+//                      `group`: an item in a group tile's menu; `ctx` is `{ group: { id, name } }`
 //                      `project`: an item in the chat's Folder menu (its details); `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })

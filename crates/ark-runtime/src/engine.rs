@@ -599,13 +599,17 @@ impl Engine {
 
     /// The on-disk workspace directory for a project's tools: the project's configured
     /// `workspace` if set, else a per-project scratch dir under the store root. Created if
-    /// absent. A child project (an orchestrated agent's) works in its top-level project's
-    /// folder, so changing that folder moves its agents too.
+    /// absent. A child project (an orchestrated agent's) works in its own folder when it has
+    /// one, else in the nearest one up its parents, so changing the top folder moves every
+    /// agent without a folder of its own.
     pub fn workspace_dir(&self, project: &ProjectId) -> Result<std::path::PathBuf, AgentError> {
         let mut id = project.clone();
         let mut p = self.store.get_project(&id)?;
         // Bounded: a parent chain is one or two levels deep.
         for _ in 0..8 {
+            if p.as_ref().is_some_and(|x| x.workspace.is_some()) {
+                break;
+            }
             match p.as_ref().and_then(|x| x.parent.clone()) {
                 Some(parent) => {
                     p = self.store.get_project(&parent)?;

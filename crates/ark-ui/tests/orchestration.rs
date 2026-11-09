@@ -1137,3 +1137,56 @@ async fn an_agent_in_another_folder_ends_and_comes_back_from_the_chat_in_view() 
             .is_err());
     }
 }
+
+#[tokio::test]
+async fn an_agent_gets_a_folder_of_its_own_and_gives_it_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let own = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let project = host.call("summary", json!({})).await.unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    host.call("spawn_agent", json!({"spec":{"name":"scout"}}))
+        .await
+        .unwrap();
+    let row = |all: Value| {
+        all.as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == "scout")
+            .cloned()
+            .unwrap()
+    };
+    let before = row(host.call("agents", json!({"all":true})).await.unwrap());
+    assert_eq!(before["own_folder"], false);
+
+    let set = host
+        .call(
+            "agent_folder",
+            json!({"agent":"scout","project":project,"path":own.path()}),
+        )
+        .await
+        .unwrap();
+    let canon = own.path().canonicalize().unwrap();
+    assert_eq!(set["folder"], json!(canon));
+    let after = row(host.call("agents", json!({"all":true})).await.unwrap());
+    assert_eq!(after["own_folder"], true);
+    assert_eq!(after["folder"], json!(canon.to_string_lossy()));
+
+    host.call(
+        "agent_folder",
+        json!({"agent":"scout","project":project,"path":null}),
+    )
+    .await
+    .unwrap();
+    let back = row(host.call("agents", json!({"all":true})).await.unwrap());
+    assert_eq!(back["own_folder"], false);
+    assert!(host
+        .call(
+            "agent_folder",
+            json!({"agent":"nobody","project":project,"path":null}),
+        )
+        .await
+        .is_err());
+}

@@ -4971,6 +4971,41 @@ impl Host {
                 }
                 Ok(json!({}))
             }
+            // The folder one agent works in: a path of its own, or null for its project's.
+            "agent_folder" => {
+                let project = s("project");
+                let agent = s("agent");
+                let top = self
+                    .engine
+                    .store
+                    .get_project(&ProjectId(project.clone()))?
+                    .filter(|p| p.parent.is_none())
+                    .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
+                let record = self
+                    .siblings
+                    .project_orchestrator(&top.id)?
+                    .agents()
+                    .into_iter()
+                    .find(|a| a.name == agent)
+                    .ok_or_else(|| anyhow::anyhow!("no agent `{agent}` in `{project}`"))?;
+                let scope = ProjectId(record.scope);
+                match params["path"].as_str() {
+                    Some(path) => {
+                        self.engine
+                            .set_workspace(&scope, std::path::Path::new(path))?;
+                    }
+                    None => {
+                        let mut p = self
+                            .engine
+                            .store
+                            .get_project(&scope)?
+                            .ok_or_else(|| anyhow::anyhow!("`{agent}` has no context"))?;
+                        p.workspace = None;
+                        self.engine.store.put_project(&p)?;
+                    }
+                }
+                Ok(json!({ "folder": self.engine.workspace_dir(&scope)? }))
+            }
             "sessions" if params["general"].as_bool() == Some(true) => {
                 Ok(serde_json::to_value(self.general_sessions()?)?)
             }

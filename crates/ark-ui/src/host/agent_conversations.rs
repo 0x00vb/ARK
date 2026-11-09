@@ -499,6 +499,11 @@ impl Host {
                 tasks_in.insert(project.to_string(), person_tasks(&self.engine, project)?);
             }
             let preview = latest_thread_title(&self.engine, agent, &tasks_in[project])?;
+            let own_folder = self
+                .engine
+                .store
+                .get_project(&ProjectId(agent.scope.clone()))?
+                .and_then(|p| p.workspace);
             rows.push((
                 agent.updated_ms,
                 json!({
@@ -514,6 +519,10 @@ impl Host {
                     "updated_ms": agent.updated_ms,
                     "preview": preview,
                     "program": agent.on_program(),
+                    "model": agent.spec.model,
+                    "description": agent.spec.description,
+                    "folder": own_folder.as_ref().or(entry.project.workspace.as_ref()),
+                    "own_folder": own_folder.is_some(),
                 }),
             ));
         }

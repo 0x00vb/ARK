@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-09
+
 Agent-first window (ADR 0109, ADR 0110).
 
 ### Added

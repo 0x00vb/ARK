@@ -211,6 +211,7 @@ export class Sidebar {
     this.agents = Array.isArray(rows) ? rows.filter((row) => row && typeof row.name === "string" && typeof row.project === "string") : [];
     if (first || reorder) this.order = null;
     this.draw();
+    this.nav.settled?.(this.arrange(this.entries()));
   }
 
   entries() {
@@ -220,9 +221,11 @@ export class Sidebar {
     const label = (agent) => agent.title || agent.name;
     const seen = new Map();
     for (const agent of shown) seen.set(label(agent).toLocaleLowerCase(), (seen.get(label(agent).toLocaleLowerCase()) || 0) + 1);
-    return [ark, ...shown.map((agent) => ({
+    const agents = shown.map((agent) => ({
       ...agent, look: typeof agent.look === "string" ? agent.look : "", key: agentKey(agent.project, agent.name), label: label(agent), twin: seen.get(label(agent).toLocaleLowerCase()) > 1,
-    }))];
+    }));
+    // An app whose + makes agents may leave the built-in assistant out: only its agents show.
+    return this.nav.assistant() ? [ark, ...agents] : agents;
   }
 
   pins() {
@@ -237,12 +240,12 @@ export class Sidebar {
     if (!this.order) {
       const rest = entries.filter((entry) => !entry.ark && !pinned.includes(entry.key))
         .sort((a, b) => (b.updated_ms || 0) - (a.updated_ms || 0) || a.label.localeCompare(b.label));
-      this.order = [ARK, ...pinned, ...rest.map((entry) => entry.key)];
+      this.order = [...(byKey.has(ARK) ? [ARK] : []), ...pinned, ...rest.map((entry) => entry.key)];
     } else {
       this.order = this.order.filter((key) => byKey.has(key));
       for (const entry of entries) if (!this.order.includes(entry.key)) this.order.push(entry.key);
     }
-    this.tiles = Math.min(this.order.length, Math.max(TILES, Math.min(MAX_TILES, 1 + pinned.length)));
+    this.tiles = Math.min(this.order.length, Math.max(TILES, Math.min(MAX_TILES, (byKey.has(ARK) ? 1 : 0) + pinned.length)));
     return this.order.map((key) => byKey.get(key));
   }
 

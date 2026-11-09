@@ -5,9 +5,11 @@
 // An identity is plain data an app or the chat itself supplies:
 //   { name, title?, description?, avatar(size) -> Node,
 //     model?: { label, mark?() -> Node, disabled?, open(anchor) },
-//     rename?(title) -> Promise, folder?: { name, path?, open?(anchor) },
+//     rename?(name) -> Promise, pet?: { open(anchor) },
+//     computer?: { name, open?(anchor) }, folder?: { name, path?, open?(anchor) },
 //     agent?: { name, project, conversation, program } }
-// `title` is what the chip says (the chat's title; `name` when it has none).
+// `title` is what the chip says (the chat's title; `name` when it has none). The pane's Name row
+// renames what `rename` names: the agent, or the chat when there is no agent.
 
 import { h, icon, clear } from "./dom.js";
 
@@ -77,16 +79,20 @@ export class Identity {
       // Same data, same pane: a redraw would drop the focus on a row and detach its open menu.
       const model = identity?.model;
       const folder = identity?.folder;
+      const computer = identity?.computer;
+      const named = identity ? (identity.agent ? identity.name : identity.title || identity.name) : "";
       const sig = identity ? JSON.stringify([identity.name, identity.description, model?.label, model?.disabled, model?.disabledReason, !!model?.mark,
-        identity.title, !!identity.rename, folder?.name, folder?.path, !!folder?.open]) : "";
+        named, !!identity.rename, !!identity.pet, computer?.name, !!computer?.open, folder?.name, folder?.path, !!folder?.open, identity.look]) : "";
       if (sig === drawn && el.firstChild) return;
       drawn = sig;
       const focused = el.contains(document.activeElement) ? document.activeElement.dataset.row : null;
       clear(el);
       if (!identity) return;
-      const title = identity.title || identity.name;
       el.append(...[
-        h("div.identity-face", identity.avatar(72)),
+        identity.pet
+          ? h("button.identity-face.identity-pet", { type: "button", "aria-label": "Pet", "aria-haspopup": "dialog", "data-row": "pet",
+            onclick: (event) => latest?.pet?.open(event.currentTarget) }, identity.avatar(72))
+          : h("div.identity-face", identity.avatar(72)),
         h("h2.identity-title", identity.name),
         identity.description ? h("p.identity-description", identity.description) : null,
         model ? h("button.identity-row", {
@@ -96,9 +102,15 @@ export class Identity {
           h("span.identity-row-label", "Model"),
           h("span.identity-row-value", model.mark?.() || null, h("span", model.label), icon("chevron-down"))) : null,
         h("button.identity-row", {
-          type: "button", disabled: !identity.rename, "data-row": "title", "aria-label": `Title: ${title}${identity.rename ? ", rename" : ""}`,
-          onclick: (event) => this.rename(event.currentTarget, latest),
-        }, h("span.identity-row-label", "Title"), h("span.identity-row-value", h("span", title))),
+          type: "button", disabled: !identity.rename, "data-row": "name", "aria-label": `Name: ${named}${identity.rename ? ", rename" : ""}`,
+          onclick: (event) => this.rename(event.currentTarget, latest, named),
+        }, h("span.identity-row-label", "Name"), h("span.identity-row-value", h("span", named))),
+        computer ? h("button.identity-row", {
+          type: "button", "aria-haspopup": computer.open ? "menu" : null, disabled: !computer.open, "data-row": "computer",
+          onclick: (event) => latest?.computer?.open?.(event.currentTarget),
+        },
+          h("span.identity-row-label", "Computer"),
+          h("span.identity-row-value", h("span", computer.name), computer.open ? icon("chevron-down") : null)) : null,
         folder ? h("button.identity-row", {
           type: "button", "aria-haspopup": folder.open ? "menu" : null, disabled: !folder.open, title: folder.path || null, "data-row": "folder",
           onclick: (event) => latest?.folder?.open?.(event.currentTarget),
@@ -113,12 +125,11 @@ export class Identity {
     return { dispose: () => this.redraws.delete(draw) };
   }
 
-  /// The title row turns into a field: Enter or leaving it saves, Escape keeps the old title.
-  rename(row, identity) {
+  /// The Name row turns into a field: Enter or leaving it saves, Escape keeps the old name.
+  rename(row, identity, before) {
     if (!identity?.rename) return;
-    const before = identity.title || identity.name;
-    const input = h("input.identity-input", { value: before, "aria-label": "Title", maxlength: "120" });
-    const editing = h("div.identity-row.editing", h("span.identity-row-label", "Title"), input);
+    const input = h("input.identity-input", { value: before, "aria-label": "Name", maxlength: "120" });
+    const editing = h("div.identity-row.editing", h("span.identity-row-label", "Name"), input);
     row.replaceWith(editing);
     input.focus();
     input.select();

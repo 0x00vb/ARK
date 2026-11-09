@@ -482,7 +482,7 @@ test("the title bar names who the chat is with and opens the details in the side
   await panel.waitFor();
   await shoot(page, "calm-details-pane");
   assert.equal(await panel.locator("h2").textContent(), "ARK");
-  assert.deepEqual(await panel.locator(".identity-row-label").allTextContents(), ["Model", "Title", "Folder"]);
+  assert.deepEqual(await panel.locator(".identity-row-label").allTextContents(), ["Model", "Name", "Folder"]);
   assert.deepEqual((await panel.locator(".identity-row-value").allTextContents()).slice(1), ["Quarterly review", "Operations"]);
   const model = panel.locator('.identity-row[data-row="model"]');
   assert.equal(await model.isEnabled(), true);
@@ -490,15 +490,15 @@ test("the title bar names who the chat is with and opens the details in the side
   await model.focus();
   await page.evaluate(() => window.ark.refreshViewTitle());
   assert.equal(await model.evaluate(el => document.activeElement === el), true, "a redraw with the same data keeps the focus");
-  // The folder menu changes the folder of all its chats or renames it; the title renames in place.
+  // The folder menu changes the folder of all its chats or renames it; Name renames the chat in place.
   await panel.locator('.identity-row[data-row="folder"]').click();
   await page.locator(".popover .menu-item").first().waitFor();
   assert.deepEqual(await page.locator(".popover .menu-item").allInnerTexts(), ["Change folder…\nAll chats in Operations", "Rename"]);
   await page.keyboard.press("Escape");
-  await panel.locator('.identity-row[data-row="title"]').click();
-  await panel.getByRole("textbox", { name: "Title" }).fill("Quarterly plan");
-  await panel.getByRole("textbox", { name: "Title" }).press("Enter");
-  await panel.locator('.identity-row[data-row="title"]').getByText("Quarterly plan").waitFor();
+  await panel.locator('.identity-row[data-row="name"]').click();
+  await panel.getByRole("textbox", { name: "Name" }).fill("Quarterly plan");
+  await panel.getByRole("textbox", { name: "Name" }).press("Enter");
+  await panel.locator('.identity-row[data-row="name"]').getByText("Quarterly plan").waitFor();
   await chip.click();
   await panel.waitFor({ state: "detached" });
   assert.equal(await chip.getAttribute("aria-expanded"), "false");

@@ -49,8 +49,10 @@ import { setAgentIdentity } from "./dom.js";
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.newChat({ open({ project, location, createChat }) })
 //     One consumer handler for explicit New chat actions. createChat keeps the captured origin.
-//   ark.newAgent({ open({ location }) })
+//   ark.newAgent({ open({ location, anchor }), assistant })
 //     What the sidebar's + does: make an agent and open its chat. Without it, + starts a chat.
+//     `assistant: false` leaves the built-in assistant out of the sidebar: the window opens
+//     the latest agent, or offers New agent when there is none.
 //
 //   ark.chatView(el, { submit(text), stop(), call(key, id), placeholder, model, files })
 //                      a conversation the app draws from its own records with the chat's
@@ -93,6 +95,7 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.searchSource({ id, load(project, api), open(entry, scopedApi) })
 //                      project search rows: { id, title, description?, updated_at? }.
 //                      Loading never navigates. Opening uses the selected project's API.
+//   ark.askFolder(anchor, title) the picker, or a typed path under `anchor` in a browser; null if dismissed
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The

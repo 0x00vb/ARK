@@ -82,6 +82,7 @@ const api = {
   // The system's folder picker in the window: a path, or null when dismissed. Undefined
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),
+  askFolder: (anchor, title) => askFolder(anchor, title),
   // Whether there is a folder picker (the window's own runtime).
   canPickFolder: transport.kind === "desktop",
   // The window's own view for the Browser panel (`show(rect, url)`, `act(action)`,
@@ -1487,16 +1488,39 @@ async function arkNewChat(project) {
 }
 
 /// The sidebar's +: the app makes an agent in the folder in view and opens its chat.
-async function newAgent() {
+async function newAgent(anchor = $("#new-agent")) {
   if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
   try {
-    await registry.newAgent.open({ location: { ...currentLocation() } });
+    await registry.newAgent.open({ location: { ...currentLocation() }, anchor });
   } catch (error) {
     toast(error.message || String(error));
   }
 }
 
 const arkName = () => state.summary?.name || "ARK";
+
+/// Whether the sidebar lists the built-in assistant (an app may show only its agents).
+const assistant = () => registry.newAgent?.assistant !== false;
+
+/// With no built-in assistant: no agent yet is one New agent button in the window; at start,
+/// the latest agent opens instead of the assistant's chat.
+let openedFirst = false;
+async function agentsSettled(entries) {
+  if (assistant()) return;
+  const none = entries.length === 0;
+  appEl.dataset.noAgents = String(none);
+  if (none) {
+    let start = $("#no-agents");
+    if (!start) {
+      start = h("div.no-agents#no-agents", h("button.btn.primary.no-agents-new", { type: "button", onclick: (e) => void newAgent(e.currentTarget) }, icon("plus"), "New agent"));
+      $(".main").append(start);
+    }
+    return;
+  }
+  if (openedFirst || state.agent || (state.view && views.get(state.view)?.ctl?.identity?.()?.agent)) return;
+  openedFirst = true;
+  await openEntry(entries[0]);
+}
 
 function arkFace(size) {
   return state.ui.logo
@@ -1559,6 +1583,7 @@ async function openEntry(entry, { newTab = false } = {}) {
 /// New chat with `entry`. An agent on an agent program has one chat: that one opens. Until an
 /// agent has its default chat, a new chat is that one (the phone shows only the default chat).
 async function newChatWith(entry) {
+  if ((!entry || entry.ark) && !assistant()) return newAgent();
   if (!entry || entry.ark) return arkNewChat();
   if (entry.program) return api.openAgentChat(entry.name, { project: entry.project });
   let chats;
@@ -2845,12 +2870,14 @@ async function start() {
     runtime: () => state.runtime,
     hasAgents: hasAgentView,
     loadAgents: () => transport.call("agents", { all: true }),
+    assistant: () => registry.newAgent?.assistant !== false,
     arkName,
     arkFace,
     arkFaceKey: () => state.ui.logo || "",
     open: (entry, options) => openEntry(entry, options),
     newChat: () => api.newSession(),
     newAgent: () => newAgent(),
+    settled: (entries) => void agentsSettled(entries),
     newChatWith,
     history: (entry) => openHistory(entry),
     openView: (id) => {

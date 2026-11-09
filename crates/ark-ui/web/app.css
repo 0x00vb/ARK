@@ -2591,3 +2591,14 @@ button.ticket-property:hover { background: var(--hover); }
 /* The composer carries no mode or model chip until one needs the person: a mode other than
    Auto, or no model yet. Shift+Tab still cycles the mode; the model lives in the chat's details. */
 .composer .model-chip:not([data-missing="true"]) { display: none; }
+
+/* An app with only its own agents and none yet: one New agent button where the chat would be. */
+.app[data-no-agents="true"] .main > :not(.topbar):not(#no-agents) { display: none; }
+.no-agents { display: none; }
+.app[data-no-agents="true"] .no-agents { display: grid; place-items: center; flex: 1; }
+.no-agents-new { display: inline-flex; align-items: center; gap: 8px; }
+
+/* The details pane's face is the pet picker when the agent has pets to pick from. */
+.identity-pet { border: 0; background: none; padding: 0; cursor: pointer; border-radius: 50%; transition: scale 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.identity-pet:active { scale: 0.96; }
+.identity-pet:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }

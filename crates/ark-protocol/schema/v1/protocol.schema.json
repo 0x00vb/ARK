@@ -115,6 +115,11 @@
         "asking": {
           "type": "boolean"
         },
+        "look": {
+          "default": "",
+          "description": "How the app draws the agent (an avatar key such as `\"arch-green\"`); empty when none.\nOlder runtimes leave it out.",
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },

@@ -409,7 +409,7 @@ Protocol1.11 adds an agent-first model for a phone. The runtime advertises `agen
 
 | Call | Shape |
 |---|---|
-| `GET /client/v1/agents` | `{"agents":[{project, project_name, name, title, role, state, asking, running, updated_ms, preview, program}]}`, the rows of host `agents {all:true}` |
+| `GET /client/v1/agents` | `{"agents":[{project, project_name, name, title, look, role, state, asking, running, updated_ms, preview, program}]}`, the rows of host `agents {all:true}`; `look` (0.43.0, ADR 0112) is the app's avatar key, empty when none, absent from older runtimes |
 | `GET /client/v1/agents/{project}/{name}/conversations` | `{"conversations":[{id, title, updated_at, turns, running, asking, default}]}`, newest first. Path segments are percent-decoded and checked. An unknown agent is `404` with code `agent_missing` |
 | Mutation `agent.conversation.start` | input `{project, agent}`. Idempotent per mutation id. The receipt's `resourceId` is the new conversation (session) id. `refused` for an agent on an agent program, `no_longer_applicable` for an agent that is gone |
 

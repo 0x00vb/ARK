@@ -129,6 +129,7 @@ public struct AgentCreateInput: Codable, Equatable, Sendable {
 
 public struct AgentRow: Codable, Equatable, Sendable {
     public let asking: Bool
+    public let look: String?
     public let name: String
     public let preview: String?
     public let program: Bool
@@ -142,6 +143,7 @@ public struct AgentRow: Codable, Equatable, Sendable {
 
     public init(
         asking: Bool,
+        look: String? = nil,
         name: String,
         preview: String? = nil,
         program: Bool,
@@ -154,6 +156,7 @@ public struct AgentRow: Codable, Equatable, Sendable {
         updated_ms: Int
     ) {
         self.asking = asking
+        self.look = look
         self.name = name
         self.preview = preview
         self.program = program

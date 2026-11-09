@@ -2,12 +2,15 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-09
+
 One sidebar like the owner's reference (ADR 0112).
 
 ### Added
 
 - `AgentSpec.look`: how the app draws an agent (an avatar key it chooses). In graph agent nodes and `agents {all}` rows. `ark.agentIdentity` resolvers get `(name, look)`.
 - `ark.newAgent({ open({ location }) })`: what the sidebar's + does. Without it + starts a chat.
+- Client protocol: `AgentRow` (`GET /client/v1/agents`) gains `look`, optional in the Swift bindings, so the iPhone can draw the same pet.
 - The sidebar's trailing edge resizes it (200 to 400 px, remembered), hides it when dragged under 150 px, resets on double click and moves with the arrow keys.
 
 ### Changed

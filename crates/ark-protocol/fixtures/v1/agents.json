@@ -5,6 +5,7 @@
       "project_name": "Research",
       "name": "researcher",
       "title": "Researcher",
+      "look": "arch-green",
       "role": "Acquisition research",
       "state": "idle",
       "asking": false,

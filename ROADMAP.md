@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.42.1**: the phone lists agents and their chats, starts one, and sends into the right chat (client protocol 1.11, ADR 0111). Before: v0.42.0: an agent has many chats that run at once, the window lists agents (ARK first) with Recent chats and `/history`, and an agent looks back at its other chats on request (`conversations.search`, `conversations.read`) (ADR 0109, ADR 0110). Before: v0.41.0, an agent sees pictures and checks what it changed. |
-| Consumers | ARK Desktop 0.12.x release train; the next Desktop pins v0.42.1; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
+| Stable release | **v0.43.0**: one sidebar (no rail), centered agent tiles, + makes an agent through the app, the edge resizes or hides the sidebar, and an agent has a look the app draws (ADR 0112). Before: v0.42.1: the phone lists agents and their chats, starts one, and sends into the right chat (client protocol 1.11, ADR 0111). Before: v0.42.0: an agent has many chats that run at once, the window lists agents (ARK first) with Recent chats and `/history`, and an agent looks back at its other chats on request (`conversations.search`, `conversations.read`) (ADR 0109, ADR 0110). Before: v0.41.0, an agent sees pictures and checks what it changed. |
+| Consumers | ARK Desktop 0.12.x release train; the next Desktop pins v0.43.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

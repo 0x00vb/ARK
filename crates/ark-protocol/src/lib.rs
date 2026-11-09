@@ -331,6 +331,10 @@ pub struct AgentRow {
     pub project_name: String,
     pub name: String,
     pub title: String,
+    /// How the app draws the agent (an avatar key such as `"arch-green"`); empty when none.
+    /// Older runtimes leave it out.
+    #[serde(default)]
+    pub look: String,
     pub role: String,
     pub state: String,
     pub asking: bool,

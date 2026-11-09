@@ -12,7 +12,11 @@
       "running": [],
       "updated_ms": 1762700000000,
       "preview": "Find three buyers",
-      "program": false
+      "program": false,
+      "model": null,
+      "description": "",
+      "folder": "/work/research",
+      "own_folder": false
     }
   ]
 }

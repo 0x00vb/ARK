@@ -129,13 +129,45 @@
         "asking": {
           "type": "boolean"
         },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "folder": {
+          "default": null,
+          "description": "The folder it works in, and whether that folder is its own rather than its project's.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": true,
         "look": {
           "default": "",
           "description": "How the app draws the agent (an avatar key such as `\"arch-green\"`); empty when none.\nOlder runtimes leave it out.",
           "type": "string"
         },
+        "model": {
+          "default": null,
+          "description": "Its model (`provider:model`); none: the runtime's default. Older runtimes leave it out.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "own_folder": {
+          "default": false,
+          "type": "boolean"
+        },
+        "place": {
+          "description": "The computer it runs on when that is not this runtime (a link name).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "preview": {
           "type": [
@@ -160,6 +192,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "session": {
+          "description": "The chat there that reaches it, and that chat's location.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "state": {
           "type": "string"

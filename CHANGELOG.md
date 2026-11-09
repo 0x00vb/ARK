@@ -8,13 +8,12 @@
 - `ark.newAgent({ open, assistant: false })`: only the app's agents and groups in the sidebar, the latest opens at start, one New agent button when there is none; `open` gets `anchor`. `ark.askFolder(anchor, title)`.
 - A view with `groupConversation: true` makes the sidebar list `groups` as tiles. `ark.chatView` turns take `author`.
 - Client protocol: `AgentCreateInput` gains optional `title` and `look`.
-
+- An agent runs on a computer the person picks (ADR 0114): window call `agent_move {agent, project, place}`; `agents {all}` rows of agents on other computers carry `place`, `session` and `location`; they work through the held-chat resource routes, and show as remembered when their computer does not answer.
 - Group chats (ADR 0113): window calls `groups`, `group_create`, `group_update`, `group_delete`, `group_messages`, `group_send` and event `ark:group`. A message goes to the `@Name` members, else the only member, else one router call, else the last speaker. Replies that name `@Other` hand on, at most 6 per message. The rules are in `ark_interact::groups`.
 
 ### Changed
 
 - The details pane's Title row is now Name: it renames the agent (or the chat when there is no agent).
-- An agent runs on a computer the person picks (ADR 0114 draft): window call `agent_move {agent, project, place}`; `agents {all}` rows of agents on other computers carry `place`, `session` and `location`; they work through the held-chat resource routes, and show as remembered when their computer does not answer.
 
 ## [0.43.1] - 2026-11-09
 

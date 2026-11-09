@@ -135,41 +135,62 @@ public struct AgentCreateInput: Codable, Equatable, Sendable {
 
 public struct AgentRow: Codable, Equatable, Sendable {
     public let asking: Bool
+    public let description: String?
+    public let folder: String?
+    public let location: JSONValue?
     public let look: String?
+    public let model: String?
     public let name: String
+    public let own_folder: Bool?
+    public let place: String?
     public let preview: String?
     public let program: Bool
     public let project: String
     public let project_name: String
     public let role: String
     public let running: [String]
+    public let session: String?
     public let state: String
     public let title: String
     public let updated_ms: Int
 
     public init(
         asking: Bool,
+        description: String? = nil,
+        folder: String? = nil,
+        location: JSONValue? = nil,
         look: String? = nil,
+        model: String? = nil,
         name: String,
+        own_folder: Bool? = nil,
+        place: String? = nil,
         preview: String? = nil,
         program: Bool,
         project: String,
         project_name: String,
         role: String,
         running: [String],
+        session: String? = nil,
         state: String,
         title: String,
         updated_ms: Int
     ) {
         self.asking = asking
+        self.description = description
+        self.folder = folder
+        self.location = location
         self.look = look
+        self.model = model
         self.name = name
+        self.own_folder = own_folder
+        self.place = place
         self.preview = preview
         self.program = program
         self.project = project
         self.project_name = project_name
         self.role = role
         self.running = running
+        self.session = session
         self.state = state
         self.title = title
         self.updated_ms = updated_ms

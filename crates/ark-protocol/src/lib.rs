@@ -342,6 +342,24 @@ pub struct AgentRow {
     pub updated_ms: u64,
     pub preview: Option<String>,
     pub program: bool,
+    /// Its model (`provider:model`); none: the runtime's default. Older runtimes leave it out.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    /// The folder it works in, and whether that folder is its own rather than its project's.
+    #[serde(default)]
+    pub folder: Option<String>,
+    #[serde(default)]
+    pub own_folder: bool,
+    /// The computer it runs on when that is not this runtime (a link name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
+    /// The chat there that reaches it, and that chat's location.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

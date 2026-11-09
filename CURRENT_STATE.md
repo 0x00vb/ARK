@@ -7,7 +7,9 @@
 | Found from | The owner's review of 0.42.0 with a reference screenshot |
 | Gates | `scripts/ci.sh` passes. Web fixtures: agent-sidebar 22 of 22 (4 new, each failing without its change where checked), project-work 23 of 23, work-state, vm-module 22 of 22. Implementation review (qa, Haiku): 7 majors, all fixed |
 | Dogfood | Desktop `--serve --tokens` on a copy of the owner's store: + made Agent 1 to 3 with pets, rename and pet saved (`look` read back from the store) |
-| Release | Owner OK 2026-11-09. Tag v0.43.0 over v0.42.1; Desktop 0.14.0 pins it |
+| Release | Owner OK 2026-11-09. Tag v0.43.0 on origin and github. Release commit: `ci.sh` passes, page suite 66 of 68 (the 2 on the v0.36.0 to v0.42.0 known list). `verify-release.sh v0.43.0` passes from a fresh clone, every step |
+| Consumer | Desktop 0.14.0 pins this tag; published 2026-11-09 |
+| Also | Client protocol `AgentRow` gains `look` (optional in Swift), found by v0.42.1's route test after the rebase |
 | Not done | Native window not opened by hand. iPhone does not draw `look` yet |
 | Evidence | `../board/evidence/agent-sidebar-20261109/` |
 

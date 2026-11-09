@@ -3843,14 +3843,17 @@ impl Inner {
             profile.core_actions.push(skills::READ.into());
         }
         if recall {
-            // An app's capability catalog does not name it, so it is loaded, not discovered.
+            // Its excerpts are shown whole. Under an app's capability catalog the index does not
+            // list it, so it is loaded; otherwise the index line is enough and cheaper.
             profile
                 .distillers
                 .push(ark_runtime::conversations::distiller());
-            profile.core_actions.extend([
-                ark_runtime::conversations::SEARCH.into(),
-                ark_runtime::conversations::READ.into(),
-            ]);
+            if !profile.capabilities.is_empty() {
+                profile.core_actions.extend([
+                    ark_runtime::conversations::SEARCH.into(),
+                    ark_runtime::conversations::READ.into(),
+                ]);
+            }
         }
         for d in per_agent_distillers {
             profile.distillers.push(d);

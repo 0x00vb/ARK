@@ -552,13 +552,16 @@ impl Ark {
             p.core_actions.push(skills::READ.into());
         }
         if recall {
-            // An app's capability catalog does not name it, so it is loaded, not discovered.
+            // Its excerpts are shown whole. Under an app's capability catalog the index does not
+            // list it, so it is loaded; otherwise the index line is enough and cheaper.
             let p = profile.to_mut();
             p.distillers.push(ark_runtime::conversations::distiller());
-            p.core_actions.extend([
-                ark_runtime::conversations::SEARCH.into(),
-                ark_runtime::conversations::READ.into(),
-            ]);
+            if !p.capabilities.is_empty() {
+                p.core_actions.extend([
+                    ark_runtime::conversations::SEARCH.into(),
+                    ark_runtime::conversations::READ.into(),
+                ]);
+            }
         }
         // What work this chat set up has posted since its last answer.
         session.read_posts(&self.engine)?;
@@ -970,10 +973,12 @@ impl Ark {
         if recall {
             let p = profile.to_mut();
             p.distillers.push(ark_runtime::conversations::distiller());
-            p.core_actions.extend([
-                ark_runtime::conversations::SEARCH.into(),
-                ark_runtime::conversations::READ.into(),
-            ]);
+            if !p.capabilities.is_empty() {
+                p.core_actions.extend([
+                    ark_runtime::conversations::SEARCH.into(),
+                    ark_runtime::conversations::READ.into(),
+                ]);
+            }
         }
         Ok(self
             .harness_with(router)

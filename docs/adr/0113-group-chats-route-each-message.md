@@ -1,6 +1,6 @@
 # 0113. Group chats route each message
 
-Status: Proposed. Date: 2026-11-09.
+Status: Accepted. Date: 2026-11-09.
 
 ## Context
 

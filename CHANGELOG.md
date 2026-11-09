@@ -4,7 +4,16 @@
 
 ### Added
 
-- Group chats (ADR 0113 draft): window calls `groups`, `group_create`, `group_update`, `group_delete`, `group_messages`, `group_send` and event `ark:group`. A message goes to the `@Name` members, else the only member, else one router call, else the last speaker. Replies that name `@Other` hand on, at most 6 per message. The rules are in `ark_interact::groups`.
+- An agent's details (ADR 0115): rows Name, Model, Computer (`identity.computer`), Folder; the face picks the pet (`identity.pet`). Window call `agent_folder {project, agent, path|null}` gives one agent a folder of its own (`Engine::workspace_dir` takes the nearest folder up the chain); `agents {all}` rows carry `folder`, `own_folder`, `model`, `description`.
+- `ark.newAgent({ open, assistant: false })`: only the app's agents and groups in the sidebar, the latest opens at start, one New agent button when there is none; `open` gets `anchor`. `ark.askFolder(anchor, title)`.
+- A view with `groupConversation: true` makes the sidebar list `groups` as tiles. `ark.chatView` turns take `author`.
+- Client protocol: `AgentCreateInput` gains optional `title` and `look`.
+
+- Group chats (ADR 0113): window calls `groups`, `group_create`, `group_update`, `group_delete`, `group_messages`, `group_send` and event `ark:group`. A message goes to the `@Name` members, else the only member, else one router call, else the last speaker. Replies that name `@Other` hand on, at most 6 per message. The rules are in `ark_interact::groups`.
+
+### Changed
+
+- The details pane's Title row is now Name: it renames the agent (or the chat when there is no agent).
 
 ## [0.43.1] - 2026-11-09
 

@@ -159,4 +159,5 @@ Local integration decisions:
 - [0111-the-phone-lists-agents-and-their-chats](0111-the-phone-lists-agents-and-their-chats.md)
 - [0112-one-sidebar-and-an-agents-look](0112-one-sidebar-and-an-agents-look.md)
 - [0113-group-chats-route-each-message](0113-group-chats-route-each-message.md)
+- [0114-an-agent-runs-on-a-computer-the-person-picks](0114-an-agent-runs-on-a-computer-the-person-picks.md)
 - [0115-an-agents-details-hold-its-setup](0115-an-agents-details-hold-its-setup.md)

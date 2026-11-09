@@ -713,3 +713,17 @@ test("an app with only its agents and none yet shows one New agent button", () =
   await page.locator("#stage").waitFor({ state: "visible" });
   await page.locator("#no-agents").waitFor({ state: "hidden" });
 }, { agents: [] }));
+
+const lastAgent = agentRows(1, { twin: false });
+test("when the last agent goes, its chat gives way to the New agent start", () => fixture(async (page) => {
+  await page.evaluate(() => {
+    window.ark.newAgent({ assistant: false, open() {} });
+    window.ark.refreshSidebar();
+  });
+  await page.waitForFunction(() => window.opened.some((o) => o.name === "Mia"));
+  await page.locator("#stage").waitFor({ state: "visible" });
+  lastAgent.length = 0;
+  await page.evaluate(() => window.ark.refreshSidebar());
+  await page.locator("#no-agents button").waitFor({ state: "visible" });
+  await page.locator("#stage").waitFor({ state: "hidden" });
+}, { agents: lastAgent }));

@@ -1514,6 +1514,7 @@ const assistant = () => registry.newAgent?.assistant !== false;
 let openedFirst = false;
 /// Settings, a search result or any view opened from the start state replaces it.
 let startLeft = false;
+let hadAgents = false;
 function leaveStart() {
   if (appEl.dataset.noAgents !== "true") return;
   startLeft = true;
@@ -1522,8 +1523,14 @@ function leaveStart() {
 async function agentsSettled(entries) {
   if (assistant()) return;
   const none = entries.length === 0;
+  // The last agent gone (or none yet): the start state comes back.
   if (!none) startLeft = false;
+  if (none && hadAgents) startLeft = false;
+  hadAgents = !none;
   appEl.dataset.noAgents = String(none && !startLeft);
+  // A chat with an agent or group that is gone gives way to the start; Settings stays.
+  const shown = state.view && registry.views.get(state.view);
+  if (none && !startLeft && (shown?.agentConversation || shown?.groupConversation)) await showConversation(false);
   if (none) {
     let start = $("#no-agents");
     if (!start) {

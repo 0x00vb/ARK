@@ -1,6 +1,6 @@
 # 0114. An agent runs on a computer the person picks
 
-Status: Proposed. Date: 2026-11-09.
+Status: Accepted. Date: 2026-11-09.
 
 ## Context
 

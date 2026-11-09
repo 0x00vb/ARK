@@ -10,7 +10,8 @@
 | Evidence | `../board/evidence/agent-first-nav-20261109/` (PLAN, DESIGN, CONTRACT, gate logs, screens, dogfood) |
 | Not verified | A live model using recall; the native Desktop window by hand; a physical phone; iPhone client calls (session aiengineering-e9 adds `client/v1` on top) |
 | Live check | Owner OK: Haiku through `writer -p` on a scratch store. The first run showed recall missing (catalog apps index only tagged actions) and its results cut by the generic distiller; fixed (loaded with the turn, own distiller). Then Haiku called `conversations.search` and `conversations.read` and reported the earlier chat's figures. Logs `../board/evidence/agent-first-nav-20261109/live-haiku/` |
-| Next | Desktop pins v0.42.0 |
+| Consumer | Desktop 0.13.0 pins this tag; published 2026-11-09 |
+| Fresh clone | `verify-release.sh v0.42.0`: fmt, protocol, version, macOS 11 check, clippy and the whole workspace test suite pass; the run was then stopped by a SIGTERM before its release build and benchmark, which passed in the release tree |
 
 # Core 0.41.0 release
 

@@ -1065,7 +1065,8 @@ pub async fn control(
 ) -> anyhow::Result<ControlOutcome> {
     Ok(match c {
         Control::Spawn(spec) => ControlOutcome::Agent(Box::new(o.spawn(*spec).await?)),
-        Control::Submit { agent, task } => {
+        Control::Submit { agent, mut task } => {
+            task.person = true;
             if task.objective.trim().is_empty() {
                 anyhow::bail!("a task needs an objective");
             }

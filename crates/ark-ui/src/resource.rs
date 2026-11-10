@@ -157,6 +157,7 @@ pub enum ResourceOperationKind {
     MessageAgent,
     AgentConversations,
     AgentConversationStart,
+    AgentFolder,
     Profiles,
     Grants,
     GrantRemove,
@@ -298,6 +299,7 @@ impl ResourceOperationKind {
             | O::MessageAgent
             | O::AgentConversations
             | O::AgentConversationStart
+            | O::AgentFolder
             | O::Profiles
             | O::Grants
             | O::GrantRemove

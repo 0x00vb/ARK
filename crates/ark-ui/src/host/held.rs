@@ -885,7 +885,7 @@ impl Host {
             // The sidebar's agents and what moves or ends one are this runtime's, whichever
             // chat the window shows.
             "agents" if params["all"].as_bool() == Some(true) => None,
-            "agent_move" | "agent_end" | "agent_restore" => None,
+            "agent_move" | "agent_end" | "agent_restore" | "agent_folder" => None,
             // Explicitly window-local or relationship-wide. This is the complete fallthrough
             // set while a held chat is shown; adding a host method requires classifying it.
             "hello"

@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-09
+
+Fixes from the owner's first day on 0.44.0: a moved agent's Stop, model list and folder; a one-row composer (ADR 0114 and ADR 0115 amendments).
+
+### Added
+
+- An agent keeps the role its person gives it in chat: `role.set` stores `AgentSpec.standing` (4000 characters), and the agent's next message starts from it (ADR 0116). Offered only in turns the person started.
+- `ark.hiddenFolders()`: the folders the person removed from the sidebar, so an app leaves their agents out of its own lists.
+- `agent_folder` on an agent that runs on another computer changes its folder there (resource op `agent_folder`); that computer checks the path. `agents {all}` rows of such agents carry that computer's `folder` and `own_folder`.
+
+### Breaking
+
+- `AgentSpec` gains `standing`, `TaskSpec` and `TaskRecord` gain `person`: a struct literal adds `standing: String::new()` / `person: false`, or ends with `..Default::default()` (for `TaskSpec`) or uses `AgentSpec::new`.
+
+### Changed
+
+- The composer is one row: + on the left, the text, then the microphone and Send. Long text grows the row; the buttons stay on its last line.
+- The sidebar's round buttons (Search, +, Settings, an app's views) share one size and one icon size, with a mouse and on touch.
+- `cancel_task` asks the task to stop and answers within 3 s: `{stopping: true}` while a step that cannot be cut short still runs. A Stop on an agent on another computer no longer times out.
+- `agent_move` keeps the agent's model only when the other computer offers it (or does not answer); otherwise the agent uses that computer's default.
+- `agent_folder` refuses a path that is not absolute.
+
 ## [0.44.0] - 2026-11-09
 
 An agent's details hold its setup, apps may list only their agents, group chats, an agent runs on a computer the person picks (ADR 0113, ADR 0114, ADR 0115).

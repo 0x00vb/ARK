@@ -76,6 +76,9 @@ const MAX_IMAGES: usize = 8;
 const MAX_IMAGE_BYTES: usize = 3_500_000;
 const MAX_IMAGES_BYTES: usize = 20_000_000;
 
+/// How long a stop waits for the task to end before it answers that it is stopping.
+const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 mod copying;
 mod groups;
 mod held;
@@ -2334,6 +2337,66 @@ impl Host {
         orchestrator.ok_or_else(|| anyhow::anyhow!("this app runs a single agent"))
     }
 
+    /// What a request asks of an agent's folder: a full path sets it, `null` goes back to the
+    /// project's, and an absent `path` clears it only when `absent_clears` (the older call).
+    pub(super) fn folder_change(
+        path: Option<&Value>,
+        absent_clears: bool,
+    ) -> anyhow::Result<Option<Option<&str>>> {
+        match path {
+            None if absent_clears => Ok(Some(None)),
+            None => Ok(None),
+            Some(Value::Null) => Ok(Some(None)),
+            Some(Value::String(p)) => {
+                anyhow::ensure!(
+                    std::path::Path::new(p).is_absolute(),
+                    "give the folder's full path, starting with /"
+                );
+                Ok(Some(Some(p.as_str())))
+            }
+            Some(_) => anyhow::bail!("the folder is a path, or null for the project's"),
+        }
+    }
+
+    /// An agent's folder on this computer. `change`: `Some(Some(path))` sets it, `Some(None)`
+    /// goes back to the project's, `None` only reads it.
+    pub(super) fn agent_folder_of(
+        &self,
+        o: &Orchestrator,
+        agent: &str,
+        change: Option<Option<&str>>,
+    ) -> anyhow::Result<Value> {
+        let record = o
+            .agents()
+            .into_iter()
+            .find(|a| a.name == agent)
+            .ok_or_else(|| anyhow::anyhow!("no agent `{agent}` in `{}`", o.project().id))?;
+        let scope = ProjectId(record.scope);
+        match change {
+            Some(Some(path)) => {
+                self.engine
+                    .set_workspace(&scope, std::path::Path::new(path))?;
+            }
+            Some(None) => {
+                let mut p = self
+                    .engine
+                    .store
+                    .get_project(&scope)?
+                    .ok_or_else(|| anyhow::anyhow!("`{agent}` has no context"))?;
+                p.workspace = None;
+                self.engine.store.put_project(&p)?;
+            }
+            None => {}
+        }
+        let own = self
+            .engine
+            .store
+            .get_project(&scope)?
+            .and_then(|p| p.workspace)
+            .is_some();
+        Ok(json!({ "folder": self.engine.workspace_dir(&scope)?, "own_folder": own }))
+    }
+
     async fn control_on(
         &self,
         orchestrator: &Orchestrator,
@@ -3231,6 +3294,11 @@ impl Host {
             O::AgentConversations => Ok(serde_json::to_value(
                 self.resource_orchestrator(&r).await?.threads(&s("agent"))?,
             )?),
+            O::AgentFolder => {
+                let o = self.resource_orchestrator(&r).await?;
+                let change = Self::folder_change(input.get("path"), false)?;
+                self.agent_folder_of(&o, &s("agent"), change)
+            }
             O::AgentConversationStart => Ok(json!({
                 "conversation": self.resource_orchestrator(&r).await?.start_thread(&s("agent"))?,
             })),
@@ -3502,7 +3570,8 @@ impl Host {
             O::WorkAdmit => {
                 let o = self.resource_orchestrator(&r).await?;
                 let target = serde_json::from_value(input["target"].clone())?;
-                let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                let mut task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                task.person = true;
                 let receipt = if let Some(receipt) = input["receipt"].as_str() {
                     o.admit_work_followup(target, task, "manual", &s("request_id"), receipt)
                         .await?
@@ -3824,7 +3893,8 @@ impl Host {
                             .all(|key| matches!(key.as_str(), "objective" | "context" | "thread")),
                         "idempotent chat turns accept only objective, context and thread"
                     );
-                    let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                    let mut task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                    task.person = true;
                     anyhow::ensure!(
                         !task.objective.trim().is_empty(),
                         "a task needs an objective"
@@ -3862,6 +3932,15 @@ impl Host {
                 } else {
                     Control::Retry { task: s("task") }
                 };
+                if operation.kind == O::CancelTask {
+                    // The stop is requested at once; a turn that cannot be cut short (a model
+                    // call that has to finish) ends later, and the caller must not wait for it.
+                    let cancel = self.control_on(&o, control);
+                    return match tokio::time::timeout(CANCEL_WAIT, cancel).await {
+                        Ok(done) => done.map(|_| json!({})),
+                        Err(_) => Ok(json!({ "stopping": true })),
+                    };
+                }
                 self.control_on(&o, control).await?;
                 Ok(json!({}))
             }
@@ -4986,36 +5065,18 @@ impl Host {
             "agent_folder" => {
                 let project = s("project");
                 let agent = s("agent");
+                let path = Self::folder_change(params.get("path"), true)?.flatten();
+                if let Some(answer) = self.placed_folder(&project, &agent, path).await? {
+                    return Ok(answer);
+                }
                 let top = self
                     .engine
                     .store
                     .get_project(&ProjectId(project.clone()))?
                     .filter(|p| p.parent.is_none())
                     .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
-                let record = self
-                    .siblings
-                    .project_orchestrator(&top.id)?
-                    .agents()
-                    .into_iter()
-                    .find(|a| a.name == agent)
-                    .ok_or_else(|| anyhow::anyhow!("no agent `{agent}` in `{project}`"))?;
-                let scope = ProjectId(record.scope);
-                match params["path"].as_str() {
-                    Some(path) => {
-                        self.engine
-                            .set_workspace(&scope, std::path::Path::new(path))?;
-                    }
-                    None => {
-                        let mut p = self
-                            .engine
-                            .store
-                            .get_project(&scope)?
-                            .ok_or_else(|| anyhow::anyhow!("`{agent}` has no context"))?;
-                        p.workspace = None;
-                        self.engine.store.put_project(&p)?;
-                    }
-                }
-                Ok(json!({ "folder": self.engine.workspace_dir(&scope)? }))
+                let o = self.siblings.project_orchestrator(&top.id)?;
+                self.agent_folder_of(&o, &agent, Some(path))
             }
             "sessions" if params["general"].as_bool() == Some(true) => {
                 Ok(serde_json::to_value(self.general_sessions()?)?)

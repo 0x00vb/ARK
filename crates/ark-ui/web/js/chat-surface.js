@@ -19,8 +19,9 @@ export function createChatSurface({ kind = "secondary", session, capabilities = 
   const place = primary ? h("button.chip.place-chip", { id: "place-chip", type: "button", hidden: true }) : null;
   const context = primary ? h("button.ctx-meter", { id: "ctx-ring", type: "button", title: "Context" }) : null;
   const send = h("button.send", { ...id("send"), type: "submit", "aria-label": "Send" });
-  const form = h("form.composer", { ...id("composer"), autocomplete: "off" }, input, dictationStatus,
-    h("div.composer-bar", attach, mic, model, place, context, actions, send));
+  // One row: + on the left, the text, then the microphone and Send (the text grows the row).
+  const form = h("form.composer", { ...id("composer"), autocomplete: "off" }, dictationStatus,
+    h("div.composer-bar", attach, input, mic, model, place, context, actions, send));
   const placeLine = primary ? h("div.place-line", { id: "place-line", role: "status", hidden: true }) : null;
   const plans = primary ? h("div.plans", { id: "plans" }) : null;
   const dock = h("div.dock", placeLine, plans, uploads, queue, slash, form);

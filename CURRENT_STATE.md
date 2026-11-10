@@ -1,3 +1,14 @@
+# Core 0.45.0 release: fixes from the owner's first day on 0.44.0, an agent keeps the role it is told (2026-11-09)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.45.0 (2026-11-09), over v0.44.0 (cc27fbe). ADR 0114 and 0115 amendments, ADR 0116 (an agent keeps the role its person gives it) |
+| Change | One-row composer; a new group offers only the sidebar's agents (`ark.hiddenFolders()`); the sidebar's round buttons share one size (mouse and touch). Agents on another computer: `cancel_task` answers within 3 s (`stopping`), `agent_folder` acts on that computer (absolute path, checked there), `agent_move` keeps a model the target offers, the listing asks every computer at once. ADR 0116: `role.set` and `AgentSpec.standing`, offered only on the person's own turns and only as the first call of the turn, no card |
+| Found from | The owner on 2026-11-09: deleted agents in the group picker (a hidden folder's agents), composer not like the reference, a slow "hi" and a dead Stop on an agent moved to a second Mac, "Checking…" stuck, folder should be on the server, button sizes; then: tell a new agent its role in chat, no UI |
+| Gates | fmt, clippy `-D warnings`; workspace tests 1571 of 1571 (then `ark-ui` + `ark-orchestrate` 534 of 534 after the last review fixes); node 22 of 22; WebKit fixtures 139 of 139; page suite: see below; simulated benchmark no delta. Three implementation reviews and one plan review (qa); blockers fixed with tests that fail without them |
+| Not verified | A real second computer (Stop, model list, folder); a live model calling `role.set` at the right moment and not for a one-off request (needs the owner's OK); the native window by hand |
+| Evidence | `../board/evidence/agent-fixes-20261110/` |
+
 # Core 0.44.0 release: agent details, groups, an agent's computer (2026-11-09)
 
 | Release state | Value |

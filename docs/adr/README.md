@@ -161,3 +161,4 @@ Local integration decisions:
 - [0113-group-chats-route-each-message](0113-group-chats-route-each-message.md)
 - [0114-an-agent-runs-on-a-computer-the-person-picks](0114-an-agent-runs-on-a-computer-the-person-picks.md)
 - [0115-an-agents-details-hold-its-setup](0115-an-agents-details-hold-its-setup.md)
+- [0116-an-agent-keeps-the-role-its-person-gives-it](0116-an-agent-keeps-the-role-its-person-gives-it.md)

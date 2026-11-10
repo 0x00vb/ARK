@@ -1559,6 +1559,53 @@ impl Inner {
         }
     }
 
+    /// Replace an agent's standing role. The next task builds its profile from it; a task
+    /// that already runs keeps its prompt.
+    pub(crate) fn set_standing(&self, name: &str, text: &str) -> Result<String, OrchError> {
+        let text = text.trim();
+        if text.chars().count() > crate::spec::STANDING_MAX_CHARS {
+            return Err(OrchError::NotAllowed(format!(
+                "the role is at most {} characters",
+                crate::spec::STANDING_MAX_CHARS
+            )));
+        }
+        let record = {
+            let mut st = self.state.lock().unwrap();
+            let a = st
+                .agents
+                .get_mut(name)
+                .ok_or_else(|| OrchError::UnknownAgent(name.into()))?;
+            a.record.spec.standing = text.to_string();
+            a.record.updated_ms = now_ms();
+            a.record.clone()
+        };
+        self.save_agent(&record);
+        self.emit(EventKind::AgentSpawned {
+            agent: name.to_string(),
+            parent: record.spec.parent.clone(),
+            model: record.model.clone(),
+        });
+        Ok(record.spec.standing)
+    }
+
+    /// Whether the task already made a call before this `role.set`: any other tool, or an
+    /// earlier `role.set` (this call is already in the list).
+    pub(crate) fn read_before(&self, task: &str) -> bool {
+        self.state.lock().unwrap().tasks.get(task).is_none_or(|t| {
+            let own = t
+                .record
+                .tool_calls
+                .iter()
+                .filter(|c| c.action == tools::ROLE_SET)
+                .count();
+            own > 1
+                || t.record
+                    .tool_calls
+                    .iter()
+                    .any(|c| c.action != tools::ROLE_SET)
+        })
+    }
+
     fn save_task(&self, r: &TaskRecord) {
         match serde_json::to_value(r) {
             Ok(v) => {
@@ -2357,6 +2404,11 @@ impl Inner {
         {
             return Err(OrchError::NotAllowed("display metadata is too long".into()));
         }
+        if spec.standing.chars().count() > crate::spec::STANDING_MAX_CHARS {
+            return Err(OrchError::NotAllowed(
+                "the standing role is too long".into(),
+            ));
+        }
         if !valid_name(&spec.name) {
             return Err(OrchError::NotAllowed(format!(
                 "`{}` is not a valid agent name (letters, digits, - _ .)",
@@ -2411,7 +2463,11 @@ impl Inner {
             .map(|a| a.record.clone());
         let record = match existing {
             Some(mut r) => {
+                let standing = std::mem::take(&mut r.spec.standing);
                 r.spec = spec.clone();
+                if r.spec.standing.is_empty() {
+                    r.spec.standing = standing;
+                }
                 r.model = models.model.clone();
                 r.account = models.account.clone();
                 if r.state == AgentState::Terminated {
@@ -3520,6 +3576,12 @@ impl Inner {
             who.push_str("Colleagues receive your brief and artifacts, never this conversation. Use agents.start for an independent conversation and return immediately. Use agents.delegate only when this turn needs its result; delegate independent subtasks together.");
         }
         p.prompts.instructions.push_str(&who);
+        if !spec.standing.trim().is_empty() {
+            p.prompts
+                .instructions
+                .push_str("\n\nThe person set your role:\n");
+            p.prompts.instructions.push_str(spec.standing.trim());
+        }
         let mut preload: Vec<&str> = Vec::new();
         if !delegates.is_empty() {
             preload.extend([tools::DELEGATE, tools::WAIT]);
@@ -3673,6 +3735,21 @@ impl Inner {
             spec.tools.iter().any(|p| action_matches(p, a))
                 && (task.run.is_none() || !a.starts_with("agents."))
         });
+        if task.person
+            && task.run.is_none()
+            && task.schedule.is_none()
+            && matches!(task.origin, crate::record::Origin::External)
+            && spec
+                .tools
+                .iter()
+                .any(|p| action_matches(p, tools::ROLE_SET))
+        {
+            registry.register(Arc::new(tools::RoleTools {
+                orch: self.me.clone(),
+                agent: owner.to_string(),
+                task: id.to_string(),
+            }));
+        }
         if task.run.is_none() {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),

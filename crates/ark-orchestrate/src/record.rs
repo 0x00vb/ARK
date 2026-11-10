@@ -324,6 +324,9 @@ pub struct TaskRecord {
     #[serde(default)]
     pub context: String,
     pub origin: Origin,
+    /// The person typed it in a chat ([`crate::TaskSpec::person`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
     /// The task that delegated this one.
     #[serde(default)]
     pub parent: Option<String>,
@@ -450,6 +453,7 @@ impl TaskRecord {
             objective: spec.objective.clone(),
             context: spec.context.clone(),
             origin,
+            person: spec.person,
             parent: None,
             children: Vec::new(),
             after: spec.after.clone(),

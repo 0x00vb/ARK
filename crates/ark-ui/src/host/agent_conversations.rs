@@ -328,6 +328,7 @@ impl Host {
         let body = request.input["body"].as_str().unwrap_or_default();
         let thread = thread_of_chat(&entry, &request.target);
         let mut spec = TaskSpec::new(body);
+        spec.person = true;
         if let Some(thread) = thread {
             let running = agent_threads(&self.engine, entry.project.id.as_str(), &entry.agent.name)
                 .map_err(|error| ClientMutationError::Store(error.into()))?

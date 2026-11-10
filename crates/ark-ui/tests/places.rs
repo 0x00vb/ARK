@@ -28,6 +28,11 @@ impl Adapter for Notes {
             ActionDescriptor::new("notes.save", "save the notes", RiskTier::Mutate),
             ActionDescriptor::new("notes.read", "read the notes slowly", RiskTier::Read),
             ActionDescriptor::new("notes.jot", "jot a line in the project", RiskTier::Read),
+            ActionDescriptor::new(
+                "notes.stall",
+                "a call that cannot be cut short",
+                RiskTier::Read,
+            ),
         ]
     }
     async fn run(
@@ -40,6 +45,10 @@ impl Adapter for Notes {
             let dir = ctx.workspace.clone().expect("a project folder");
             std::fs::write(dir.join("jot.md"), "a line\n").unwrap();
             return Ok(ActionOutput::json(json!({ "ok": true })));
+        }
+        if action == "notes.stall" {
+            std::thread::sleep(Duration::from_secs(10));
+            return Ok(ActionOutput::json(json!({ "notes": "late" })));
         }
         if action == "notes.read" {
             tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -65,6 +74,8 @@ fn model(who: &'static str) -> Arc<MockProvider> {
             (String::new(), vec![call("notes.save")])
         } else if said("jot it down") && !called {
             (String::new(), vec![call("notes.jot")])
+        } else if said("stall it") && !called {
+            (String::new(), vec![call("notes.stall")])
         } else if said("read slowly") && !called {
             (String::new(), vec![call("notes.read")])
         } else if said("also the date") {
@@ -89,7 +100,7 @@ fn app(dir: &std::path::Path, who: &'static str, saves: Arc<AtomicUsize>) -> App
         .tool(Arc::new(Notes { saves }))
         .profile(
             AgentProfile::builder()
-                .core_actions(["notes.save", "notes.read", "notes.jot"])
+                .core_actions(["notes.save", "notes.read", "notes.jot", "notes.stall"])
                 .build(),
         )
         .provider(provider)
@@ -118,7 +129,7 @@ fn app_with_computer(
         .tool(Arc::new(Notes { saves }))
         .profile(
             AgentProfile::builder()
-                .core_actions(["notes.save", "notes.read", "notes.jot"])
+                .core_actions(["notes.save", "notes.read", "notes.jot", "notes.stall"])
                 .build(),
         )
         .provider(provider)
@@ -1094,8 +1105,10 @@ async fn worker_setup_runs_only_on_the_chats_runtime() {
     } else {
         first
     };
-    until("remote worker setup", async || remote_marker.is_file()).await;
-    assert_eq!(std::fs::read_to_string(&remote_marker).unwrap(), "remote");
+    until("remote worker setup", async || {
+        std::fs::read_to_string(&remote_marker).is_ok_and(|text| text == "remote")
+    })
+    .await;
     assert!(!local_marker.exists(), "the local setup must not run");
     resource_call(
         &a,
@@ -2506,4 +2519,311 @@ async fn a_moved_agent_stays_listed_while_its_server_is_away() {
         "vps",
         "nothing changed"
     );
+}
+
+/// Spawn `scout` here and move it to the server, with its chat shown.
+async fn moved_scout(a: &Arc<Host>, spec: Value) -> (String, String) {
+    let project = project_of(a).await;
+    resource_call(a, "project", "spawn_agent", "", json!({ "spec": spec }))
+        .await
+        .unwrap();
+    let moved = a
+        .call(
+            "agent_move",
+            json!({"agent":"scout","project":project,"place":"vps"}),
+        )
+        .await
+        .unwrap();
+    let session = moved["session"].as_str().unwrap().to_string();
+    a.call("open_session", json!({ "id": session }))
+        .await
+        .unwrap();
+    (project, session)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_moved_agents_turn_answers_before_the_turn_can_end() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (_b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    moved_scout(&a, json!({"name":"scout"})).await;
+    let sent = resource_call(
+        &a,
+        "project",
+        "submit_task",
+        "",
+        json!({"agent":"scout","task":{"objective":"stall it"}}),
+    )
+    .await
+    .unwrap();
+    let task = sent["task"].as_str().unwrap().to_string();
+    let state = async || {
+        resource_call(&a, "project", "task", "", json!({"task": task}))
+            .await
+            .unwrap()["task"]["state"]
+            .clone()
+    };
+    until("the turn to reach its call", async || {
+        resource_call(&a, "project", "graph", "", json!({}))
+            .await
+            .unwrap()["tasks"]
+            .to_string()
+            .contains("notes.stall")
+    })
+    .await;
+
+    let began = std::time::Instant::now();
+    let stop = resource_call(&a, "project", "cancel_task", "", json!({"task": task}))
+        .await
+        .expect("the stop is answered, not timed out");
+    assert!(
+        began.elapsed() < Duration::from_secs(6),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(stop["stopping"], true, "{stop}");
+    assert_eq!(state().await, "running", "the call is still going");
+    until("the turn to end cancelled", async || {
+        state().await == "cancelled"
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_agents_folder_is_a_folder_on_its_computer() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let (project, _) = moved_scout(&a, json!({"name":"scout"})).await;
+    let there = dir_b.path().join("notes");
+    std::fs::create_dir(&there).unwrap();
+    let there = std::fs::canonicalize(&there).unwrap();
+
+    let e = a
+        .call(
+            "agent_folder",
+            json!({"agent":"scout","project":project,"path":dir_b.path().join("missing")}),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("is not a folder"), "{e}");
+
+    let set = a
+        .call(
+            "agent_folder",
+            json!({"agent":"scout","project":project,"path":there}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(set["folder"], json!(there), "{set}");
+    let theirs = row_of(
+        &b.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert_eq!(theirs["folder"], json!(there), "B holds it: {theirs}");
+    assert_eq!(theirs["own_folder"], true);
+    let mine = row_of(
+        &a.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert_eq!(mine["place"], "vps");
+    assert_eq!(
+        mine["folder"],
+        json!(there),
+        "the row names B's folder: {mine}"
+    );
+    assert_eq!(mine["own_folder"], true);
+
+    a.call(
+        "agent_folder",
+        json!({"agent":"scout","project":project,"path":null}),
+    )
+    .await
+    .unwrap();
+    let back = row_of(
+        &a.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert_eq!(back["own_folder"], false, "{back}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_drops_a_model_the_computer_does_not_offer() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    moved_scout(
+        &a,
+        json!({"name":"scout","model":"ollama:no-such-model:1b"}),
+    )
+    .await;
+    let theirs = row_of(
+        &b.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert!(theirs["model"].is_null(), "runs on B's default: {theirs}");
+}
+
+/// An Ollama that lists one model, so that a computer's model list does not depend on this Mac.
+async fn fake_ollama() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    std::env::set_var(
+        "OLLAMA_HOST",
+        format!("http://{}", listener.local_addr().unwrap()),
+    );
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let body = r#"{"models":[{"name":"tiny:1b"}]}"#;
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_keeps_a_model_the_computer_offers() {
+    fake_ollama().await;
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    moved_scout(&a, json!({"name":"scout","model":"ollama:tiny:1b"})).await;
+    let theirs = row_of(
+        &b.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert_eq!(theirs["model"], "ollama:tiny:1b", "{theirs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agents_folder_is_a_full_path_or_null() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let _a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let project = project_of(&b).await;
+    resource_call(
+        &b,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"scout"}}),
+    )
+    .await
+    .unwrap();
+    let folder = std::fs::canonicalize(dir_b.path()).unwrap();
+    b.call(
+        "agent_folder",
+        json!({"agent":"scout","project":project,"path":folder}),
+    )
+    .await
+    .unwrap();
+    for path in [
+        json!("notes"),
+        json!("../x"),
+        json!(5),
+        json!(["/tmp"]),
+        json!(true),
+    ] {
+        let legacy = b
+            .call(
+                "agent_folder",
+                json!({"agent":"scout","project":project,"path":path}),
+            )
+            .await;
+        let op = resource_call(
+            &b,
+            "project",
+            "agent_folder",
+            "",
+            json!({"agent":"scout","path":path}),
+        )
+        .await;
+        for e in [legacy, op] {
+            let e = e.unwrap_err().to_string();
+            assert!(
+                e.contains("full path") || e.contains("is a path"),
+                "{path}: {e}"
+            );
+        }
+    }
+    let row = row_of(
+        &b.call("agents", json!({"all":true})).await.unwrap(),
+        "scout",
+    )
+    .unwrap();
+    assert_eq!(
+        row["own_folder"], true,
+        "a refused path changed nothing: {row}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_agent_folder_operation_stays_within_its_chats_project() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let _a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let first = project_of(&b).await;
+    b.call("add_project", json!({"name":"Second project"}))
+        .await
+        .unwrap();
+    resource_call(
+        &b,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"other"}}),
+    )
+    .await
+    .unwrap();
+    b.call("open_project", json!({"id": first})).await.unwrap();
+
+    // A chat of the first project holds no authority over the second project's agent.
+    let e = resource_call(&b, "project", "agent_folder", "", json!({"agent":"other"}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("no agent `other`"), "{e}");
+
+    // A reference to another project's location, or another kind of resource, is refused.
+    let mut location = b.call("summary", json!({})).await.unwrap()["location"].clone();
+    let call = |location: Value, kind: &str| {
+        let b = b.clone();
+        let kind = kind.to_string();
+        async move {
+            b.call(
+                "resource",
+                json!({
+                    "ref": { "location": location, "kind": kind, "id": "" },
+                    "operation": { "kind": "agent_folder", "input": { "agent": "scout" } },
+                }),
+            )
+            .await
+        }
+    };
+    let e = call(location.clone(), "terminal")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("is not valid"), "{e}");
+    let e = call(location.clone(), "file")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("is not valid"), "{e}");
+    location["runtime"] = json!("another-runtime");
+    let e = call(location, "project").await.unwrap_err().to_string();
+    assert!(e.contains("no linked chat owns that resource"), "{e}");
 }

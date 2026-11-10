@@ -83,6 +83,8 @@ const api = {
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),
   askFolder: (anchor, title) => askFolder(anchor, title),
+  // The folders the person removed from the sidebar: their agents are not offered anywhere.
+  hiddenFolders: () => [...hiddenProjects().keys()],
   // Whether there is a folder picker (the window's own runtime).
   canPickFolder: transport.kind === "desktop",
   // The window's own view for the Browser panel (`show(rect, url)`, `act(action)`,

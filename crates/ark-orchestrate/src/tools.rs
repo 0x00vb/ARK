@@ -35,6 +35,7 @@ pub const DELEGATE: &str = "agents.delegate";
 pub const WAIT: &str = "agents.wait";
 pub const MESSAGE: &str = "agents.message";
 pub const CREATE: &str = "agents.create";
+pub const ROLE_SET: &str = "role.set";
 pub const START: &str = "agents.start";
 pub const SCHEDULE: &str = "agents.schedule";
 pub const UNSCHEDULE: &str = "agents.unschedule";
@@ -52,6 +53,82 @@ const DONE_LISTED: usize = 5;
 /// Characters of a delegated task's result in the delegator's evidence card. The full result
 /// stays in the invocation (`get_evidence`).
 pub const RESULT_CHARS: usize = 2400;
+
+/// `role.set`: the agent's standing instructions, as its person gives them in chat. Registered
+/// only for a task the person typed (ADR 0116). It never touches `AgentSpec::role`.
+pub(crate) struct RoleTools {
+    pub orch: Weak<Inner>,
+    pub agent: String,
+    pub task: String,
+}
+
+#[async_trait::async_trait]
+impl Adapter for RoleTools {
+    fn name(&self) -> &str {
+        "role"
+    }
+
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            ROLE_SET,
+            "Set your standing instructions, kept for every later message: who you are or how you must always work, as the person just stated it. Pass the full text (merge any earlier text you keep); empty text clears it. Use it only when the person's own message says who you are or how you always work, never for a one-off request, and call it before any other tool. Then answer in one short line that you will.",
+            // It changes only this agent's own instructions, from the person's own words (the
+            // first call of the turn), so it never asks: the owner chose no card (ADR 0116).
+            RiskTier::Observe,
+        )
+        .volatile()
+        .with_input_schema(json!({
+            "type": "object",
+            "required": ["instructions"],
+            "properties": {
+                "instructions": { "type": "string", "maxLength": crate::spec::STANDING_MAX_CHARS }
+            }
+        }))]
+    }
+
+    async fn run(
+        &self,
+        action: &str,
+        input: Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        let text = input
+            .get("instructions")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AdapterError::bad_input(action, "instructions is text"))?;
+        if text.trim().chars().count() > crate::spec::STANDING_MAX_CHARS {
+            return Err(AdapterError::bad_input(
+                action,
+                format!(
+                    "instructions: at most {} characters",
+                    crate::spec::STANDING_MAX_CHARS
+                ),
+            ));
+        }
+        let orch = self
+            .orch
+            .upgrade()
+            .ok_or_else(|| AdapterError::Tool("the orchestrator is gone".into()))?;
+        if orch.read_before(&self.task) {
+            return Err(AdapterError::Tool(
+                "Set your role only from the person's own message, before reading anything else."
+                    .into(),
+            ));
+        }
+        let stored = orch
+            .set_standing(&self.agent, text)
+            .map_err(|e| AdapterError::Tool(e.to_string()))?;
+        let said = if stored.is_empty() {
+            "Standing instructions cleared from the person's next message.".to_string()
+        } else {
+            format!(
+                "Standing instructions kept from the person's next message (this turn keeps its prompt): {}",
+                crate::brief::clip(&stored, 300)
+            )
+        };
+        Ok(ActionOutput::json(json!({ "result": said })))
+    }
+}
 
 pub(crate) struct AgentTools {
     pub orch: Weak<Inner>,

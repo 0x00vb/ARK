@@ -541,6 +541,22 @@ test("the foot holds the person, who opens Settings, and the app's views as butt
   await shot(page, "sidebar-foot");
 }));
 
+for (const coarse of [false, true]) test(`the sidebar's round buttons share one size and one icon size (${coarse ? "touch" : "mouse"})`, () => fixture(async (page) => {
+  await page.evaluate(() => {
+    window.ark.setting({ id: "account", title: "Account", render(el) { el.textContent = "Account section"; } });
+    window.ark.view({ id: "board", title: "Board", nav: true, icon: "box", render(el) { el.textContent = "Board view"; } });
+  });
+  await page.locator('#sidebar-views [data-view="board"]').waitFor();
+  const sizes = await page.evaluate(() => ["#search-chats", "#new-agent", "#open-settings .account-avatar", '#sidebar-views [data-view="board"]'].map((selector) => {
+    const button = document.querySelector(selector);
+    const box = button.getBoundingClientRect();
+    const glyph = button.querySelector(".ico").getBoundingClientRect();
+    return { selector, box: `${box.width}x${box.height}`, icon: `${glyph.width}x${glyph.height}` };
+  }));
+  for (const size of sizes) assert.deepEqual({ box: size.box, icon: size.icon }, { box: sizes[0].box, icon: sizes[0].icon }, size.selector);
+  assert.equal(sizes[0].box, coarse ? "44x44" : "32x32");
+}, { coarse }));
+
 test("the sidebar edge resizes, remembers, hides past the minimum, and keys move it", () => fixture(async (page) => {
   const width = () => page.locator(".sidebar").evaluate((el) => Math.round(el.getBoundingClientRect().width));
   const grip = page.locator("#sidebar-grip");

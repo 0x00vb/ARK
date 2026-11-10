@@ -99,6 +99,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      project search rows: { id, title, description?, updated_at? }.
 //                      Loading never navigates. Opening uses the selected project's API.
 //   ark.askFolder(anchor, title) the picker, or a typed path under `anchor` in a browser; null if dismissed
+//   ark.hiddenFolders()  ids of the folders the person removed from the sidebar; leave their agents out
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The

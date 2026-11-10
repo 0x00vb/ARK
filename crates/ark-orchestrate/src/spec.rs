@@ -5,6 +5,9 @@ use ark_core::RuleBinding;
 use ark_runtime::AgentProfile;
 use serde::{Deserialize, Serialize};
 
+/// The longest [`AgentSpec::standing`], in characters.
+pub const STANDING_MAX_CHARS: usize = 4000;
+
 /// A logical agent: its identity, instructions, tools, permissions and model. Each agent
 /// gets its own context (a child project of the orchestrator's project) and its own model
 /// session.
@@ -26,6 +29,10 @@ pub struct AgentSpec {
     /// Its persona and method. Empty: the orchestrator's base profile instructions.
     #[serde(default)]
     pub instructions: String,
+    /// What the person told this agent to be or always do, kept as its own block after the
+    /// base instructions. At most [`STANDING_MAX_CHARS`] characters.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub standing: String,
     /// `provider:model` (`claude:sonnet`, `codex`, `ollama:qwen3:4b`). `None`: the
     /// orchestrator's default model.
     #[serde(default)]
@@ -100,6 +107,7 @@ impl AgentSpec {
             look: String::new(),
             role: String::new(),
             instructions: String::new(),
+            standing: String::new(),
             model: None,
             tools: all_tools(),
             delegates_to: Vec::new(),
@@ -120,6 +128,10 @@ impl AgentSpec {
     }
     pub fn instructions(mut self, i: impl Into<String>) -> Self {
         self.instructions = i.into();
+        self
+    }
+    pub fn standing(mut self, text: impl Into<String>) -> Self {
+        self.standing = text.into();
         self
     }
     pub fn model(mut self, spec: impl Into<String>) -> Self {
@@ -286,6 +298,10 @@ pub struct TaskSpec {
     /// default conversation. Conversations of one agent run at the same time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// The person typed this in a chat with the agent. Set by the front-end's send path only;
+    /// it decides whether the task is offered `role.set` (ADR 0116).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
 }
 
 impl TaskSpec {

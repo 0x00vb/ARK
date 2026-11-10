@@ -195,6 +195,7 @@ mod tests {
                 agent: "lead".into(),
                 task: "t-1".into(),
             },
+            person: false,
             parent: Some("t-1".into()),
             children: vec![],
             after: vec![],

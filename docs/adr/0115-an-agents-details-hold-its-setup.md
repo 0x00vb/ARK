@@ -30,3 +30,10 @@ composer"; "there shouldn't be a default agent ARK, it's the ones users create".
 
 - An app that opts out of the assistant gets no assistant tile, `/new` with no agent makes an agent.
 - An agent with its own folder works there for every chat; its earlier chats keep their files where they were written.
+
+## Amendment (2026-11-09): a one-row composer
+
+The owner chose a one-row composer: + on the left, the text, then the microphone and Send. Long
+text grows the row and the buttons stay on its last line. The text area moved inside
+`.composer-bar`; the chips keep their order after the microphone. `ark.hiddenFolders()` lets an
+app leave the agents of folders removed from the sidebar out of its own lists.

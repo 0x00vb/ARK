@@ -140,3 +140,19 @@ for (const [name, options] of [
     if (options.context) assert.ok((await box(page, "#ctx-ring")).right <= send.left, "the reading sits before send");
   }, options));
 }
+
+// One row like a pill: + on the left, the text, then the microphone and Send. Long text grows the
+// row and the buttons stay on its last line.
+test("the composer is one row: plus, the text, the microphone, send", async () => fixture(async (page) => {
+  await page.locator("#send").waitFor();
+  const rect = (selector) => page.locator(selector).evaluate((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, middle: r.top + r.height / 2 }; });
+  const [attach, input, mic, send, form] = await Promise.all(["#attach", "#input", "#dictate", "#send", "#composer"].map(rect));
+  assert.ok(attach.right <= input.left && input.right <= mic.left && mic.right <= send.left, "left to right: plus, text, microphone, send");
+  for (const button of [attach, mic, send]) assert.ok(Math.abs(button.middle - input.middle) < 1, "one line");
+  assert.ok(form.bottom - form.top <= 46, `a single line is a short pill (${form.bottom - form.top}px)`);
+  await page.locator("#input").fill("line\n".repeat(4) + "last");
+  const [grown, sendAfter, pill] = await Promise.all(["#input", "#send", "#composer"].map(rect));
+  assert.ok(grown.bottom - grown.top > 80, "the text grows the row");
+  assert.ok(pill.top <= grown.top && grown.bottom <= pill.bottom, "the pill holds all the text");
+  assert.ok(Math.abs(sendAfter.bottom - grown.bottom) < 6, "send stays on the last line");
+}));

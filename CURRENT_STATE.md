@@ -7,6 +7,8 @@
 | Found from | The owner on 2026-11-09: deleted agents in the group picker (a hidden folder's agents), composer not like the reference, a slow "hi" and a dead Stop on an agent moved to a second Mac, "Checking…" stuck, folder should be on the server, button sizes; then: tell a new agent its role in chat, no UI |
 | Gates | fmt, clippy `-D warnings`; workspace tests 1571 of 1571 (then `ark-ui` + `ark-orchestrate` 534 of 534 after the last review fixes); node 22 of 22; WebKit fixtures 139 of 139; page suite: see below; simulated benchmark no delta. Three implementation reviews and one plan review (qa); blockers fixed with tests that fail without them |
 | Not verified | A real second computer (Stop, model list, folder); a live model calling `role.set` at the right moment and not for a one-off request (needs the owner's OK); the native window by hand |
+| Fresh clone | `verify-release.sh v0.45.0`: all checks passed, release verified from a fresh clone of the canonical remote |
+| Consumer | Desktop 0.15.1 pins this tag (published 2026-11-10) |
 | Evidence | `../board/evidence/agent-fixes-20261110/` |
 
 # Core 0.44.0 release: agent details, groups, an agent's computer (2026-11-09)

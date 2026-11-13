@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+A named agent schedules work from its own chat, and each run answers there as its next message (ADR 0120).
+
+### Added
+
+- `agents.schedule` and `agents.unschedule` on a chat turn of a named agent (not on a scheduled run, started or delegated work, or an agent program; `AgentSpec.tools` can leave them out). Each run's answer is posted once into the chat that asked, as the agent's message (`reply`, scrubbed). The chat's mode decides the approval: Auto asks nothing, ask mode asks each time, Plan does not offer them; an agent with `allow_mutate` does not ask. The agent made for a schedule has no more tools than the asker and asks before it changes anything. An agent sees and stops only its own schedules, keeps at most 10, sets runs at most once an hour, and may schedule only for itself or for an agent made for the schedule.
+
+### Fixed
+
+- A schedule that reports into a named agent's chat no longer fails at its first run: the result chat is checked outside the project transaction, which cannot read an agent's scope.
+
 ## [0.47.0] - 2026-11-13
 
 Agents answer later in the same chat (ADR 0118); agents' exchanges show as one quiet line that opens them (ADR 0119).

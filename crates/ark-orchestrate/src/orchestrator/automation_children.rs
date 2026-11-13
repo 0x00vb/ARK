@@ -53,6 +53,7 @@ impl Adapter for RunTools {
                 .collect(),
             contacts: vec![],
             can_create: false,
+            schedule: None,
         }
         .actions()
         .into_iter()

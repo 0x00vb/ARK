@@ -845,6 +845,7 @@ impl Inner {
                 .collect(),
             contacts: vec![],
             can_create: false,
+            schedule: None,
         };
         let descriptors: Vec<_> = agent_tools
             .actions()

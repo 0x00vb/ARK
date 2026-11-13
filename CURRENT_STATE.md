@@ -1,3 +1,11 @@
+# P4 in progress: an agent schedules work from its own chat (2026-11-13, branch agent-schedules, not released)
+
+| State | Value |
+| --- | --- |
+| Change | `agents.schedule` and `agents.unschedule` on a named agent's chat turn; each run answers in that chat as the agent's message; the chat's mode decides the approval (ADR 0120). Fixes a schedule that reported into an agent's chat failing at its first run |
+| Evidence | `../board/evidence/business-team-20261112/p4/`, tests `crates/ark-orchestrate/tests/schedules_from_chat.rs` |
+| Open | An agent with `allow_mutate` does not ask in ask mode (owner to confirm). Live model check and dogfood not run. Gates: `../board/evidence/business-team-20261112/p4/RESULTS.md` |
+
 # Core 0.47.0 release: an agent answers later, agents' exchanges in one line (2026-11-13)
 
 | Release state | Value |

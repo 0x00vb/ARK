@@ -37,6 +37,11 @@ pub(super) fn own_thread<'a>(task: &'a TaskRecord, session: Option<&str>) -> Opt
     task.thread.as_deref().filter(|t| Some(*t) != session)
 }
 
+/// The chat a chat turn of `agent` is in: its own conversation, else its default one.
+pub(super) fn turn_chat(task: &TaskRecord, agent: &AgentRecord) -> Option<String> {
+    task.thread.clone().or_else(|| agent.session.clone())
+}
+
 /// Whether mail for `thread` is for the conversation `lane` (`None`: the default one).
 pub(super) fn same_thread(thread: Option<&str>, lane: Option<&str>, session: Option<&str>) -> bool {
     thread.filter(|t| Some(*t) != session) == lane
@@ -233,6 +238,71 @@ fn refuse_program(agent: &AgentRecord) -> Result<(), OrchError> {
 }
 
 impl Inner {
+    /// The schedule tools a chat turn of `agent` gets (ADR 0120): those its `tools` allow, unless
+    /// the chat is in Plan or its mode cannot be read. The chat's mode is read now, once for
+    /// the turn; a chat with no record yet is a new one, in Auto.
+    pub(super) fn schedule_offer(
+        &self,
+        spec: &AgentSpec,
+        task: &TaskRecord,
+        agent: &AgentRecord,
+    ) -> Option<crate::tools::ScheduleOffer> {
+        let mode = match turn_chat(task, agent) {
+            None => ark_core::ExecutionMode::Auto,
+            Some(chat) => match Session::open(&self.engine, &chat) {
+                Ok(Some(s)) => s.execution_mode(),
+                // No record yet: a new chat, which starts in Auto.
+                Ok(None) => ark_core::ExecutionMode::Auto,
+                // Its mode is unknown: it is not offered, rather than offered without a question.
+                Err(error) => {
+                    tracing::warn!(%chat, %error, "could not read the chat's mode; no schedule tools");
+                    return None;
+                }
+            },
+        };
+        let allows = |action| spec.tools.iter().any(|p| action_matches(p, action));
+        let offer = crate::tools::ScheduleOffer {
+            schedule: allows(crate::tools::SCHEDULE),
+            unschedule: allows(crate::tools::UNSCHEDULE),
+            auto: mode == ark_core::ExecutionMode::Auto,
+        };
+        (mode != ark_core::ExecutionMode::Plan && (offer.schedule || offer.unschedule))
+            .then_some(offer)
+    }
+
+    /// Refuse a schedule's result chat that is gone or is not in this project or one of its agents.
+    pub(super) fn check_result_chat(&self, chat: &str) -> Result<(), OrchError> {
+        let record = self
+            .engine
+            .store
+            .get_session(chat)?
+            .map(serde_json::from_value::<SessionRecord>)
+            .transpose()?;
+        let here = |scope: &str| {
+            scope == self.project.id.as_str()
+                || self
+                    .state
+                    .lock()
+                    .unwrap()
+                    .agents
+                    .values()
+                    .any(|a| a.record.scope == scope)
+        };
+        match record {
+            Some(r) if here(r.project.as_str()) => Ok(()),
+            _ => Err(OrchError::NotAllowed(
+                "the schedule's result conversation is unavailable in this project".into(),
+            )),
+        }
+    }
+
+    /// The chat of the chat turn `task`, once it has one.
+    pub(crate) fn chat_of_turn(&self, task: &str) -> Option<String> {
+        let st = self.state.lock().unwrap();
+        let t = &st.tasks.get(task)?.record;
+        turn_chat(t, &st.agents.get(&t.owner)?.record)
+    }
+
     /// Hand the turn `task`'s work to a new conversation of the same agent, which posts its
     /// answer into the chat the turn is in as the agent's next message (ADR 0118). One hand-off
     /// per turn: asking again changes nothing and returns `true`. The new task keeps the turn's origin, so what
@@ -292,10 +362,7 @@ impl Inner {
                 .ok_or_else(|| OrchError::UnknownAgent(agent.into()))?
                 .record
                 .clone();
-            let chat = t
-                .thread
-                .clone()
-                .or_else(|| agent_record.session.clone())
+            let chat = turn_chat(t, &agent_record)
                 .ok_or_else(|| OrchError::NotAllowed("this turn has no chat".into()))?;
             (chat, t.origin.clone(), agent_record)
         };

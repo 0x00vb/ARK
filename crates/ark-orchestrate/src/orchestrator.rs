@@ -3835,6 +3835,9 @@ impl Inner {
                 task: id.to_string(),
             }));
         }
+        let schedule = chat_turn
+            .then(|| self.schedule_offer(spec, &task, &agent))
+            .flatten();
         if task.run.is_none() {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),
@@ -3843,6 +3846,7 @@ impl Inner {
                 delegates: delegates.clone(),
                 contacts,
                 can_create: spec.tools.iter().any(|p| action_matches(p, tools::CREATE)),
+                schedule,
             }));
         }
         if let Some(run_id) = &task.run {

@@ -471,3 +471,44 @@ async fn deleting_a_group_takes_it_off_every_member_and_removes_its_rules() {
     assert_eq!(t.groups_of("ana").await, json!([]));
     assert!(!t.rules_left());
 }
+
+#[tokio::test]
+async fn an_answer_a_member_handed_to_the_background_shows_in_the_group_as_its_next_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path()).await;
+    t.script
+        .replies
+        .lock()
+        .unwrap()
+        .insert("Ana".into(), "Ana says hi".into());
+    t.send("@ana hello").await;
+    t.settle(2).await;
+    let group = t.store.get_record("group", &t.group).unwrap().unwrap();
+    let thread = group["threads"][format!("{}/ana", t.project)]
+        .as_str()
+        .expect("ana has a thread in the group")
+        .to_string();
+    t.script
+        .replies
+        .lock()
+        .unwrap()
+        .insert("Ana".into(), "The numbers are 42".into());
+    // What `work.later` starts: a task in that thread whose result is Ana's next message.
+    let summary = t.host.call("summary", json!({})).await.unwrap();
+    t.host
+        .call(
+            "resource",
+            json!({
+                "ref": { "location": summary["location"], "kind": "project", "id": "" },
+                "operation": { "kind": "submit_task", "input": { "agent": "ana", "task": {
+                    "objective": "read the reports", "thread": thread,
+                    "report_to": thread, "reply": true } } },
+            }),
+        )
+        .await
+        .unwrap();
+    let list = t.settle(3).await;
+    assert_eq!(Setup::agents_of(&list), ["person", "ana", "ana"]);
+    assert_eq!(list[2]["text"], "The numbers are 42");
+    assert_ne!(list[2]["failed"], true);
+}

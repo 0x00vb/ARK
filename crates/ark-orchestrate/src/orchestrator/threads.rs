@@ -6,6 +6,9 @@ use super::*;
 use ark_runtime::session::SessionRecord;
 use serde::{Deserialize, Serialize};
 
+/// Hand-offs of one agent that may be open at once ([`Inner::work_later`]).
+pub(super) const LATER_OPEN: usize = 3;
+
 /// The lane of the agent's default conversation. Work and automations run on it too.
 pub(super) const DEFAULT_LANE: &str = "default";
 
@@ -118,12 +121,13 @@ pub fn agent_threads(
         }
     }
     let session = record.session.as_deref();
-    let objectives = first_objectives(&record, &person_tasks(engine, project)?);
+    let tasks = person_tasks(engine, project)?;
+    let objectives = first_objectives(&record, &tasks);
     let mut out = Vec::new();
     for s in Session::list(engine, Some(&ProjectId(record.scope.clone())))? {
         let id = s.id.as_str();
         let default = Some(id) == session;
-        if !is_conversation(&s, &record.scope) || (s.turn_count == 0 && !default) {
+        if !is_conversation(&s, &record.scope) || (s.turn_count == 0 && !default) || s.background {
             continue;
         }
         let task = running.iter().find(|t| match own_thread(t, session) {
@@ -229,6 +233,104 @@ fn refuse_program(agent: &AgentRecord) -> Result<(), OrchError> {
 }
 
 impl Inner {
+    /// Hand the turn `task`'s work to a new conversation of the same agent, which posts its
+    /// answer into the chat the turn is in as the agent's next message (ADR 0118). One hand-off
+    /// per turn: asking again changes nothing and returns `true`. The new task keeps the turn's origin, so what
+    /// asks in the turn asks in it (`sent_through_group`), and its conversation takes the
+    /// chat's execution mode.
+    pub(crate) async fn work_later(
+        &self,
+        agent: &str,
+        task: &str,
+        brief: &str,
+    ) -> Result<bool, OrchError> {
+        let _guard = self.conversations.lock().await;
+        let key = blake3::hash(&serde_json::to_vec(&(task, "work.later"))?)
+            .to_hex()
+            .to_string();
+        let (chat, origin, record) = {
+            let st = self.state.lock().unwrap();
+            if st
+                .tasks
+                .values()
+                .any(|t| t.record.handoff_key.as_deref() == Some(&key))
+            {
+                return Ok(true);
+            }
+            let source = st
+                .tasks
+                .get(task)
+                .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
+            let t = &source.record;
+            if t.owner != agent
+                || t.state.is_final()
+                || source.cancel.is_cancelled()
+                || source.stop.is_some()
+            {
+                return Err(OrchError::NotAllowed(
+                    "this turn is no longer active".into(),
+                ));
+            }
+            if !t.is_chat_turn() {
+                return Err(OrchError::NotAllowed(
+                    "only a chat turn can answer later".into(),
+                ));
+            }
+            let open = st
+                .tasks
+                .values()
+                .filter(|o| o.record.owner == agent && o.record.reply && !o.record.state.is_final())
+                .count();
+            if open >= LATER_OPEN {
+                return Err(OrchError::NotAllowed(format!(
+                    "{LATER_OPEN} answers are already on their way; wait for one"
+                )));
+            }
+            let agent_record = st
+                .agents
+                .get(agent)
+                .ok_or_else(|| OrchError::UnknownAgent(agent.into()))?
+                .record
+                .clone();
+            let chat = t
+                .thread
+                .clone()
+                .or_else(|| agent_record.session.clone())
+                .ok_or_else(|| OrchError::NotAllowed("this turn has no chat".into()))?;
+            (chat, t.origin.clone(), agent_record)
+        };
+        refuse_program(&record)?;
+        let mut lane = Session::start(&self.engine, &ProjectId(record.scope.clone()))?;
+        lane.set_background(&self.engine)?;
+        if let Some(asking) = Session::open(&self.engine, &chat)? {
+            let mode = asking.execution_mode();
+            if mode != ark_core::ExecutionMode::Auto {
+                lane.set_execution_mode(&self.engine, lane.execution_mode_revision(), mode)?;
+            }
+        }
+        let mut spec = TaskSpec::new(brief)
+            .work(task)
+            .report_to(&chat)
+            .thread(lane.id().as_str());
+        spec.reply = true;
+        let id = self.create_run(agent, spec, origin, None, Some(&key))?;
+        // A Stop on the turn that came before the hand-off was made means no work: the task
+        // ends unstarted. A Stop after it does not reach the work; the person stops that from
+        // the agent's tile (ADR 0118).
+        let stopped = {
+            let st = self.state.lock().unwrap();
+            st.tasks
+                .get(task)
+                .is_none_or(|t| t.cancel.is_cancelled() || t.stop.is_some())
+        };
+        if stopped {
+            self.cancel_tree(&id, Stop::Cancel);
+            return Err(OrchError::NotAllowed("this turn was stopped".into()));
+        }
+        self.start(&id)?;
+        Ok(false)
+    }
+
     /// Refuse `thread` for `agent` unless it is one of the agent's own conversations.
     pub(super) fn check_thread(&self, agent: &AgentRecord, thread: &str) -> Result<(), OrchError> {
         refuse_program(agent)?;

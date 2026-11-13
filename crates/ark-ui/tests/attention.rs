@@ -53,6 +53,17 @@ fn model() -> Arc<MockProvider> {
                 }],
             ),
             (true, true) => ("Saved.".to_string(), vec![]),
+            (false, _) if req.messages.iter().any(|m| m.content.contains("say a key")) => {
+                ("The key is sk-ant-api03-abcdefghij".to_string(), vec![])
+            }
+            (false, _)
+                if req
+                    .messages
+                    .iter()
+                    .any(|m| m.content.contains("say nothing")) =>
+            {
+                ("  ".to_string(), vec![])
+            }
             (false, _) => ("Hello.".to_string(), vec![]),
         };
         Completion {
@@ -466,6 +477,80 @@ async fn a_post_waits_until_a_window_shows_its_chat() {
         .await
         .unwrap();
     assert!(list(&host).await.is_empty(), "the window showed it");
+}
+
+#[tokio::test]
+async fn an_answer_posted_as_a_message_is_the_notice_and_the_window_gets_it_as_a_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let (_, chat) = chat_in(&host, "books").await;
+    project_call(
+        &host,
+        "spawn_agent",
+        json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    let mut rx = host.subscribe();
+    project_call(
+        &host,
+        "submit_task",
+        json!({ "agent": "scribe", "task": {
+            "objective": "say hello", "report_to": chat, "reply": true } }),
+    )
+    .await
+    .unwrap();
+    let post = wait_for(&mut rx, "the post", |v| v["kind"] == "post").await;
+    assert_eq!(post["post"]["kind"], "message");
+    wait_for(&mut rx, "the list to change", |v| v["kind"] == "attention").await;
+    let items = list(&host).await;
+    assert_eq!(items.len(), 1, "{items:#?}");
+    assert_eq!(
+        items[0]["line"], "Hello.",
+        "the notice says what the agent said"
+    );
+}
+
+/// What a message answer says in the notice, for each answer the agent gives.
+async fn notice_for(objective: &str) -> (Value, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let (_, chat) = chat_in(&host, "books").await;
+    project_call(
+        &host,
+        "spawn_agent",
+        json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    let mut rx = host.subscribe();
+    project_call(
+        &host,
+        "submit_task",
+        json!({ "agent": "scribe", "task": {
+            "objective": objective, "report_to": chat, "reply": true } }),
+    )
+    .await
+    .unwrap();
+    let post = wait_for(&mut rx, "the post", |v| v["kind"] == "post").await;
+    wait_for(&mut rx, "the list to change", |v| v["kind"] == "attention").await;
+    let items = list(&host).await;
+    assert_eq!(items.len(), 1, "{items:#?}");
+    (
+        post["post"].clone(),
+        items[0]["line"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn the_notice_and_the_chat_hide_a_secret_and_an_empty_answer_reads_the_same_in_both() {
+    let (post, line) = notice_for("say a key").await;
+    assert_eq!(post["text"], "The key is [redacted]");
+    assert_eq!(line, "The key is [redacted]");
+    let (post, line) = notice_for("say nothing").await;
+    assert_eq!(post["ok"], false);
+    assert_eq!(post["text"], ark_interact::ark_orchestrate::EMPTY_ANSWER);
+    assert_eq!(line, post["text"].as_str().unwrap());
 }
 
 #[test]

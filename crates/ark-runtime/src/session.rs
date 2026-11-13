@@ -110,6 +110,10 @@ pub struct SessionRecord {
     /// Its coordinator settles begun turns from a separate execution journal.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub execution_managed: bool,
+    /// Made for work an agent handed to the background (`work.later`, ADR 0118): the person
+    /// never opened it, so no list of the person's chats shows it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -168,6 +172,7 @@ impl SessionRecord {
             work_item: None,
             execution_scope: None,
             execution_managed: false,
+            background: false,
             created_at: now,
             updated_at: now,
             turn_count: 0,
@@ -211,6 +216,23 @@ pub fn artifact_references(input: &str) -> Result<Vec<String>, AgentError> {
 /// Posts a turn carries at most; older unread ones are counted, not shown.
 pub const POSTS_CARRIED: usize = 3;
 
+/// How a post reads in its chat.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostKind {
+    /// A result of work the chat set up: a card with a title.
+    #[default]
+    Result,
+    /// The agent's own next message: drawn as a turn of that agent, no card (ADR 0118).
+    Message,
+}
+
+impl PostKind {
+    pub fn is_result(&self) -> bool {
+        *self == PostKind::Result
+    }
+}
+
 /// A message posted into a chat by work the chat set up, not by the person in it: an agent's
 /// scheduled run reporting its result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -230,6 +252,9 @@ pub struct Post {
     /// The work it reports on (a task id), so a result is never posted twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work: Option<String>,
+    /// A result card or the agent's own message. A post stored before this field reads as a result.
+    #[serde(default, skip_serializing_if = "PostKind::is_result")]
+    pub kind: PostKind,
 }
 
 impl Post {
@@ -247,7 +272,14 @@ impl Post {
             at: OffsetDateTime::now_utc(),
             after: None,
             work: None,
+            kind: PostKind::Result,
         }
+    }
+
+    /// Read as the agent's own next message, not a result card.
+    pub fn message(mut self) -> Post {
+        self.kind = PostKind::Message;
+        self
     }
 
     /// The work it reports on: [`posted`] finds it by this.
@@ -983,6 +1015,13 @@ impl Session {
         self.record.model.as_deref()
     }
 
+    /// Mark this conversation as made for background work: lists of the person's chats leave
+    /// it out.
+    pub fn set_background(&mut self, engine: &Engine) -> Result<(), AgentError> {
+        self.record.background = true;
+        self.save(engine)
+    }
+
     pub fn set_model(&mut self, engine: &Engine, model: String) -> Result<(), AgentError> {
         self.record.model = Some(model);
         self.save(engine)
@@ -1138,13 +1177,12 @@ impl Session {
             }
             for (_, p) in &self.unread[older..] {
                 let failed = if p.ok { "" } else { ", failed" };
-                let _ = writeln!(
-                    s,
-                    "  [{} · {}{failed}] {}",
-                    p.from,
-                    p.title,
-                    clip(&p.text, self.record.policy.answer_chars)
-                );
+                let text = clip(&p.text, self.record.policy.answer_chars);
+                if p.kind == PostKind::Message {
+                    let _ = writeln!(s, "  [you, later{failed}] {text}");
+                } else {
+                    let _ = writeln!(s, "  [{} · {}{failed}] {text}", p.from, p.title);
+                }
             }
         }
         Some(s.trim_end().to_string())

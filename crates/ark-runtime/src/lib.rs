@@ -54,6 +54,7 @@ pub use approval::{
     lasting_grants, remove_lasting_grant, ApprovalClassifier, ApprovalDecision, ApprovalGate,
     ApprovalRequest, Approver, FixedApprover, LastingGrant, LASTING_GRANT,
 };
+pub use ark_store::scrub_text;
 pub use cancel::CancelToken;
 pub use context_report::ContextReport;
 pub use distill::{call_digest, distill, Distiller, DistillerSet};
@@ -71,7 +72,8 @@ pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
 pub use rules::{ProjectInstructions, RuleBook, RuleSelection, RulesTool};
 pub use session::{
-    CarryPolicy, CompactReport, Post, Session, SessionRecord, SessionUsage, Turn, POSTS_CARRIED,
+    CarryPolicy, CompactReport, Post, PostKind, Session, SessionRecord, SessionUsage, Turn,
+    POSTS_CARRIED,
 };
 pub use skills::{Skill, SkillCatalog, SkillScope, SkillsTool};
 pub use steer::Steering;

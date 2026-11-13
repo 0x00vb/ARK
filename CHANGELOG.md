@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+An agent answers later in the same chat (ADR 0118).
+
+### Added
+
+- `work.later {brief}`: on the person's own turn and a group-chat turn, an agent hands its work to the background and ends the turn with a short reply. The work runs as the same agent in a new conversation that no list of the person's chats shows (`SessionRecord.background`), reports to the chat it came from, and its answer is posted once as the agent's next message. A new message in the chat does not cancel it; stopping the work (the tile's Stop) posts nothing. One hand-off per turn, at most 3 open per agent. It keeps the approval behavior of the turn: same origin, same agent, same gate, and the conversation records the chat's execution mode (nothing reads it for an orchestrated agent today). Offered only on a chat turn (`person`, or the new `TaskSpec.group_turn` the group driver sets); not on an SDK `submit` of a plain task, Give work, delegated, started, scheduled, automation or Work tasks, on the work it started, or to an agent on an agent program; an app can leave it out through `AgentSpec.tools`.
+- `Post.kind` (`PostKind::Result` by default, `Message`) and `Post::message()`; `TaskSpec.reply`, `TaskSpec.group_turn` and the same on `TaskRecord`; `SessionRecord.background`; `ark_store::scrub_text` and `ark_runtime::scrub_text` (the store's scrubber, public); `ark_orchestrate::EMPTY_ANSWER`. The posted answer and its notice are scrubbed of secrets; an empty answer is posted as a failed message. A post or task stored before reads as before.
+- The page draws a `message` post as an agent turn (no card, title or caption); a failed one is a notice. The window host shows a message that lands in a group member's thread as that member's next message in the group. The notice for a finished or failed answer says the message or the reason.
+
+### Breaking
+
+- `Post` gains `kind`, `TaskSpec` gains `reply` and `group_turn`, `SessionRecord` gains `background`: a struct literal adds `kind: PostKind::Result`, `reply: false`, `group_turn: false`, `background: false` (or uses `Post::new`, `TaskSpec::new`). `ark_runtime::PostKind` and `ark_orchestrate::WORK_LATER` are new exports.
+
+### Known gaps
+
+- The phone draws a message post as a result card until the client protocol carries `kind` (plan P5).
+- The page has no reduced-motion rule for turns; a message that arrives live rises like any turn.
+- A notification shows the message as written, markdown marks included.
+- `TaskSpec.reply` and `report_to` are settable by any client that can submit a task, so a client can draw a result as a message.
+- An answer posted into a chat that was deleted is not shown; the result stays in the task record.
+- Not verified with a live model: that it calls `work.later` for slow work and not for a quick question.
+
 ## [0.46.0] - 2026-11-13
 
 A chat makes a group of agents with shared rules (ADR 0117). Links in replies open. Selected text shows in every palette; no palette uses cyan.

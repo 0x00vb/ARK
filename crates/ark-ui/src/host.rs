@@ -305,6 +305,11 @@ async fn forward_attention(
         if let EventKind::Group { group } = &ev.kind {
             host.emitter().emit("ark:group", json!({ "id": group }));
         }
+        if let EventKind::Posted { session, post, .. } = &ev.kind {
+            if post.kind == ark_sdk::prelude::ark_runtime::PostKind::Message {
+                tokio::spawn(host.clone().group_posted(session.clone(), post.clone()));
+            }
+        }
         match &ev.kind {
             // A retry takes a failed task out of the list (`TaskQueued`).
             EventKind::Asked { .. }

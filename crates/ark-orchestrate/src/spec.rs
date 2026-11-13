@@ -334,6 +334,14 @@ pub struct TaskSpec {
     /// default conversation. Conversations of one agent run at the same time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// Its result is the agent's own next message in the chat it reports to, not a result card
+    /// ([`ark_runtime::PostKind::Message`]). Set by `work.later` (ADR 0118).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reply: bool,
+    /// A group chat's driver submitted this as a member's turn (ADR 0113). With `person`, it is
+    /// what makes a task a chat turn that may hand work off (`work.later`, ADR 0118).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group_turn: bool,
     /// The person typed this in a chat with the agent. Set by the front-end's send path only;
     /// it decides whether the task is offered `role.set` (ADR 0116).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

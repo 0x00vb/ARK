@@ -386,6 +386,32 @@ async fn conversation_creation_cannot_publish_after_cancellation_during_model_re
 }
 
 #[tokio::test]
+async fn a_turn_that_was_stopped_hands_off_no_work() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("source")).await.unwrap();
+    let mut spec = TaskSpec::new("look into it");
+    spec.person = true;
+    let turn = o
+        .inner
+        .create_task("source", spec, Origin::External, None)
+        .unwrap();
+    o.cancel(&turn).unwrap();
+    let refused = o
+        .inner
+        .work_later("source", &turn, "read the filings")
+        .await;
+    assert!(refused.is_err(), "a stopped turn handed work off");
+    assert!(
+        o.tasks().iter().all(|t| !t.reply),
+        "work was made for a stopped turn"
+    );
+}
+
+#[tokio::test]
 async fn task_and_work_item_commit_together() {
     let (dir, ark, project) = fixture();
     let o = Orchestrator::builder(&ark, &project)

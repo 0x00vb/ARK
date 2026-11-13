@@ -230,6 +230,8 @@ mod tests {
             retry_at_ms: None,
             item: None,
             report_to: None,
+            reply: false,
+            group_turn: false,
             work: None,
             reported: false,
             question: None,

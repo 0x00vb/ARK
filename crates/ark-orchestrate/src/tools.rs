@@ -38,6 +38,7 @@ pub const MESSAGE: &str = "agents.message";
 pub const CREATE: &str = "agents.create";
 pub const ROLE_SET: &str = "role.set";
 pub const GROUPS_SET: &str = "groups.set";
+pub const WORK_LATER: &str = "work.later";
 pub const START: &str = "agents.start";
 pub const SCHEDULE: &str = "agents.schedule";
 pub const UNSCHEDULE: &str = "agents.unschedule";
@@ -285,6 +286,69 @@ impl Adapter for GroupTools {
         Ok(ActionOutput::json(
             serde_json::to_value(outcome).map_err(|e| AdapterError::Tool(e.to_string()))?,
         ))
+    }
+}
+
+/// `work.later`: hand the turn's own work to the background and answer later in the same chat
+/// (ADR 0118). Registered only for a chat turn: the person's or a group chat's.
+pub(crate) struct LaterTools {
+    pub orch: Weak<Inner>,
+    pub agent: String,
+    pub task: String,
+}
+
+#[async_trait::async_trait]
+impl Adapter for LaterTools {
+    fn name(&self) -> &str {
+        "work"
+    }
+
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            WORK_LATER,
+            "Hand your own work to the background when answering needs more than a few quick steps (research, a long read, a build). Write a self-contained brief: the work does not see this chat. It runs as you, and its answer arrives in this chat by itself as your next message. Call it once, then reply to the person in one short line that you will look into it, and stop. Never use it for a question you can answer now.",
+            RiskTier::Observe,
+        )
+        .volatile()
+        .with_input_schema(json!({
+            "type": "object",
+            "required": ["brief"],
+            "properties": {
+                "brief": { "type": "string", "maxLength": 8000, "description": "what to find out or do, with everything it needs" }
+            }
+        }))]
+    }
+
+    async fn run(
+        &self,
+        action: &str,
+        input: Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        let brief = input
+            .get("brief")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if brief.is_empty() || brief.chars().count() > 8000 {
+            return Err(AdapterError::bad_input(
+                action,
+                "brief: 1 to 8000 characters",
+            ));
+        }
+        let orch = self
+            .orch
+            .upgrade()
+            .ok_or_else(|| AdapterError::Tool("the orchestrator is gone".into()))?;
+        let already = orch
+            .work_later(&self.agent, &self.task, brief)
+            .await
+            .map_err(|e| AdapterError::Tool(e.to_string()))?;
+        Ok(ActionOutput::json(json!({
+            "started": true,
+            "already": already,
+            "note": "Its answer will arrive in this chat as your next message. Tell the person in one short line that you will look into it, and stop."
+        })))
     }
 }
 

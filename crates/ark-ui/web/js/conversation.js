@@ -164,14 +164,14 @@ export class Thread {
     if (t.after) turn.agent.append(t.after);
     turn.keepWorkingLast();
     turn.footer(t.footer, t.index);
-    for (const p of t.posts || []) turn.el.append(postView(p));
+    for (const p of t.posts || []) turn.el.append(p.kind === "message" ? messageView(p) : postView(p));
     return turn;
   }
 
   /// Something work this chat set up posted here (a scheduled run's result), as it arrives.
   post(p) {
     this.dropWelcome();
-    this.root.append(postView(p));
+    this.root.append(p.kind === "message" ? h("article.turn.message", messageView(p)) : postView(p));
     this.scroll(false);
   }
 
@@ -256,6 +256,14 @@ function postView(p) {
     h("div.post-head", h("span.post-from", p.from), h("span.post-title", p.title),
       p.ok ? null : h("span.post-failed", "did not finish")),
     h("div.prose", { html: markdown(p.text || "") }));
+}
+
+/// An answer the agent gave later: its next message, drawn as a reply (no card, no caption). One
+/// that failed says why as a notice.
+function messageView(p) {
+  return h("div.agent", p.ok
+    ? h("div.prose.answer", { html: markdown(p.text || "") })
+    : h("div.notice.tone-error", p.text || "Did not finish."));
 }
 
 class TurnView {

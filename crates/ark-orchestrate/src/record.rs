@@ -327,6 +327,9 @@ pub struct TaskRecord {
     /// The person typed it in a chat ([`crate::TaskSpec::person`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person: bool,
+    /// A group chat's driver submitted it ([`crate::TaskSpec::group_turn`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group_turn: bool,
     /// The task that delegated this one.
     #[serde(default)]
     pub parent: Option<String>,
@@ -403,6 +406,9 @@ pub struct TaskRecord {
     /// The chat its result is posted into when it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
+    /// Its result is posted as the agent's own message ([`crate::TaskSpec::reply`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reply: bool,
     /// The work that handed it off ([`crate::TaskSpec::work`]); a turn that continues that
     /// work and takes it up writes its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,6 +435,20 @@ fn yes() -> bool {
 }
 
 impl TaskRecord {
+    /// A turn of a chat with the agent: the person's own or a group chat's member turn. Not
+    /// delegated or started by an agent, scheduled, an automation, Work, a board item's, or
+    /// work already handed off by `work.later` (ADR 0118).
+    pub(crate) fn is_chat_turn(&self) -> bool {
+        self.origin == Origin::External
+            && (self.person || self.group_turn)
+            && self.run.is_none()
+            && self.schedule.is_none()
+            && self.conversation.is_none()
+            && self.submission.is_none()
+            && self.item.is_none()
+            && !self.reply
+    }
+
     pub(crate) fn queued(
         id: String,
         project: String,
@@ -454,6 +474,7 @@ impl TaskRecord {
             context: spec.context.clone(),
             origin,
             person: spec.person,
+            group_turn: spec.group_turn,
             parent: None,
             children: Vec::new(),
             after: spec.after.clone(),
@@ -488,6 +509,7 @@ impl TaskRecord {
             retry_at_ms: None,
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
+            reply: spec.reply,
             work: spec.work.clone(),
             reported: false,
             question: None,

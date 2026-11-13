@@ -1,3 +1,12 @@
+# P3 work.later (in progress, branch work-later, 2026-11-13)
+
+| Release state | Value |
+| --- | --- |
+| State | Unreleased on `work-later` (off v0.46.0). ADR 0118. Plan and design: `../board/evidence/business-team-20261112/p3/` |
+| Change | `work.later {brief}`: an agent hands its work to a new, unlisted conversation and answers later in the same chat as its next message (`Post.kind = message`); page, group delivery, notice line, approvals by copied origin |
+| Not verified | No real-app run yet (Desktop with a live model calling `work.later`); only the WebKit fixture screenshots and a real Host test with scripted models |
+| Next | implementation review, full `ci.sh`, then the owner's release decision; P2 (`ark-exchanges`) merges separately |
+
 # Core 0.46.0 release: a chat makes a group of agents, links open, selection shows (2026-11-13)
 
 | Release state | Value |

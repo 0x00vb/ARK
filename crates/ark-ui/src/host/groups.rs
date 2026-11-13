@@ -9,7 +9,7 @@ use ark_interact::groups::{
     GroupMessage, Member, Route, MAX_REPLIES, SCOPE,
 };
 use ark_model::Message;
-use ark_sdk::prelude::ark_runtime::{Role, RuleBook};
+use ark_sdk::prelude::ark_runtime::{Post, PostKind, Role, RuleBook};
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
@@ -369,6 +369,44 @@ impl Host {
         }
     }
 
+    /// An answer a member handed to the background (`work.later`, ADR 0118) lands in the member's
+    /// thread of a group chat: show it in the group as that member's next message. Waits for
+    /// the group's driver so it does not race its cursors.
+    pub(crate) async fn group_posted(self: Arc<Self>, chat: String, post: Post) {
+        if post.kind != PostKind::Message || post.text.trim().is_empty() {
+            return;
+        }
+        let Ok(groups) = self.group_list() else {
+            return;
+        };
+        for group in groups {
+            let Some(member) = group
+                .threads
+                .iter()
+                .find(|(_, thread)| **thread == chat)
+                .and_then(|(key, _)| group.members.iter().find(|m| m.key() == *key))
+                .cloned()
+            else {
+                continue;
+            };
+            let lock = self
+                .groups
+                .locks
+                .lock()
+                .unwrap()
+                .entry(group.id.clone())
+                .or_default()
+                .clone();
+            let _turn = lock.lock().await;
+            if self
+                .group_store_msg(&group.id, Some(member), post.text.trim(), !post.ok)
+                .is_ok()
+            {
+                self.emitter().emit("ark:group", json!({ "id": group.id }));
+            }
+        }
+    }
+
     fn group_working(&self, gid: &str, member: &Member, on: bool) {
         let mut all = self.groups.working.lock().unwrap();
         let list = all.entry(gid.to_string()).or_default();
@@ -442,6 +480,7 @@ impl Host {
                     objective,
                     context: context(roster, member),
                     thread: Some(thread),
+                    group_turn: true,
                     ..Default::default()
                 },
             )

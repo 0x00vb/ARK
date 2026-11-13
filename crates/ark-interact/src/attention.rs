@@ -20,6 +20,7 @@ use crate::approval::{approval_choices, approval_title, Choice};
 use crate::fmt::clip;
 use crate::labels::Labels;
 use crate::report::{Cell, Report, Row, Table, Tone};
+use ark_sdk::prelude::ark_runtime::scrub_text as scrub;
 
 /// How long a failure or a result stays in the list unless it is cleared or opened.
 pub const KEPT_MS: u64 = 7 * 24 * 3600 * 1000;
@@ -316,7 +317,15 @@ fn try_list_at(engine: &Engine, labels: &Labels, now: u64) -> anyhow::Result<Vec
         };
         let title = clip(&t.objective, 80);
         let line = match kind {
+            Kind::Failed if t.reply => {
+                clip(&scrub(t.error.as_deref().unwrap_or("did not finish")), 500)
+            }
             Kind::Failed => format!("Did not finish: {title}"),
+            // The agent's own message: the notice says what it said, as the chat shows it.
+            _ if t.reply => match t.result.as_deref().map(str::trim) {
+                Some(r) if !r.is_empty() => clip(&scrub(r), 500),
+                _ => ark_orchestrate::EMPTY_ANSWER.to_string(),
+            },
             _ => format!("Done: {title}"),
         };
         items.push(Item {

@@ -805,7 +805,11 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             Tone::Accent,
         ),
         EventKind::Posted { post, .. } => (
-            "posted the result in the chat that asked for it".to_string(),
+            if post.kind == ark_sdk::prelude::ark_runtime::PostKind::Message {
+                "answered in the chat".to_string()
+            } else {
+                "posted the result in the chat that asked for it".to_string()
+            },
             if post.ok { Tone::Muted } else { Tone::Warning },
         ),
         EventKind::Unscheduled { agent, says, .. } => {

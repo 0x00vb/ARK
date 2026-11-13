@@ -355,6 +355,7 @@ pub fn list_sessions(
         .collect();
     let mut sessions: Vec<_> = Session::list(engine, scope)?
         .iter()
+        .filter(|r| !r.background)
         .map(|r| {
             let pname = names.get(r.project.as_str()).cloned().unwrap_or_default();
             SessionSummary::of(r, &pname, r.id.as_str() == current)
@@ -402,6 +403,7 @@ pub fn project_sessions(
         .ok_or_else(|| anyhow::anyhow!("no project with id `{id}`"))?;
     let mut sessions: Vec<_> = Session::list(engine, Some(&p.id))?
         .iter()
+        .filter(|r| !r.background)
         .map(|r| SessionSummary::of(r, &p.name, r.id.as_str() == current))
         .collect();
     enrich_participants(engine, &mut sessions);
@@ -435,6 +437,7 @@ pub fn history(
         for r in Session::list(engine, Some(&p.id))? {
             let title = r.title.to_lowercase();
             if is_conversation(&r)
+                && !r.background
                 && (r.turn_count > 0 || r.id.as_str() == current)
                 && words.iter().all(|w| title.contains(w.as_str()))
             {

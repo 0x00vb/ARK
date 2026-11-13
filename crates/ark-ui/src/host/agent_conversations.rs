@@ -475,7 +475,10 @@ pub(crate) fn thread_of(input: &Value) -> anyhow::Result<Option<String>> {
 
 /// A session that is a person's own chat: not Work's, not an automation's.
 fn general(record: &SessionRecord) -> bool {
-    record.work_item.is_none() && !record.execution_managed && record.execution_scope.is_none()
+    record.work_item.is_none()
+        && !record.execution_managed
+        && record.execution_scope.is_none()
+        && !record.background
 }
 
 impl Host {

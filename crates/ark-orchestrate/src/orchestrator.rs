@@ -1432,6 +1432,9 @@ fn final_error(e: &ark_runtime::AgentError) -> bool {
 
 /// What a finished task reports to its chat: (ok, text). Nothing for one that was cancelled
 /// (whoever cancelled it knows) or has not finished.
+/// What a chat says when work it handed off ended without an answer.
+pub const EMPTY_ANSWER: &str = "It finished without an answer.";
+
 fn reports(t: &TaskRecord) -> Option<(bool, String)> {
     match t.state {
         TaskState::Done => Some((true, t.result.clone().unwrap_or_default())),
@@ -3817,6 +3820,19 @@ impl Inner {
                 task: id.to_string(),
             }));
         }
+        let chat_turn = task.is_chat_turn() && !agent.on_program();
+        if chat_turn
+            && spec
+                .tools
+                .iter()
+                .any(|p| action_matches(p, tools::WORK_LATER))
+        {
+            registry.register(Arc::new(tools::LaterTools {
+                orch: self.me.clone(),
+                agent: owner.to_string(),
+                task: id.to_string(),
+            }));
+        }
         if task.run.is_none() {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),
@@ -4700,7 +4716,18 @@ impl Inner {
         if waiting {
             return;
         }
-        let post = Post::new(&t.owner, clip(&t.objective, 80), text, ok).work(&t.id);
+        // An answer that came back empty is said, not drawn as an empty reply.
+        let (ok, text) = if t.reply && ok && text.trim().is_empty() {
+            (false, EMPTY_ANSWER.to_string())
+        } else {
+            (ok, text)
+        };
+        // What a chat stores and shows is scrubbed of secrets, as its turns are.
+        let text = ark_store::scrub_text(&text);
+        let mut post = Post::new(&t.owner, clip(&t.objective, 80), text, ok).work(&t.id);
+        if t.reply {
+            post = post.message();
+        }
         match ark_runtime::session::post_once(&self.engine, chat, post.clone()) {
             Ok((_, created)) => {
                 self.update_task(&t.id, |r| r.reported = true);

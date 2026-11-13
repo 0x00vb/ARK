@@ -8,6 +8,9 @@
 | Gates | Each branch: plan/design and implementation reviews by qa (haiku) with rechecks; blockers fixed with tests that fail without them (scrubbing, offer scope, failed ask, stale read, occurrence key, hidden lanes). Release commit: see the ci line below |
 | Not verified | A live model calling `work.later` for slow work and not for a quick question; real agents messaging each other in Desktop; the phone (P5) |
 | Open | Exchange view: no focus trap; Esc is captured at document level; a hidden document does not refresh until the next event. P3: the phone draws a message post as a card until P5 |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests, node 22 of 22, WebKit 171 of 171, page suite 66 of 68 (the 2 known); notification 3 of 3; release build; simulated benchmark no delta |
+| Fresh clone | `verify-release.sh v0.47.0`: all checks passed |
+| Consumer | Desktop 0.16.0 pins this tag (committed a06c1ba; signing waits on the Apple developer agreement) |
 | Evidence | `../board/evidence/business-team-20261112/p2/`, `../board/evidence/business-team-20261112/p3/` |
 
 # Core 0.46.0 release: a chat makes a group of agents, links open, selection shows (2026-11-13)

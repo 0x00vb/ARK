@@ -1,20 +1,14 @@
-# P3 work.later (in progress, branch work-later, 2026-11-13)
+# Core 0.47.0 release: an agent answers later, agents' exchanges in one line (2026-11-13)
 
 | Release state | Value |
 | --- | --- |
-| State | Unreleased on `work-later` (off v0.46.0). ADR 0118. Plan and design: `../board/evidence/business-team-20261112/p3/` |
-| Change | `work.later {brief}`: an agent hands its work to a new, unlisted conversation and answers later in the same chat as its next message (`Post.kind = message`); page, group delivery, notice line, approvals by copied origin |
-| Not verified | No real-app run yet (Desktop with a live model calling `work.later`); only the WebKit fixture screenshots and a real Host test with scripted models |
-| Next | implementation review, full `ci.sh`, then the owner's release decision; P2 (`ark-exchanges`) merges separately |
-
-# Core P2 in progress: agents talk among themselves, the person opens a line (2026-11-13)
-
-| State | Value |
-| --- | --- |
-| Branch | `exchanges` (worktree `ark-exchanges`) off v0.46.0 (a5156f2). Not committed, not released |
-| Change | ADR 0119. `ark_interact::exchanges` (`lines`, `talk`) over `ark_orchestrate::said`; the note record keeps its text; window calls `exchange_lines`, `exchange_talk`; `ark.chatView({ exchanges })` draws one line under a turn keyed `task:<id>` and opens the messages over the chat surface |
-| Evidence | `../board/evidence/business-team-20261112/p2/` (PLAN, DESIGN, qa reviews, ci.log, screens) |
-| Open | Desktop must pass `exchanges` to `chatView` and set `--pet-ink` per pet; the plain chat's stored turns carry no task id so draw no lines; agents on another computer show none; Desktop wiring and two recheck items (8, 10) left to the coordinator; phone is P5; live model check of agents messaging each other needs the owner's OK |
+| Latest tag | v0.47.0 (2026-11-13), over v0.46.0 (a5156f2). ADR 0118 (an agent answers later in the same chat), ADR 0119 (agents' exchanges are read from what agents already keep) |
+| Change | P3: `work.later {brief}` on the person's own turn or a group-chat turn hands the work to an unlisted conversation of the same agent and posts the answer once into the same chat as the agent's next message (`Post.kind = message`, no card); the tile shows it working, Stop ends it and posts nothing, at most 3 open, approvals as the turn. P2: `exchange_lines` and `exchange_talk`; `chatView({ exchanges })` draws one quiet line under a turn that reached other agents ("2 messages with CMO") and opens their messages over the chat (Back or Esc returns). Stored and shown text from agents is scrubbed (`ark_store::scrub_text`) |
+| Found from | The owner's plan of 2026-11-12 (`../board/evidence/business-team-20261112/PLAN.md`, P2 and P3) |
+| Gates | Each branch: plan/design and implementation reviews by qa (haiku) with rechecks; blockers fixed with tests that fail without them (scrubbing, offer scope, failed ask, stale read, occurrence key, hidden lanes). Release commit: see the ci line below |
+| Not verified | A live model calling `work.later` for slow work and not for a quick question; real agents messaging each other in Desktop; the phone (P5) |
+| Open | Exchange view: no focus trap; Esc is captured at document level; a hidden document does not refresh until the next event. P3: the phone draws a message post as a card until P5 |
+| Evidence | `../board/evidence/business-team-20261112/p2/`, `../board/evidence/business-team-20261112/p3/` |
 
 # Core 0.46.0 release: a chat makes a group of agents, links open, selection shows (2026-11-13)
 

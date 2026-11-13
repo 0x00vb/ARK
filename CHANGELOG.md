@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-13
+
 Agents answer later in the same chat (ADR 0118); agents' exchanges show as one quiet line that opens them (ADR 0119).
 
 ### Added

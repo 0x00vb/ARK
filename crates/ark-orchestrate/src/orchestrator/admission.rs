@@ -530,6 +530,12 @@ impl Inner {
                 scope: binding.scope.clone(),
             });
         }
+        // A named agent's chat is kept in that agent's own scope, so it cannot be read inside
+        // this project's transaction: its place is checked here. A chat deleted after this
+        // is handled when the result is posted.
+        if let (Some(_), Some(chat)) = (&scheduled, &spec.report_to) {
+            self.check_result_chat(chat)?;
+        }
         let mut state = self.state.lock().unwrap();
         let (submission, created, item, board, task) =
             self.engine.store.transact_records(project, |tx| {
@@ -705,9 +711,6 @@ impl Inner {
                     task.submission = Some(id.clone());
                     task.report_to = if scheduled.is_some() { spec.report_to.clone() } else { None };
                     if let Some(schedule) = &scheduled {
-                        if let Some(chat) = &task.report_to {
-                            if tx.get_session(chat)?.is_none() { return Err(OrchError::NotAllowed("the schedule's result conversation is unavailable in this project".into())); }
-                        }
                         let expected = schedule.expected;
                         let mut current: ScheduleRecord = serde_json::from_value(tx.get_record(SCHEDULE, &expected.id)?.ok_or_else(|| OrchError::NotAllowed("the schedule was removed before admission".into()))?)?;
                         if current.version != expected.version || current.target.is_some() || current.agent != agent.name || schedule.due && (current.paused || current.next_ms != Some(schedule.slot)) {

@@ -175,8 +175,10 @@ The chat makes, changes, resumes and runs a schedule with `agents.schedule` (ask
 with when and all each run is handed; no "always" covers it) and stops or pauses one with
 `agents.unschedule`. Without `to`, the schedule gets an agent of its own. The tool's description
 says today's date in the person's zone and lists the schedules with their state. Stopping a
-schedule ends the agent made for it when nothing else uses it. Agents
-never get these tools. The terminal has `/schedules` and `/schedules run|pause|resume|stop <id>`;
+schedule ends the agent made for it when nothing else uses it. A named agent gets
+them on its own chat turns, never on a scheduled, started or delegated task (ADR 0120): the chat's mode decides the
+approval (Auto asks nothing, ask mode asks each time), each run answers in that chat as the
+agent's message, it sees only the schedules it made (10 at most, one run an hour at most). The terminal has `/schedules` and `/schedules run|pause|resume|stop <id>`;
 `/agents` lists them. The window shows a line per schedule above the composer of the chat that
 asked, and the schedule with its runs in the side pane.
 

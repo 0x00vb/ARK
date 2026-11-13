@@ -561,6 +561,7 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
         delegates: Vec::new(),
         contacts: vec!["lead".into()],
         can_create: false,
+        schedule: None,
     }));
     let weather = ark_runtime::catalog::matching_actions(
         &registry,
@@ -6554,4 +6555,67 @@ async fn context_messages_cannot_control_another_live_execution() {
         .to_string()
         .contains("another live runtime"));
     assert!(o.agent("reader").unwrap().inbox.is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_does_not_see_a_schedule_the_person_made_that_reports_into_its_chat() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("ceo")).await.unwrap();
+    let chat = o.start_thread("ceo").unwrap();
+    let person = o
+        .schedule(
+            "ceo",
+            TaskSpec::new("the person's").report_to(&chat),
+            crate::When::every_minutes(120),
+        )
+        .unwrap();
+    let view = crate::tools::Scheduling {
+        orch: &o,
+        chat: Some(&chat),
+        zone: None,
+        by: Some("ceo"),
+        auto: true,
+    };
+    assert!(!view.sees(&person));
+}
+
+#[tokio::test]
+async fn a_chat_whose_mode_cannot_be_read_is_offered_no_schedule_tools() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("ceo")).await.unwrap();
+    let chat = o.start_thread("ceo").unwrap();
+    let agent = o.agent("ceo").unwrap();
+    let mut spec = TaskSpec::new("hello").thread(&chat);
+    spec.person = true;
+    let task = TaskRecord::queued(
+        "t-1".into(),
+        project.id.to_string(),
+        "ceo".into(),
+        &spec,
+        crate::record::Origin::External,
+        crate::Budget::default(),
+        Vec::new(),
+    );
+    assert!(o
+        .inner
+        .schedule_offer(&agent.spec, &task, &agent)
+        .is_some_and(|offer| offer.schedule));
+    // The chat's record no longer reads.
+    ark.engine()
+        .store
+        .put_session(
+            &chat,
+            &ProjectId(agent.scope.clone()),
+            &serde_json::json!("not a session"),
+        )
+        .unwrap();
+    assert!(o.inner.schedule_offer(&agent.spec, &task, &agent).is_none());
 }

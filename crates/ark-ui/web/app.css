@@ -2623,3 +2623,53 @@ button.ticket-property:hover { background: var(--hover); }
 .group-face { position: relative; display: inline-block; flex: none; }
 .group-face > :first-child { position: absolute; left: 0; top: 0; }
 .group-face > :nth-child(2) { position: absolute; right: 0; bottom: 0; }
+
+/* What agents said to each other (ADR 0119): a quiet line under a turn, and the view it opens. */
+.xline {
+  display: inline-flex; align-items: center; flex-wrap: wrap; column-gap: 4px; max-width: 100%;
+  margin: 6px 0 0; padding: 4px 0; border: 0; background: none; color: var(--text-2);
+  font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer;
+  transition: color 120ms ease-out, scale 120ms ease-out;
+}
+@media (hover: hover) { .xline:hover { color: var(--text); } }
+.xline:active { scale: 0.98; }
+.xline:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; border-radius: 6px; }
+.xline.xnew { animation: xfade 160ms ease-out both; }
+.xwho { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.xwho .chat-face { flex: none; }
+.xname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xview .xname { color: var(--pet-ink, var(--text)); }
+@media (pointer: coarse) { .xline { min-height: 44px; } }
+
+.xview { position: absolute; inset: 0; z-index: 5; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); animation: xin 200ms var(--ease) both; }
+.xhead { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.xback { flex: none; }
+.xchip { min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+.xchip .xwho { gap: 6px; }
+.xarrows { color: var(--text-3); font-weight: 400; }
+.xscroll { flex: 1; }
+.xthread { padding-top: 4px; }
+.xstamp { margin: 20px 0 6px; text-align: center; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.xmsg { margin: 14px 0 0; min-width: 0; }
+.xmsg.xnew { animation: xrise 180ms ease-out both; }
+.xmsg .turn-author { margin: 0 0 6px; }
+.xbubble { white-space: normal; width: fit-content; max-width: min(100%, 560px); }
+.xbubble > :first-child { margin-top: 0; }
+.xbubble > :last-child { margin-bottom: 0; }
+.xfail { font-size: 13px; color: var(--text-3); }
+.xempty { margin: 48px 0; text-align: center; font-size: 13px; color: var(--text-3); }
+.xerror { margin: 48px 0; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+.xerror p { margin: 0; }
+.xretry { border: 0; border-radius: 16px; padding: 6px 14px; background: var(--hover); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; transition: scale 120ms ease-out; }
+.xretry:active { scale: 0.97; }
+.xretry:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+@media (pointer: coarse) { .xback, .xretry { min-height: 44px; min-width: 44px; } }
+@media (max-width: 480px) { .xbubble { max-width: 100%; } .xhead { padding: 8px 10px; } }
+@keyframes xin { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes xrise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes xfade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .xview { animation-name: xfade; }
+  .xmsg.xnew { animation-name: xfade; }
+  .xline:active, .xretry:active { scale: 1; }
+}

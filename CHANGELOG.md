@@ -2,17 +2,26 @@
 
 ## [Unreleased]
 
-An agent answers later in the same chat (ADR 0118).
+Agents answer later in the same chat (ADR 0118); agents' exchanges show as one quiet line that opens them (ADR 0119).
 
 ### Added
 
 - `work.later {brief}`: on the person's own turn and a group-chat turn, an agent hands its work to the background and ends the turn with a short reply. The work runs as the same agent in a new conversation that no list of the person's chats shows (`SessionRecord.background`), reports to the chat it came from, and its answer is posted once as the agent's next message. A new message in the chat does not cancel it; stopping the work (the tile's Stop) posts nothing. One hand-off per turn, at most 3 open per agent. It keeps the approval behavior of the turn: same origin, same agent, same gate, and the conversation records the chat's execution mode (nothing reads it for an orchestrated agent today). Offered only on a chat turn (`person`, or the new `TaskSpec.group_turn` the group driver sets); not on an SDK `submit` of a plain task, Give work, delegated, started, scheduled, automation or Work tasks, on the work it started, or to an agent on an agent program; an app can leave it out through `AgentSpec.tools`.
 - `Post.kind` (`PostKind::Result` by default, `Message`) and `Post::message()`; `TaskSpec.reply`, `TaskSpec.group_turn` and the same on `TaskRecord`; `SessionRecord.background`; `ark_store::scrub_text` and `ark_runtime::scrub_text` (the store's scrubber, public); `ark_orchestrate::EMPTY_ANSWER`. The posted answer and its notice are scrubbed of secrets; an empty answer is posted as a failed message. A post or task stored before reads as before.
 - The page draws a `message` post as an agent turn (no card, title or caption); a failed one is a notice. The window host shows a message that lands in a group member's thread as that member's next message in the group. The notice for a finished or failed answer says the message or the reason.
+- `ark_interact::exchanges`: `lines` (what one chat's turns started with other agents: a note, a brief, a reply, grouped per turn, with a plain label) and `talk` (the messages between two agents, newest 200, each clipped to 2000 characters). `ark_orchestrate::said`, `known`, `Said`, `Known`: the same read from the store.
+- Window calls `exchange_lines {project, agent, session?}` and `exchange_talk {project, a, b}`.
+- `ark.chatView(el, { exchanges: { project, agent, name?, look? }, ... })` (the `exchanges` option): a turn keyed `task:<id>` gets a line ("2 messages with CMO", "Messaged CSO and CMO") when that task reached other agents; the line opens what they said over the chat surface (Back or Esc returns at the same scroll). The name takes `--pet-ink` and carries `data-variant`.
+- `chatView`'s `exchanges` option may be a function returning the descriptor or null, read at each use; `view.refreshExchanges()` after a switch of agent or chat.
 
 ### Breaking
 
 - `Post` gains `kind`, `TaskSpec` gains `reply` and `group_turn`, `SessionRecord` gains `background`: a struct literal adds `kind: PostKind::Result`, `reply: false`, `group_turn: false`, `background: false` (or uses `Post::new`, `TaskSpec::new`). `ark_runtime::PostKind` and `ark_orchestrate::WORK_LATER` are new exports.
+
+### Changed
+
+- The record of an `agents.message` note keeps its text, masked for keys and passwords (clipped to 1000). Notes saved earlier have none and are not shown in exchanges.
+- A failed write of that record is logged instead of dropped silently.
 
 ### Known gaps
 
@@ -392,7 +401,6 @@ Found in the owner's ARK Desktop traces, 71 turns from 2026-10-03 to 2026-11-07 
 
 - Project disclosure keeps sidebar rows stable, reverses smoothly and releases hidden controls after closing. Keyboard and reduced-motion toggles finish immediately. Chat lists no longer replay entrance animations on refresh. Project actions stay visible on touch screens.
 
-
 - Let a project conversation occupy the main column with scoped lifecycle, upload ownership, title actions and keyboard focus.
 - Keep an agent display title and description separate from its stable identity and behavioral instructions. External chat lists and snapshots use the same display metadata.
 - Accept exact, idempotent objective/context chat turns through an optional submit request identifier.
@@ -453,7 +461,6 @@ Found in the owner's ARK Desktop traces, 71 turns from 2026-10-03 to 2026-11-07 
 - Keep simultaneous first Browser requests on one owned page.
 - Keep conversation identity stable across coding, auxiliary calls and retries without changing shared providers.
 - Saving a Go key reports configuration only. Public discovery does not verify subscription access.
-
 
 ## [0.27.3] - 2026-10-29
 

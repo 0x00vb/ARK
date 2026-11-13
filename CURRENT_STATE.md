@@ -7,6 +7,15 @@
 | Not verified | No real-app run yet (Desktop with a live model calling `work.later`); only the WebKit fixture screenshots and a real Host test with scripted models |
 | Next | implementation review, full `ci.sh`, then the owner's release decision; P2 (`ark-exchanges`) merges separately |
 
+# Core P2 in progress: agents talk among themselves, the person opens a line (2026-11-13)
+
+| State | Value |
+| --- | --- |
+| Branch | `exchanges` (worktree `ark-exchanges`) off v0.46.0 (a5156f2). Not committed, not released |
+| Change | ADR 0119. `ark_interact::exchanges` (`lines`, `talk`) over `ark_orchestrate::said`; the note record keeps its text; window calls `exchange_lines`, `exchange_talk`; `ark.chatView({ exchanges })` draws one line under a turn keyed `task:<id>` and opens the messages over the chat surface |
+| Evidence | `../board/evidence/business-team-20261112/p2/` (PLAN, DESIGN, qa reviews, ci.log, screens) |
+| Open | Desktop must pass `exchanges` to `chatView` and set `--pet-ink` per pet; the plain chat's stored turns carry no task id so draw no lines; agents on another computer show none; Desktop wiring and two recheck items (8, 10) left to the coordinator; phone is P5; live model check of agents messaging each other needs the owner's OK |
+
 # Core 0.46.0 release: a chat makes a group of agents, links open, selection shows (2026-11-13)
 
 | Release state | Value |

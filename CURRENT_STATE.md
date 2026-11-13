@@ -8,6 +8,8 @@
 | Gates | fmt, protocol, version, macOS 11 check, clippy `-D warnings`; workspace tests pass; node 22 of 22; WebKit fixtures 146 of 146 (new `palette.test.mjs`, `links.test.mjs`); real-host page suite 66 of 68 (the 2 on the v0.36.0 to v0.45.0 known list: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`); notification 3 of 3; release build; simulated benchmark no delta. Five qa reviews (plan, implementation and three rechecks): blockers fixed, each with a test that fails without it (rollback and retry, group-only work asks, group-only message refused, a person-ended member stays ended, delegation chain asks, window group members join) |
 | Not verified | A live model calling `groups.set` at the right moment and not for a one-off request; a Desktop screenshot of a group made from chat; a remote-runtime window's links (`window.open` there is still dropped) |
 | Open | ADR 0113 group chats: a member's `@Name` reply starts another member's turn as a person turn (board card `group-chat-handon-gate-20261113`) |
+| Fresh clone | `verify-release.sh v0.46.0`: all checks passed, release verified from a fresh clone of the canonical remote |
+| Consumer | Desktop 0.16.0 pins this tag (committed; signing waits on the Apple developer agreement) |
 | Evidence | `../board/evidence/business-team-20261112/` |
 
 # Core 0.45.0 release: fixes from the owner's first day on 0.44.0, an agent keeps the role it is told (2026-11-09)

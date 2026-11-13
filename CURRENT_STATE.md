@@ -1,10 +1,14 @@
-# P4 in progress: an agent schedules work from its own chat (2026-11-13, branch agent-schedules, not released)
+# Core 0.48.0 release: an agent schedules work from its own chat (2026-11-13)
 
-| State | Value |
+| Release state | Value |
 | --- | --- |
-| Change | `agents.schedule` and `agents.unschedule` on a named agent's chat turn; each run answers in that chat as the agent's message; the chat's mode decides the approval (ADR 0120). Fixes a schedule that reported into an agent's chat failing at its first run |
-| Evidence | `../board/evidence/business-team-20261112/p4/`, tests `crates/ark-orchestrate/tests/schedules_from_chat.rs` |
-| Open | An agent with `allow_mutate` does not ask in ask mode (owner to confirm). Live model check and dogfood not run. Gates: `../board/evidence/business-team-20261112/p4/RESULTS.md` |
+| Latest tag | v0.48.0 (2026-11-13), over v0.47.0 (d2e9280). ADR 0120 (an agent schedules work from its own chat) |
+| Change | `agents.schedule` and `agents.unschedule` on a named agent's chat turn (not on scheduled runs, started or delegated work, or Plan); each run posts once into that chat as the agent's message, scrubbed; the chat's mode decides whether creating it asks (Auto no, ask mode yes); `to` is only the asker; an agent sees only schedules it made; at most 10, at most once an hour. A schedule reporting into a named agent's chat no longer fails at its first run (admission checked the chat against the wrong project) |
+| Found from | The owner's plan of 2026-11-12 (P4) and the decision "a new schedule inherits the chat's mode" |
+| Gates | qa: plan (4 blockers decided), implementation (1 blocker), two rechecks (2 + 2 blockers), each fixed with a test that fails without it. Release commit: see below |
+| Owner to confirm | An agent with `allow_mutate` does not ask for a schedule even in ask mode (it asks for nothing today) |
+| Not verified | A live model scheduling from chat; the real app |
+| Evidence | `../board/evidence/business-team-20261112/p4/` |
 
 # Core 0.47.0 release: an agent answers later, agents' exchanges in one line (2026-11-13)
 

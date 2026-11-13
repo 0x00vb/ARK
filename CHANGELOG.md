@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-13
+
 A named agent schedules work from its own chat, and each run answers there as its next message (ADR 0120).
 
 ### Added

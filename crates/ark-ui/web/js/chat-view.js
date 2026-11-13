@@ -9,14 +9,20 @@
 // Two fields change in place, without drawing the turn again: `streaming` (the text being
 // written now) and `approvals` (questions the run waits on, as `ark:approval` brought them).
 // `call(key, id)` loads a tool call's detail so its row opens; `stop()` is the chat's Stop.
+// `exchanges` (ADR 0119) is `{ project, agent, session?, name?, look? }`, or a function returning
+// it, or null, read at each use: a view that switches agent and chat gives the new one and calls
+// `refreshExchanges()`. The turns whose key is `task:<id>` get a quiet line when that task reached
+// other agents, and the line opens what they said over this surface. The lines come from the
+// window call `exchange_lines`. Null: no lines and no calls.
 
 import { Thread } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { createChatSurface } from "./chat-surface.js";
+import { exchangeLine, exchangeView } from "./exchange.js";
 
 const NEAR_END = 80;
 
-export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null, location = null } = {}) {
+export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null, location = null, exchanges = null } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
   if (location) Object.defineProperty(api, "location", {get: () => {
@@ -170,6 +176,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     for (const [key, entry] of views) if (!next.has(key)) drop(entry);
     views = next;
     drawn = true;
+    decorate();
     const kept = anchor && views.get(anchor[0])?.view.el;
     if (stick) thread.scroll(true);
     else if (kept) scroller.scrollTop = kept.offsetTop - anchorOffset;
@@ -184,6 +191,106 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     drawn = false;
   }
 
+  // ---- what agents said to each other ------------------------------------------------------
+  const LINES_EVERY = 1000;
+  let lines = new Map();
+  let drawnLines = new Map();
+  let reads = 0;
+  let open = null;
+  let timer = 0;
+  let disposed = false;
+
+  const target = () => (typeof exchanges === "function" ? exchanges() : exchanges) || null;
+
+  function decorate() {
+    if (!exchanges) return;
+    for (const [turnKey, entry] of views) {
+      const turn = String(turnKey).startsWith("task:") ? String(turnKey).slice(5) : null;
+      const line = turn && lines.get(turn);
+      const there = entry.view.el.querySelector(":scope > .xline");
+      const sig = line ? JSON.stringify([line.label, line.count, line.failed]) : "";
+      if (!line) { there?.remove(); continue; }
+      if (there && there.dataset.sig === sig) continue;
+      there?.remove();
+      // The first read draws without motion; a line that comes with a later read fades in.
+      const button = exchangeLine(line, (row, opener) => show(row, opener), { fresh: reads > 1 && !drawnLines.has(turn) });
+      button.dataset.sig = sig;
+      entry.view.el.append(button);
+      drawnLines.set(turn, sig);
+      if (thread.stick) thread.scroll();
+    }
+  }
+
+  async function loadLines() {
+    const t = target();
+    if (!exchanges || disposed || !t) return;
+    let rows;
+    try {
+      rows = await base.call("exchange_lines", { project: t.project, agent: t.agent, session: t.session || "" });
+    } catch (error) {
+      console.warn("ark: could not read what agents said to each other", error);
+      return;
+    }
+    // The app switched to another chat while this was read: that chat reads for itself.
+    const now = target();
+    if (disposed || !now || now.project !== t.project || now.agent !== t.agent || (now.session || "") !== (t.session || "")) return;
+    reads++;
+    lines = new Map(rows.map((row) => [row.turn, row]));
+    decorate();
+  }
+
+  function scheduleLines() {
+    if (!exchanges || timer || document.hidden) return;
+    timer = setTimeout(() => {
+      timer = 0;
+      const t = target();
+      if (open?.open && (!t || t.agent !== open.agent || t.project !== open.project)) open.close();
+      void loadLines();
+      open?.refresh();
+    }, LINES_EVERY);
+  }
+  const stopListening = exchanges ? base.on?.("ark:orch", scheduleLines) : null;
+
+  /// The app switched agent or chat (or has none now): the lines of the one before go, the new
+  /// one's are read, and an open view of the old one closes.
+  function refreshExchanges() {
+    open?.close();
+    lines = new Map();
+    drawnLines = new Map();
+    reads = 0;
+    decorate();
+    return loadLines();
+  }
+
+  function show(line, opener) {
+    const d = target();
+    if (open?.open || !d) return;
+    const self = { agent: d.agent, name: d.name || d.agent, look: d.look || "" };
+    const others = line.with;
+    const people = { first: self, others };
+    const read = async () => {
+      const t = target();
+      if (!t || t.agent !== d.agent || t.project !== d.project) return { first: people.first, messages: [] };
+      const talks = await Promise.all(others.map((o) => base.call("exchange_talk", { project: t.project, a: t.agent, b: o.agent })));
+      return { first: talks[0].with[0], messages: talks.flatMap((t, i) => t.messages.map((m) => ({ ...m, peer: others[i].agent }))).sort((a, b) => a.at_ms - b.at_ms) };
+    };
+    open = exchangeView({
+      surface,
+      people,
+      agent: d.agent,
+      project: d.project,
+      read,
+      sink: (error) => console.warn("ark: could not read an exchange", error),
+      onClose: () => {
+        open = null;
+        const again = surface.querySelector(`.xline[data-turn="${CSS.escape(line.turn)}"]`) || opener;
+        if (again?.isConnected) again.focus({ preventScroll: true });
+      },
+    });
+  }
+
+  if (exchanges) void loadLines();
+
   return {
     render,
     reset,
@@ -194,6 +301,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
       composer.addLine(text, options);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     },
+    refreshExchanges,
     focus: () => composer.focus(),
     set: (text) => composer.set(text),
     /// What the composer says while empty, whether it takes a message now, and whether the
@@ -223,6 +331,10 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
       }
     },
     dispose() {
+      disposed = true;
+      clearTimeout(timer);
+      stopListening?.();
+      open?.close();
       for (const entry of views.values()) entry.view.stop();
       views = new Map();
       composer.dispose();

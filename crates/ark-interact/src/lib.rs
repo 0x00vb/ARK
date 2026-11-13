@@ -23,6 +23,7 @@ pub mod attention;
 mod builtins;
 pub mod capabilities;
 pub mod command;
+pub mod exchanges;
 pub mod fmt;
 pub mod groups;
 pub mod held;

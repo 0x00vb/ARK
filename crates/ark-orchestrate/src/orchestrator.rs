@@ -61,6 +61,7 @@ mod automation_reports;
 mod automation_schedule;
 mod automations;
 mod elsewhere;
+mod exchange;
 mod general;
 mod groups;
 mod legacy_automation;
@@ -73,6 +74,7 @@ mod resolution;
 mod results;
 pub use resolution::{WorkFailure, WorkRunRef};
 mod threads;
+pub use exchange::{known, said, Known, Said};
 pub use threads::{agent_threads, latest_thread_title, person_tasks, AgentThread};
 mod work;
 mod work_snapshot;
@@ -5363,12 +5365,22 @@ impl Inner {
             task: task.map(str::to_string),
             at_ms: now_ms(),
         };
-        let _ = serde_json::to_value(&edge).map(|v| {
-            let id = format!("{}-{}", edge.at_ms, uuid::Uuid::new_v4().simple());
-            self.engine
-                .store
-                .put_record(MESSAGE, &id, self.project.id.as_str(), &v)
-        });
+        let record = exchange::MessageRecord {
+            edge: edge.clone(),
+            text: clip(&ark_store::scrub_text(text), 1000),
+        };
+        let id = format!("{}-{}", edge.at_ms, uuid::Uuid::new_v4().simple());
+        if let Err(error) = serde_json::to_value(&record)
+            .map_err(OrchError::from)
+            .and_then(|v| {
+                self.engine
+                    .store
+                    .put_record(MESSAGE, &id, self.project.id.as_str(), &v)
+                    .map_err(OrchError::from)
+            })
+        {
+            tracing::warn!(record = %id, "could not store a message between agents: {error}");
+        }
         self.state.lock().unwrap().messages.push(edge);
         self.emit(EventKind::Message {
             from: from.to_string(),

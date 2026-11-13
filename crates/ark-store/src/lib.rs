@@ -36,6 +36,7 @@ pub use error::StoreError;
 pub use index::Hit;
 pub use memory::MemoryReview;
 pub use records::RecordTransaction;
+pub use scrub::scrub as scrub_text;
 pub use writer::LOCK_FILE;
 pub type Result<T> = std::result::Result<T, StoreError>;
 

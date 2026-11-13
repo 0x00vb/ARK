@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+Agents talk among themselves and the person sees one quiet line and opens it (ADR 0119).
+
+### Added
+
+- `ark_interact::exchanges`: `lines` (what one chat's turns started with other agents: a note, a brief, a reply, grouped per turn, with a plain label) and `talk` (the messages between two agents, newest 200, each clipped to 2000 characters). `ark_orchestrate::said`, `known`, `Said`, `Known`: the same read from the store.
+- Window calls `exchange_lines {project, agent, session?}` and `exchange_talk {project, a, b}`.
+- `ark.chatView(el, { exchanges: { project, agent, name?, look? }, ... })` (the `exchanges` option): a turn keyed `task:<id>` gets a line ("2 messages with CMO", "Messaged CSO and CMO") when that task reached other agents; the line opens what they said over the chat surface (Back or Esc returns at the same scroll). The name takes `--pet-ink` and carries `data-variant`.
+- `ark_store::scrub_text`: the store's scrubber, public.
+- `chatView`'s `exchanges` option may be a function returning the descriptor or null, read at each use; `view.refreshExchanges()` after a switch of agent or chat.
+
+### Changed
+
+- The record of an `agents.message` note keeps its text, masked for keys and passwords (clipped to 1000). Notes saved earlier have none and are not shown in exchanges.
+- A failed write of that record is logged instead of dropped silently.
+
 ## [0.46.0] - 2026-11-13
 
 A chat makes a group of agents with shared rules (ADR 0117). Links in replies open. Selected text shows in every palette; no palette uses cyan.

@@ -5032,6 +5032,34 @@ impl Host {
                     ark_interact::ark_orchestrate::agent_contacts(&self.engine.store, &project)?,
                 )?)
             }
+            // What agents said to each other (ADR 0119), read from the store like the contacts:
+            // a chat's lines, and the messages between two agents.
+            "exchange_lines" | "exchange_talk" => {
+                let project = s("project");
+                anyhow::ensure!(
+                    self.engine
+                        .store
+                        .get_project(&ProjectId(project.clone()))?
+                        .is_some(),
+                    "there is no project `{project}` here"
+                );
+                if method == "exchange_lines" {
+                    let chat = Some(s("session")).filter(|c| !c.is_empty());
+                    Ok(serde_json::to_value(ark_interact::exchanges::lines(
+                        &self.engine,
+                        &project,
+                        &s("agent"),
+                        chat.as_deref(),
+                    )?)?)
+                } else {
+                    Ok(serde_json::to_value(ark_interact::exchanges::talk(
+                        &self.engine,
+                        &project,
+                        &s("a"),
+                        &s("b"),
+                    )?)?)
+                }
+            }
             "agents" if params["all"].as_bool() == Some(true) => self.all_agents_placed().await,
             "agent_move" => self.agent_move(&params).await,
             // An agent the sidebar lists, in its own folder whichever chat is shown: Delete

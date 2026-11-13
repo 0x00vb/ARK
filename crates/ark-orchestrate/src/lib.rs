@@ -57,10 +57,10 @@ pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskN
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{
     agent_threads, automation_attention_runs, automation_projects_with_work, automation_question,
-    latest_thread_title, person_tasks, stored_automation_run, AgentThread, GeneralWorkResult,
-    GeneralWorkStart, GeneralWorkState, NamedProfile, Orchestrator, OrchestratorBuilder, WorkEntry,
-    WorkFailure, WorkPage, WorkReceipt, WorkRunRef, WorkTarget, WorkTemplate, INTERRUPTED,
-    RESTARTED, WAITING_PERSON,
+    known, latest_thread_title, person_tasks, said, stored_automation_run, AgentThread,
+    GeneralWorkResult, GeneralWorkStart, GeneralWorkState, Known, NamedProfile, Orchestrator,
+    OrchestratorBuilder, Said, WorkEntry, WorkFailure, WorkPage, WorkReceipt, WorkRunRef,
+    WorkTarget, WorkTemplate, INTERRUPTED, RESTARTED, WAITING_PERSON,
 };
 pub use participants::chat_participants;
 pub use record::{

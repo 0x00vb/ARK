@@ -67,6 +67,12 @@ import { setAgentIdentity } from "./dom.js";
 //                      Optional `files.captureOrigin()` runs before the chooser opens and returns
 //                      `{ uploadApi, appendDraft, progressTarget, started?, finished? }`, all bound to that origin.
 //                      `uploads` is this view's upload container.
+//                      Optional `exchanges` (ADR 0119): `{ project, agent, session?, name?, look? }`, or
+//                      a function returning it or null, read at each use. Turns keyed `task:<id>`
+//                      get a quiet line when that task reached other agents; it opens their messages
+//                      over this view (read only; Back or Esc returns). A view that switches agent or
+//                      chat calls `view.refreshExchanges()` after; null means no lines and no calls.
+//                      Names take `--pet-ink`; the app sets it per `data-variant`.
 //                      `turns` take `chat_read`'s transcript shape plus `key`, `note`,
 //                      `working: { label, since }`, `status`, `after` (an app's node under
 //                      the reply), `streaming` (text being written now) and `approvals`

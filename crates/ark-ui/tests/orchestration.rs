@@ -1190,3 +1190,71 @@ async fn an_agent_gets_a_folder_of_its_own_and_gives_it_back() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn a_chat_makes_a_group_and_the_window_lists_its_agents_and_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let board = json!({
+        "name": "Board",
+        "rules": ["Answer in Spanish."],
+        "members": [
+            { "name": "cmo", "role": "Marketing", "personality": "Bold." },
+            { "name": "coo", "role": "Operations", "personality": "Careful." }
+        ]
+    });
+    let host = open_with(
+        dir.path(),
+        Arc::new(AtomicUsize::new(0)),
+        model("groups.set", board),
+    )
+    .await;
+    let mut rx = host.subscribe();
+    host.call("spawn_agent", json!({"spec":{"name":"ceo","role":"leads"}}))
+        .await
+        .unwrap();
+    let sent = host
+        .call(
+            "submit_task",
+            json!({"agent":"ceo","request_id":"g1","task":{"objective":"Make a board: a CMO and a COO."}}),
+        )
+        .await
+        .unwrap();
+    let task = sent["task"].clone();
+    let mut done = Value::Null;
+    for _ in 0..500 {
+        done = host.call("task", json!({"task":task})).await.unwrap()["task"].clone();
+        if done["state"] == "done" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(done["state"], "done", "{done}");
+    wait_for(&mut rx, "the group event", |v| {
+        v["kind"] == "ext" && v["name"] == "ark:group"
+    })
+    .await;
+
+    let all = host.call("agents", json!({"all": true})).await.unwrap();
+    let names: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"cmo") && names.contains(&"coo"),
+        "{names:?}"
+    );
+    let groups = host.call("groups", json!({})).await.unwrap();
+    assert_eq!(groups.as_array().unwrap().len(), 1, "{groups}");
+    assert_eq!(groups[0]["name"], "Board");
+    assert_eq!(groups[0]["members"].as_array().unwrap().len(), 2);
+    let agents = host.call("agents", json!({})).await.unwrap();
+    let cmo = agents
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "cmo")
+        .unwrap();
+    assert_eq!(cmo["spec"]["groups"][0], groups[0]["id"]);
+}

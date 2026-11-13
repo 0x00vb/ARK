@@ -302,6 +302,9 @@ async fn forward_attention(
                 json!({ "kind": "sessions", "session": format!("agent:{}:{agent}", ev.project) }),
             );
         }
+        if let EventKind::Group { group } = &ev.kind {
+            host.emitter().emit("ark:group", json!({ "id": group }));
+        }
         match &ev.kind {
             // A retry takes a failed task out of the list (`TaskQueued`).
             EventKind::Asked { .. }

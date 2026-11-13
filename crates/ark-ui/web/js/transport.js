@@ -38,6 +38,7 @@ export function connect() {
         tauri.core.invoke("ark_subscribe", { channel: ch });
       },
       pickFolder: (title) => tauri.core.invoke("ark_pick_folder", { title: title || null }),
+      openLink: (url) => tauri.core.invoke("ark_open_link", { url }),
       // The packaged app, not the runtime: signed updates from its embedded endpoint. No URL,
       // header, version or downgrade input crosses this bridge.
       updates: {

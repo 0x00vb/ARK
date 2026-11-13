@@ -849,6 +849,7 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             Tone::Muted,
         ),
         EventKind::Automation { .. }
+        | EventKind::Group { .. }
         | EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,

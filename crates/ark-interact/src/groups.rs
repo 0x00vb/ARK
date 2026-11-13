@@ -3,10 +3,11 @@
 //! A group holds agents of one or more projects. A person's message goes to the members the
 //! rules below pick; each answers in its own thread for the group, from a bounded brief.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
+
+pub use ark_orchestrate::group::{Group, Member, SCOPE};
 
 /// The most agent replies one person message may cause.
 pub const MAX_REPLIES: usize = 6;
@@ -16,41 +17,6 @@ const ROUTER_CHARS: usize = 300;
 /// Messages and characters one agent's brief holds; the newest are kept.
 const BRIEF_MESSAGES: usize = 20;
 const BRIEF_CHARS: usize = 6000;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Member {
-    pub project: String,
-    pub agent: String,
-}
-
-impl Member {
-    pub fn new(project: impl Into<String>, agent: impl Into<String>) -> Self {
-        Member {
-            project: project.into(),
-            agent: agent.into(),
-        }
-    }
-
-    /// The key of the group's `threads` and `cursors` maps.
-    pub fn key(&self) -> String {
-        format!("{}/{}", self.project, self.agent)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Group {
-    pub id: String,
-    pub name: String,
-    pub members: Vec<Member>,
-    /// Member key to the thread it answers in for this group.
-    #[serde(default)]
-    pub threads: BTreeMap<String, String>,
-    /// Member key to the last message id its brief included.
-    #[serde(default)]
-    pub cursors: BTreeMap<String, String>,
-    pub created_ms: u64,
-    pub updated_ms: u64,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupMessage {

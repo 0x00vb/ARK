@@ -7,6 +7,7 @@ import { h, clear } from "./dom.js";
 import { registry } from "./ext.js";
 import { pluginArtwork } from "./plugin-art.js";
 import { skillsMarketplace } from "./marketplace-skills.js";
+import { openOutside } from "./links.js";
 
 function entryIcon(entry) {
   return pluginArtwork(entry);
@@ -110,7 +111,7 @@ function marketplace(el, ark) {
     try {
       if (entry.source === "local") {
         const { url } = await ark.call("capability_connect", { id: entry.capabilityId });
-        window.open(url, "_blank", "noopener");
+        openOutside(url);
       } else {
         await ark.ext("desktop.plugins_connect", { offer: entry.id });
       }

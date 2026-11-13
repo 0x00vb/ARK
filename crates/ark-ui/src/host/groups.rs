@@ -2,17 +2,17 @@
 //! through the members. The rules are in `ark_interact::groups`.
 
 use super::*;
+use ark_interact::ark_orchestrate::group::rule_set_name;
 use ark_interact::ark_orchestrate::{AgentState, Orchestrator, TaskSpec, TaskState};
 use ark_interact::groups::{
     brief, context, from_router, hand_on, route, router_prompt, sortable_id, Candidate, Group,
-    GroupMessage, Member, Route, MAX_REPLIES,
+    GroupMessage, Member, Route, MAX_REPLIES, SCOPE,
 };
 use ark_model::Message;
-use ark_sdk::prelude::ark_runtime::Role;
+use ark_sdk::prelude::ark_runtime::{Role, RuleBook};
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-const GROUPS: &str = "#groups";
 const SHOWN: usize = 200;
 const ROUTER_WAIT: Duration = Duration::from_secs(15);
 
@@ -84,10 +84,16 @@ impl Host {
                     group.name = name;
                 }
                 if params.get("members").is_some() {
+                    let before = std::mem::take(&mut group.members);
                     group.members = self.live_members(members()?)?;
                     let keys: Vec<String> = group.members.iter().map(Member::key).collect();
                     group.threads.retain(|k, _| keys.contains(k));
                     group.cursors.retain(|k, _| keys.contains(k));
+                    let left: Vec<Member> = before
+                        .into_iter()
+                        .filter(|m| !group.members.contains(m))
+                        .collect();
+                    self.group_leave(&group.id, &left)?;
                 }
                 self.group_put(&group)?;
                 self.emitter().emit("ark:group", json!({ "id": group.id }));
@@ -96,6 +102,9 @@ impl Host {
             "group_delete" => {
                 let group = self.group_get(&text("id"))?;
                 let store = &self.engine.store;
+                // Contact and rules end first; a failure leaves the group to delete again.
+                self.group_leave(&group.id, &group.members)?;
+                RuleBook::new(store).remove(&rule_set_name(&group.id))?;
                 for m in self.group_msgs(&group.id)? {
                     store.delete_record("group_msg", &m.id)?;
                 }
@@ -120,7 +129,7 @@ impl Host {
         Ok(self
             .engine
             .store
-            .list_records("group", Some(GROUPS))?
+            .list_records("group", Some(SCOPE))?
             .into_iter()
             .filter_map(|v| serde_json::from_value(v).ok())
             .collect())
@@ -138,7 +147,25 @@ impl Host {
     fn group_put(&self, group: &Group) -> anyhow::Result<()> {
         self.engine
             .store
-            .put_record("group", &group.id, GROUPS, &serde_json::to_value(group)?)?;
+            .put_record("group", &group.id, SCOPE, &serde_json::to_value(group)?)?;
+        Ok(())
+    }
+
+    /// Take the group off these members: their contact and rules end with the membership.
+    fn group_leave(&self, id: &str, members: &[Member]) -> anyhow::Result<()> {
+        let mut by_project: HashMap<&str, Vec<String>> = HashMap::new();
+        for m in members {
+            by_project
+                .entry(m.project.as_str())
+                .or_default()
+                .push(m.agent.clone());
+        }
+        for (project, agents) in by_project {
+            // A project that is gone has no agent left to take it off.
+            if let Ok(o) = self.group_orchestrator(project) {
+                o.leave_group(id, &agents)?;
+            }
+        }
         Ok(())
     }
 

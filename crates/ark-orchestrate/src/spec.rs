@@ -58,6 +58,10 @@ pub struct AgentSpec {
     /// Offer the diagram tool (`diagram.create`, `diagram.read`).
     #[serde(default)]
     pub diagrams: bool,
+    /// The groups it belongs to (ids, [`crate::group`]). Members of one group may message and
+    /// start each other, never delegate, and follow the group's rules.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
     /// The skills it may read (`*`: all, else names; empty: none). Their catalog rides in each
     /// task's first message; their instructions load with `skills.read`
     /// ([`ark_runtime::skills`]).
@@ -120,6 +124,7 @@ impl AgentSpec {
             profile_name: None,
             profile: None,
             skills: Vec::new(),
+            groups: Vec::new(),
         }
     }
     pub fn role(mut self, r: impl Into<String>) -> Self {
@@ -191,6 +196,37 @@ impl AgentSpec {
         other != self.name
             && (self.parent.as_deref() == Some(other)
                 || self.delegates_to.iter().any(|d| d == "*" || d == other))
+    }
+
+    /// The spec of an agent this one creates. It keeps what bounds its creator (model, tools,
+    /// budget, profile, skills) and nothing that is the creator's own: display metadata,
+    /// standing role, contacts and groups.
+    pub(crate) fn colleague(
+        &self,
+        name: &str,
+        role: &str,
+        instructions: &str,
+        standing: &str,
+    ) -> AgentSpec {
+        AgentSpec {
+            name: name.to_string(),
+            title: String::new(),
+            description: String::new(),
+            look: String::new(),
+            role: role.to_string(),
+            instructions: instructions.to_string(),
+            standing: standing.to_string(),
+            delegates_to: Vec::new(),
+            groups: Vec::new(),
+            allow_mutate: false,
+            parent: Some(self.name.clone()),
+            ..self.clone()
+        }
+    }
+
+    /// Whether `other` is in a group it is in.
+    pub fn shares_group(&self, other: &AgentSpec) -> bool {
+        self.groups.iter().any(|g| other.groups.contains(g))
     }
 
     /// Whether it may hand tasks to `other`.

@@ -75,6 +75,21 @@ impl<'a> RuleBook<'a> {
         Ok(all.pop())
     }
 
+    /// Delete every version of a set. Returns how many versions it held.
+    pub fn remove(&self, name: &str) -> Result<usize, AgentError> {
+        let mut removed = 0;
+        for v in self.store.list_records(SET, Some(name))? {
+            let set: RuleSet = serde_json::from_value(v)?;
+            if self
+                .store
+                .delete_record(SET, &format!("{}@{}", set.name, set.version))?
+            {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     /// The newest version of every set.
     pub fn list(&self) -> Result<Vec<RuleSet>, AgentError> {
         let mut newest: std::collections::BTreeMap<String, RuleSet> = Default::default();
@@ -658,6 +673,7 @@ mod tests {
         assert_eq!(v2.version, 2);
         assert_eq!(book.get("eng", Some(1)).unwrap().unwrap().rules.len(), 1);
         assert_eq!(book.list().unwrap().len(), 1);
+        assert_eq!(book.remove("other").unwrap(), 0);
 
         book.bind(&RuleBinding::new("eng", RuleScope::Project("p".into())))
             .unwrap();
@@ -671,6 +687,9 @@ mod tests {
         let project = book.resolve(&[RuleScope::Project("p".into())]).unwrap();
         assert_eq!(project[0].version, 2, "unpinned follows the newest");
         assert!(book.unbind("eng", &RuleScope::Task("t".into())).unwrap());
+        assert_eq!(book.remove("eng").unwrap(), 2);
+        assert!(book.get("eng", None).unwrap().is_none());
+        assert!(book.get("eng", Some(1)).unwrap().is_none());
     }
 
     #[tokio::test]

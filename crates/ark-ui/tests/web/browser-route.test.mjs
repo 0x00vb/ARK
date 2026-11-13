@@ -41,6 +41,7 @@ async function fixture({ remoteResource = false, destinationBrowser = true, fail
     "./file.js": { KIND_ICON: {} },
     "./processes.js": { processes() {}, watchProcesses() {} },
     "./keys.js": { mod: () => false },
+    "./links.js": { openOutside: (url) => calls.push({ kind: "window.open", args: [url, "_blank", "noopener"] }) },
   };
   const module = new SourceTextModule(source, { context });
   await module.link(specifier => {

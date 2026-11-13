@@ -11,6 +11,7 @@ import { h, icon, clear } from "./dom.js";
 import { KIND_ICON } from "./file.js";
 import { processes, watchProcesses } from "./processes.js";
 import { mod } from "./keys.js";
+import { openOutside } from "./links.js";
 
 /// What the agent may put at the prompt: one line, no control characters, so it cannot run
 /// a command itself (that would skip approval). The person presses Enter.
@@ -305,7 +306,7 @@ function browser(el, params, ark) {
   const address = h("input.wb-input", { placeholder: "Search or enter an address", spellcheck: "false", "aria-label": "Address" });
   const host = h("div.wb-frame-host");
   const blank = h("div.wb-empty", "Search or enter an address");
-  const out = () => s.url && window.open(s.url, "_blank", "noopener");
+  const out = () => s.url && openOutside(s.url);
   const back = h("button.icon-btn", { type: "button", title: "Back", "aria-label": "Back", onclick: () => nav.back() }, icon("arrow-left"));
   const reload = h("button.icon-btn", { type: "button", title: "Reload", "aria-label": "Reload", onclick: () => s.url && nav.reload() }, icon("reload"));
   const outBtn = h("button.icon-btn", { type: "button", title: "Open in your browser", "aria-label": "Open in your browser", onclick: out }, icon("external"));

@@ -1,3 +1,15 @@
+# Core 0.46.0 release: a chat makes a group of agents, links open, selection shows (2026-11-13)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.46.0 (2026-11-13), over v0.45.0 (be08c0c). ADR 0117 (a chat makes a group of agents with shared rules) |
+| Change | `groups.set` on the person's own turn (first call): new members with their own role and personality, existing agents join, shared always-rules (20 x 300 per group, 20 per agent), sibling `agents.message` and `agents.start`, no delegation. Work that reaches an agent only through a group (any hop) asks before it changes anything, and a group-only member cannot message an agent with `allow_mutate`. New agents are made first; a failure ends those made and writes nothing else, and the same call later makes them again. `agents.create` no longer copies look, standing, title, description or delegates. Links in replies: web links open in the browser (`ark_open_link`), relative paths open in the file view. `--selection` token per palette; no cyan |
+| Found from | The owner's requests of 2026-11-12 and 2026-11-13: agents that work as a team from chat (plan `../board/evidence/business-team-20261112/PLAN.md`, P1), selection not visible on any palette, links in replies do nothing |
+| Gates | fmt, protocol, version, macOS 11 check, clippy `-D warnings`; workspace tests pass; node 22 of 22; WebKit fixtures 146 of 146 (new `palette.test.mjs`, `links.test.mjs`); real-host page suite 66 of 68 (the 2 on the v0.36.0 to v0.45.0 known list: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`); notification 3 of 3; release build; simulated benchmark no delta. Five qa reviews (plan, implementation and three rechecks): blockers fixed, each with a test that fails without it (rollback and retry, group-only work asks, group-only message refused, a person-ended member stays ended, delegation chain asks, window group members join) |
+| Not verified | A live model calling `groups.set` at the right moment and not for a one-off request; a Desktop screenshot of a group made from chat; a remote-runtime window's links (`window.open` there is still dropped) |
+| Open | ADR 0113 group chats: a member's `@Name` reply starts another member's turn as a person turn (board card `group-chat-handon-gate-20261113`) |
+| Evidence | `../board/evidence/business-team-20261112/` |
+
 # Core 0.45.0 release: fixes from the owner's first day on 0.44.0, an agent keeps the role it is told (2026-11-09)
 
 | Release state | Value |

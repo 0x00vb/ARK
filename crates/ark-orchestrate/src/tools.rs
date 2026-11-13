@@ -26,7 +26,8 @@ use ark_tools::{ActionOutput, Adapter, AdapterError, RunCtx};
 use serde_json::{json, Value};
 
 use crate::board::{self, WorkChange, WorkItem, WorkState};
-use crate::orchestrator::Inner;
+use crate::group::{self, Candidate, Request};
+use crate::orchestrator::{valid_name, Inner};
 use crate::record::{AgentState, TaskRecord};
 use crate::spec::{AgentSpec, TaskSpec};
 use crate::Orchestrator;
@@ -36,6 +37,7 @@ pub const WAIT: &str = "agents.wait";
 pub const MESSAGE: &str = "agents.message";
 pub const CREATE: &str = "agents.create";
 pub const ROLE_SET: &str = "role.set";
+pub const GROUPS_SET: &str = "groups.set";
 pub const START: &str = "agents.start";
 pub const SCHEDULE: &str = "agents.schedule";
 pub const UNSCHEDULE: &str = "agents.unschedule";
@@ -109,7 +111,7 @@ impl Adapter for RoleTools {
             .orch
             .upgrade()
             .ok_or_else(|| AdapterError::Tool("the orchestrator is gone".into()))?;
-        if orch.read_before(&self.task) {
+        if orch.read_before(&self.task, ROLE_SET) {
             return Err(AdapterError::Tool(
                 "Set your role only from the person's own message, before reading anything else."
                     .into(),
@@ -127,6 +129,162 @@ impl Adapter for RoleTools {
             )
         };
         Ok(ActionOutput::json(json!({ "result": said })))
+    }
+}
+
+/// `groups.set`: a group of agents with shared rules, as its person asks for it in chat.
+/// Registered only for a task the person typed (ADR 0117), like `role.set`.
+pub(crate) struct GroupTools {
+    pub orch: Weak<Inner>,
+    pub agent: String,
+    pub task: String,
+}
+
+impl GroupTools {
+    fn request(input: &Value) -> Result<Request, String> {
+        let text = |v: &Value, k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
+        let name = text(input, "name");
+        if name.is_empty() || name.chars().count() > group::NAME_CHARS {
+            return Err(format!("name: 1 to {} characters", group::NAME_CHARS));
+        }
+        let rules: Option<Vec<String>> = match input.get("rules") {
+            None => None,
+            Some(v) => Some(
+                v.as_array()
+                    .ok_or("rules is a list of texts")?
+                    .iter()
+                    .map(|r| r.as_str().map(|r| r.trim().to_string()))
+                    .collect::<Option<_>>()
+                    .ok_or("rules is a list of texts")?,
+            ),
+        };
+        if rules.as_ref().is_some_and(|rules| {
+            rules.len() > group::MAX_RULES
+                || rules
+                    .iter()
+                    .any(|r| r.is_empty() || r.chars().count() > group::RULE_CHARS)
+        }) {
+            return Err(format!(
+                "rules: at most {} rules of 1 to {} characters",
+                group::MAX_RULES,
+                group::RULE_CHARS
+            ));
+        }
+        let listed = input
+            .get("members")
+            .and_then(Value::as_array)
+            .ok_or("members is a list")?;
+        if !(1..=8).contains(&listed.len()) {
+            return Err("members: 1 to 8 agents".into());
+        }
+        let mut members: Vec<Candidate> = Vec::new();
+        for m in listed {
+            let name = text(m, "name").to_lowercase().replace(' ', "-");
+            if name.contains('/') {
+                return Err(format!("`{name}`: only agents of this folder can join"));
+            }
+            if !valid_name(&name) {
+                return Err(format!("`{name}` is not a valid agent name"));
+            }
+            if members.iter().any(|c| c.name == name) {
+                return Err(format!("`{name}` is listed twice"));
+            }
+            let role = text(m, "role");
+            let personality = text(m, "personality");
+            if role.chars().count() > 500
+                || personality.chars().count() > crate::spec::STANDING_MAX_CHARS
+            {
+                return Err(format!(
+                    "role: at most 500 characters; personality: at most {}",
+                    crate::spec::STANDING_MAX_CHARS
+                ));
+            }
+            members.push(Candidate {
+                name,
+                role,
+                personality,
+                selection: crate::execution::ExecutionSelection::parse(m)
+                    .map_err(|e| e.to_string())?,
+            });
+        }
+        Ok(Request {
+            name,
+            rules,
+            members,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Adapter for GroupTools {
+    fn name(&self) -> &str {
+        "groups"
+    }
+
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            GROUPS_SET,
+            "Make or update a group of agents with rules they all follow, as the person just asked: a team they want (an editor and a researcher, say). The same group name updates that group: pass the full list of rules to change them (omit to keep them); listed members are added, others stay. New names become agents with their own role and personality; names of existing agents join and keep theirs. Members may message each other. Use it only when the person's own message asks for a group or team, never for a one-off request, and call it before any other tool. Then say in one line who is in it.",
+            RiskTier::Observe,
+        )
+        .volatile()
+        .with_input_schema(json!({
+            "type": "object",
+            "required": ["name", "members"],
+            "properties": {
+                "name": { "type": "string", "maxLength": group::NAME_CHARS },
+                "rules": {
+                    "type": "array",
+                    "maxItems": group::MAX_RULES,
+                    "items": { "type": "string", "maxLength": group::RULE_CHARS },
+                    "description": "the full list of what every member always follows, from the person's words; replaces the current list"
+                },
+                "members": {
+                    "type": "array", "minItems": 1, "maxItems": 8,
+                    "items": {
+                        "type": "object", "required": ["name"],
+                        "properties": {
+                            "name": { "type": "string", "description": "short lowercase name" },
+                            "role": { "type": "string", "maxLength": 500, "description": "one line; required for a new agent" },
+                            "personality": { "type": "string", "maxLength": crate::spec::STANDING_MAX_CHARS, "description": "who it is and how it works, in the person's words; new agents only" },
+                            "model": { "type": "string", "description": "provider:model; omitted inherits this turn; new agents only" }
+                        }
+                    }
+                }
+            }
+        }))]
+    }
+
+    async fn run(
+        &self,
+        action: &str,
+        input: Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        let request = Self::request(&input).map_err(|e| AdapterError::bad_input(action, e))?;
+        let orch = self
+            .orch
+            .upgrade()
+            .ok_or_else(|| AdapterError::Tool("the orchestrator is gone".into()))?;
+        if orch.read_before(&self.task, GROUPS_SET) {
+            return Err(AdapterError::Tool(
+                "Make a group only from the person's own message, before reading anything else."
+                    .into(),
+            ));
+        }
+        let outcome = orch
+            .set_group(&self.agent, &self.task, request)
+            .await
+            .map_err(|e| AdapterError::Tool(e.to_string()))?;
+        Ok(ActionOutput::json(
+            serde_json::to_value(outcome).map_err(|e| AdapterError::Tool(e.to_string()))?,
+        ))
     }
 }
 
@@ -367,6 +525,14 @@ impl Adapter for AgentTools {
                     return Err(AdapterError::bad_input(
                         action,
                         format!("you may not message `{to}`"),
+                    ));
+                }
+                // Text from a group member would steer a task that does not ask: work for such
+                // an agent goes through `agents.start`, which asks.
+                if orch.group_only(&self.agent, to) && orch.acts_alone(to) {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!("`{to}` acts without asking; use agents.start to ask it for work"),
                     ));
                 }
                 let delivered = orch

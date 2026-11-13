@@ -76,6 +76,7 @@ person asks in words; the chat decides what becomes an agent or a task.
 | Action | Does |
 |---|---|
 | `agents.create {name, role, instructions?, skills?, capabilities?}` | adds an agent with the skills named (none by default) and the capabilities named (`["web", "browser"]`, from `Orchestrator::capabilities`; every app tool when none are named); its state-changing actions still ask the person. An existing name or an unknown capability is refused |
+| `groups.set {name, rules?, members: [{name, role?, personality?, model?}]}` | makes a group of agents, or updates the one of that name ([Groups from chat](#groups-from-chat)). Only on a task the person typed, only as the first call |
 | `agents.delegate {to, objective, context?, item?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false`. `item` links it to a board item |
 | `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
 | `agents.schedule {to, objective, context?, at?, days?, every_minutes?, once?}` | has an agent run the task at set times ([Schedules](#schedules)). `Mutate`: the person agrees to standing work once |
@@ -85,11 +86,28 @@ person asks in words; the chat decides what becomes an agent or a task.
 The `agents.delegate` summary lists the current agents and their roles, so the chat picks one
 without a lookup. An app with no orchestrator offers none of these.
 
+## Groups from chat
+
+`groups.set {name, rules?, members}` lets the person's own message make a group, or update the group of that name: pass the full rules to change them, list the members to add (the others stay) (ADR 0117).
+Each member is `{name, role?, personality?, model?}`. A free name becomes an agent: it keeps the
+creator's model, tools, budget, profile and skills, takes `role`, and takes `personality` as its
+standing role (`AgentSpec.standing`). An agent of this folder joins and keeps its own role and
+personality. The result lists who was created and who joined.
+
+| Part | Behavior |
+|---|---|
+| Membership | `AgentSpec.groups`, the group ids. Removing the id ends contact and rules |
+| Contact | members may `agents.message` and `agents.start` each other; a group adds no `agents.delegate`. Work started only through the group asks before any state-changing action, even on an agent with `allow_mutate`; such an agent takes no message from a member only through the group |
+| Rules | rule set `group-<id>`, every rule `always` (a call's `rules` replaces them, omitted keeps them), read by each member's next task (scheduled and automation runs too). At most 20 rules of 300 characters per group and 20 per agent across groups |
+| Same name | the same name in the folder is the same group; a retry with the same input changes nothing. New agents are made first; if one cannot be made, those made end and nothing else is written, and a retry makes them again. Members already on the group's record join too |
+| Window | `group_update` and `group_delete` remove the id from members left out; delete removes the rule set; `ark:group` follows every change |
+| Offered | only on the person's own turn and only before any other tool, as `role.set` is (ADR 0116) |
+
 ## Persistent conversations
 
 An agent can create a lasting colleague with `agents.create {name, role, instructions?}`
 when its tool patterns permit it. The colleague inherits its capabilities, skills, model,
-profile, contacts and budget. It keeps its own conversation. Creation starts no work.
+profile and budget. It starts with no look, standing role or contacts of its own. It keeps its own conversation. Creation starts no work.
 
 `agents.start {to, objective, context?}` sends one brief and returns immediately. It starts
 an independent turn in the receiving agent's existing conversation. It does not copy the

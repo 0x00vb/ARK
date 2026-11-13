@@ -31,9 +31,14 @@ import { Places } from "./places.js";
 import { Identity, DETAILS } from "./identity.js";
 import { registerComputers } from "./computers.js";
 import { reviewComputerMessage } from "./computer-recovery.js";
+import { openLinksOutside, setOpener } from "./links.js";
 import { MAX_VISIBLE_CHATS, chatLeaf, visibleChats, splitChat as splitLayoutChat, removeChat as removeLayoutChat, replaceChat, updateRatio, restoreLayout } from "./chat-layout.js";
 
 const transport = connect();
+if (transport.openLink) {
+  setOpener((url) => transport.openLink(url).catch(() => window.open(url, "_blank", "noopener")));
+}
+openLinksOutside(document);
 const pageParams = new URL(location.href).searchParams;
 const detachedSession = pageParams.get("detached") || "";
 const windowIdentity = pageParams.get("window") || "main";

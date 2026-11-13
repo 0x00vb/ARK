@@ -40,6 +40,7 @@ mod cron;
 mod event;
 mod execution;
 mod graph;
+pub mod group;
 pub mod models;
 mod orchestrator;
 mod participants;
@@ -73,8 +74,8 @@ pub use schedule::{
 };
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{
-    BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, START,
-    UNSCHEDULE, WAIT,
+    BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, GROUPS_SET, MESSAGE, SCHEDULE,
+    START, UNSCHEDULE, WAIT,
 };
 
 #[derive(Debug, thiserror::Error)]

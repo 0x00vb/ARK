@@ -1,7 +1,8 @@
 // Markdown for agent text. Safe by construction: every character is escaped before any tag is
-// added, and links only keep http(s) targets. Evidence citations (`[inv:1a2b3c4d]`) become
-// links that open the evidence beside the conversation. Rendering the whole text again on each streamed
-// chunk is cheap at these sizes and keeps half-finished markup well formed.
+// added. Links keep http(s) targets; a relative path is a project file. Evidence citations
+// (`[inv:1a2b3c4d]`) become links that open the evidence beside the conversation. Rendering the
+// whole text again on each streamed chunk is cheap at these sizes and keeps half-finished markup
+// well formed.
 
 import { esc } from "./dom.js";
 
@@ -12,6 +13,11 @@ let blockLines = false;
 
 /// ` data-lines="a:b"` for the block drawn from source lines `a` to `b` (end exclusive).
 const at = (a, b) => (blockLines ? ` data-lines="${a}:${b}"` : "");
+
+/// A path inside the project: relative, no scheme, no `..`, not a page anchor.
+function projectPath(path) {
+  return !/^([a-z][a-z0-9+.-]*:|\/|#|~)/i.test(path) && !path.split("/").includes("..");
+}
 
 function inline(s) {
   let out = esc(s);
@@ -24,6 +30,11 @@ function inline(s) {
     images.push(`<img class="md-img" data-file="${src}" alt="${alt}">`);
     return `\u0001${images.length - 1}\u0001`;
   });
+  const opens = [];
+  const keep = (tag, text) => {
+    opens.push(tag);
+    return `\u0002${opens.length - 1}\u0002${text}</a>`;
+  };
   const codes = [];
   out = out.replace(/`([^`]+)`/g, (_, c) => {
     codes.push(c);
@@ -31,11 +42,16 @@ function inline(s) {
   });
   out = out
     .replace(/\[inv:([0-9a-f]{4,})\]/gi, (_, id) => `<a class="cite" data-inv="${id}" href="#">${id.slice(0, 6)}</a>`)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+    // A link's target is kept aside like code, so the emphasis rules never reach into it.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, text, url) => keep(`<a href="${url}" target="_blank" rel="noreferrer">`, text))
+    .replace(/\[([^\]]+)\]\(www\.([^)\s]+)\)/g, (_, text, rest) => keep(`<a href="https://www.${rest}" target="_blank" rel="noreferrer">`, text))
+    // A relative path is a file of the project: it opens in the file view.
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, path) => (projectPath(path) ? keep(`<a class="file-link" href="#" data-path="${path}">`, text) : all))
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
     .replace(/(^|\W)_([^_\s][^_]*)_(?=\W|$)/g, "$1<em>$2</em>");
   return out
+    .replace(/\u0002(\d+)\u0002/g, (_, i) => opens[Number(i)])
     .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`)
     .replace(/\u0001(\d+)\u0001/g, (_, i) => images[Number(i)]);
 }

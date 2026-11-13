@@ -178,6 +178,11 @@ pub enum EventKind {
         says: String,
         paused: bool,
     },
+    /// A group of agents was made or changed by an agent (`groups.set`). Live only: the group
+    /// record is in the store.
+    Group {
+        group: String,
+    },
     /// A schedule stopped (asked to, or its agent ended).
     Unscheduled {
         schedule: String,
@@ -237,14 +242,14 @@ impl EventKind {
         }
     }
 
-    /// Streamed text is live-only: it is broadcast, never stored.
+    /// Streamed text and group changes are live-only: broadcast, never stored.
     pub(crate) fn stored(&self) -> bool {
         !matches!(
             self,
             EventKind::Agent {
                 event: HarnessEvent::TextDelta { .. },
                 ..
-            }
+            } | EventKind::Group { .. }
         )
     }
 }

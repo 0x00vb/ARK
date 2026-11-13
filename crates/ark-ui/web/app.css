@@ -21,6 +21,8 @@
   --hair: rgba(0, 0, 0, 0.075);
   --accent: var(--app-accent, #2563eb);
   --accent-fg: #ffffff;
+  /* Selected text: strong enough to see on every palette; dark palettes need more. */
+  --selection: color-mix(in srgb, var(--accent) 32%, transparent);
   --ok: #2f855a;
   --warn: #b7791f;
   --err: #c53030;
@@ -57,8 +59,8 @@
   --tok-lit: var(--tok-num);
   --tok-com: var(--text-2);
 
-  --seg-0: #8e9aaf; --seg-1: #b8a07e; --seg-2: #7fa7a0; --seg-3: #6f8fd6; --seg-4: #b98bb3;
-  --seg-5: #c9a24a; --seg-6: #9aa66b; --seg-7: #d08770; --seg-8: #7ab8d6;
+  --seg-0: #8e9aaf; --seg-1: #b8a07e; --seg-2: #86a68c; --seg-3: #6f8fd6; --seg-4: #b98bb3;
+  --seg-5: #c9a24a; --seg-6: #9aa66b; --seg-7: #d08770; --seg-8: #9089b8;
   --term-bg: var(--pane); --term-fg: var(--text); --term-cursor: var(--accent);
   --term-selection: rgba(37, 99, 235, 0.22);
   /* Consumers that restyle Light or Dark override these so Appearance previews stay truthful. */
@@ -86,6 +88,7 @@
   --active: rgba(255, 255, 255, 0.085);
   --hair: rgba(255, 255, 255, 0.08);
   --accent: var(--app-accent-dark, #5b8def);
+  --selection: color-mix(in srgb, var(--accent) 45%, transparent);
   --ok: #5fb383;
   --warn: #d6a24e;
   --err: #e5736f;
@@ -105,27 +108,29 @@
    charts and the terminal, in one palette instead of recolouring isolated surfaces. */
 :root[data-theme="monokai"] {
   color-scheme: dark;
+  --selection: color-mix(in srgb, var(--accent) 45%, transparent);
   --bg: #272822; --sidebar: #20211c; --pane: #24251f; --card: #303129; --seg-on: #3a3b32;
   --sunken: #1f201b; --code-bg: #1f201b; --bubble: #32332b;
   --text: #f8f8f2; --text-2: #c5c6bd; --text-3: #8f9187;
   --hover: rgba(255,255,255,.07); --active: rgba(255,255,255,.12); --hair: rgba(255,255,255,.11);
-  --accent: #66d9ef; --accent-fg: #171814; --ok: #a6e22e; --warn: #e6db74; --err: #f92672;
-  --sheet: #a6e22e; --doc: #66d9ef; --grid-head: #303129; --grid-line: rgba(255,255,255,.1);
-  --tok-key: #f92672; --tok-str: #e6db74; --tok-num: #ae81ff; --tok-lit: #66d9ef; --tok-com: #a7a89f;
-  --seg-0: #66d9ef; --seg-1: #f92672; --seg-2: #a6e22e; --seg-3: #ae81ff; --seg-4: #fd971f;
-  --seg-5: #e6db74; --seg-6: #a1efe4; --seg-7: #cc6633; --seg-8: #f8f8f2;
-  --term-bg: #24251f; --term-fg: #f8f8f2; --term-cursor: #66d9ef; --term-selection: rgba(102,217,239,.26);
+  --accent: #fd971f; --accent-fg: #171814; --ok: #a6e22e; --warn: #e6db74; --err: #f92672;
+  --sheet: #a6e22e; --doc: #ae81ff; --grid-head: #303129; --grid-line: rgba(255,255,255,.1);
+  --tok-key: #f92672; --tok-str: #e6db74; --tok-num: #ae81ff; --tok-lit: #fd971f; --tok-com: #a7a89f;
+  --seg-0: #fd971f; --seg-1: #f92672; --seg-2: #a6e22e; --seg-3: #ae81ff; --seg-4: #a7a89f;
+  --seg-5: #e6db74; --seg-6: #c4a07a; --seg-7: #cc6633; --seg-8: #f8f8f2;
+  --term-bg: #24251f; --term-fg: #f8f8f2; --term-cursor: #fd971f; --term-selection: rgba(253,151,31,.24);
 }
 :root[data-theme="dracula"] {
   color-scheme: dark;
+  --selection: color-mix(in srgb, var(--accent) 45%, transparent);
   --bg: #282a36; --sidebar: #21222c; --pane: #242631; --card: #303241; --seg-on: #3b3d4d;
   --sunken: #20212b; --code-bg: #20212b; --bubble: #343746;
   --text: #f8f8f2; --text-2: #c7c8d1; --text-3: #8b8d9b;
   --hover: rgba(255,255,255,.07); --active: rgba(255,255,255,.12); --hair: rgba(255,255,255,.1);
   --accent: #bd93f9; --accent-fg: #1f2029; --ok: #50fa7b; --warn: #f1fa8c; --err: #ff5555;
-  --sheet: #50fa7b; --doc: #8be9fd; --grid-head: #303241; --grid-line: rgba(255,255,255,.09);
-  --tok-key: #ff79c6; --tok-str: #f1fa8c; --tok-num: #bd93f9; --tok-lit: #8be9fd; --tok-com: #a5a7b5;
-  --seg-0: #8be9fd; --seg-1: #ff79c6; --seg-2: #50fa7b; --seg-3: #bd93f9; --seg-4: #ffb86c;
+  --sheet: #50fa7b; --doc: #bd93f9; --grid-head: #303241; --grid-line: rgba(255,255,255,.09);
+  --tok-key: #ff79c6; --tok-str: #f1fa8c; --tok-num: #bd93f9; --tok-lit: #ffb86c; --tok-com: #a5a7b5;
+  --seg-0: #a5a7b5; --seg-1: #ff79c6; --seg-2: #50fa7b; --seg-3: #bd93f9; --seg-4: #ffb86c;
   --seg-5: #f1fa8c; --seg-6: #6272a4; --seg-7: #ff5555; --seg-8: #f8f8f2;
   --term-bg: #242631; --term-fg: #f8f8f2; --term-cursor: #bd93f9; --term-selection: rgba(189,147,249,.25);
 }
@@ -139,7 +144,7 @@
   --sheet: #1a7f37; --doc: #0969da; --grid-head: #f6f8fa; --grid-line: #d8dee4;
   --tok-key: #cf222e; --tok-str: #0a3069; --tok-num: #0550ae; --tok-lit: #8250df; --tok-com: #6e7781;
   --seg-0: #0969da; --seg-1: #cf222e; --seg-2: #1a7f37; --seg-3: #8250df; --seg-4: #bc4c00;
-  --seg-5: #9a6700; --seg-6: #1b7c83; --seg-7: #bf3989; --seg-8: #57606a;
+  --seg-5: #9a6700; --seg-6: #8a6e4f; --seg-7: #bf3989; --seg-8: #57606a;
   --term-bg: #ffffff; --term-fg: #1f2328; --term-cursor: #0969da; --term-selection: rgba(9,105,218,.2);
 }
 :root[data-theme="xcode"] {
@@ -152,7 +157,7 @@
   --sheet: #258a3e; --doc: #0068d9; --grid-head: #f2f4f7; --grid-line: #dce0e5;
   --tok-key: #ad3da4; --tok-str: #d12f1b; --tok-num: #272ad8; --tok-lit: #804fb8; --tok-com: #5d6c79;
   --seg-0: #0068d9; --seg-1: #d12f1b; --seg-2: #258a3e; --seg-3: #804fb8; --seg-4: #b85c00;
-  --seg-5: #947000; --seg-6: #0b7f88; --seg-7: #b23a77; --seg-8: #5d6c79;
+  --seg-5: #947000; --seg-6: #a2845e; --seg-7: #b23a77; --seg-8: #5d6c79;
   --term-bg: #fbfbfd; --term-fg: #17181a; --term-cursor: #0068d9; --term-selection: rgba(0,104,217,.2);
 }
 
@@ -191,7 +196,7 @@ button { font: inherit; color: inherit; }
 kbd { font: 11px var(--font); color: var(--text-3); }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+::selection { background: var(--selection); }
 
 .ico { display: inline-flex; width: 16px; height: 16px; flex: none; }
 .ico svg { width: 100%; height: 100%; }
@@ -1482,7 +1487,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .appearance-choice[data-palette="light"] .appearance-preview { --preview-bg: var(--appearance-light-bg); --preview-rail: var(--appearance-light-rail); --preview-accent: var(--appearance-light-accent); }
 .appearance-choice[data-palette="github"] .appearance-preview { --preview-bg: #fff; --preview-rail: #f6f8fa; --preview-accent: #0969da; }
 .appearance-choice[data-palette="dark"] .appearance-preview { --preview-bg: var(--appearance-dark-bg); --preview-rail: var(--appearance-dark-rail); --preview-card: #232323; --preview-line: #ececeb; --preview-accent: var(--appearance-dark-accent); }
-.appearance-choice[data-palette="monokai"] .appearance-preview { --preview-bg: #272822; --preview-rail: #20211c; --preview-line: #f8f8f2; --preview-accent: #66d9ef; }
+.appearance-choice[data-palette="monokai"] .appearance-preview { --preview-bg: #272822; --preview-rail: #20211c; --preview-line: #f8f8f2; --preview-accent: #fd971f; }
 .appearance-choice[data-palette="dracula"] .appearance-preview { --preview-bg: #282a36; --preview-rail: #21222c; --preview-line: #f8f8f2; --preview-accent: #bd93f9; }
 .appearance-choice[data-palette="xcode"] .appearance-preview { --preview-bg: #fbfbfd; --preview-rail: #f2f4f7; --preview-accent: #0068d9; }
 .appearance-choice[data-palette="solid"] .appearance-preview { --preview-bg: var(--bg); --preview-rail: var(--sidebar); --preview-line: var(--text); --preview-accent: var(--accent); }

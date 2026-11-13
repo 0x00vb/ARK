@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-13
+
+A chat makes a group of agents with shared rules (ADR 0117). Links in replies open. Selected text shows in every palette; no palette uses cyan.
+
+### Added
+
+- `groups.set {name, rules?, members}`: from the person's own chat message, makes a group of agents, or updates the group of that name in the folder (rules replaced by the call's list, listed members added, others stay; removing a member is a window action). A new name becomes an agent with its own role and personality (`standing`); an agent of the folder joins and keeps its own. Members may `agents.message` and `agents.start` each other, never delegate. Rule set `group-<id>`, all always, at most 20 rules of 300 characters per group and 20 per agent. Offered only as the first call of a person's turn. Members already on a group of that name (one made in the window) join too. The same input twice changes nothing. New agents are made first; if one cannot be made, those this call made end, nothing else is written, and the same call later makes them again. Work a member starts on another through the group asks before it changes anything, even on an agent with `allow_mutate`, and such an agent takes no message from it.
+- `AgentSpec.groups` (group ids), `ark_orchestrate::group`, `Orchestrator::put_group`, `Orchestrator::leave_group`, `EventKind::Group` (live only), `RuleBook::remove`.
+- The window's `group_update` and `group_delete` take the group off the members left out, and delete remove the group's rule set.
+
+### Breaking
+
+- `AgentSpec` gains `groups`: a struct literal adds `groups: Vec::new()` or uses `AgentSpec::new`. It is left out of the JSON when empty: a reader of `agents {all}` rows treats a missing `groups` as none.
+- `Group`, `Member` and the `#groups` scope are defined in `ark_orchestrate::group`. `ark_interact::groups` re-exports `Group`, `Member` and `SCOPE`, so paths through `ark_interact` keep working. `EventKind` gains `Group`: an exhaustive match adds an arm.
+
+### Changed
+
+- `agents.create` no longer copies its creator's `look`, `standing`, `title`, `description` or `delegates_to` to the new agent. It still keeps the model, tools, budget, profile and skills, and the creator and the new agent still contact each other.
+- `role.set` may now follow `groups.set` in the same turn (and the other way round); a refused or failed `role.set` or `groups.set` no longer uses up the first call.
+- No palette uses cyan. Monokai's accent, cursor and literals are its orange (`#fd971f`), its doc colour its purple. Chart colours: Dracula, GitHub and Xcode replace their cyan or teal; the default sage and sky blue become green-grey (`#86a68c`) and muted violet (`#9089b8`). `palette.test.mjs` fails on any cyan custom property.
+
+### Fixed
+
+- A link in an agent's reply did nothing when clicked in the window: the window opens no windows of its own, so `target=_blank` was dropped. A web link now opens in the person's browser (window call `ark_open_link`, http and https only; in a browser, a new tab). A link to a path with no scheme (`[plan](./PLAN.md)`) opens the file in ARK's file view. `links.test.mjs`.
+- Selected text was hard to see: 22% of the accent gave 1.36:1 against the page. A `--selection` token now sets it per palette (32% of the accent on light palettes, 45% on dark): at least 1.5:1 on light and 2:1 on dark, with text above 5.6:1. Apps restyle selection through `--selection`. `palette.test.mjs` checks every palette in WebKit.
+
 ## [0.45.0] - 2026-11-09
 
 Fixes from the owner's first day on 0.44.0: a moved agent's Stop, model list and folder; a one-row composer (ADR 0114 and ADR 0115 amendments).

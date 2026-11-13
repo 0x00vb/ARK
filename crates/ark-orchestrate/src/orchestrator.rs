@@ -38,6 +38,7 @@ use crate::board::{
 };
 use crate::brief::{clip, Brief};
 use crate::event::{EventKind, OrchEvent};
+use crate::group;
 use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder};
 use crate::record::{
     now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord,
@@ -61,6 +62,7 @@ mod automation_schedule;
 mod automations;
 mod elsewhere;
 mod general;
+mod groups;
 mod legacy_automation;
 mod runs;
 mod webhooks;
@@ -401,6 +403,26 @@ impl Orchestrator {
     pub fn agent(&self, name: &str) -> Option<AgentRecord> {
         let st = self.inner.state.lock().unwrap();
         st.agents.get(name).map(|a| a.record.clone())
+    }
+
+    /// Write a group record, the one the window's group calls and `groups.set` share.
+    pub fn put_group(&self, group: &group::Group) -> Result<(), OrchError> {
+        self.inner.put_group(group)
+    }
+
+    /// Take `group` off the agents of this project that are in it: their contact with the
+    /// group's other members and its rules end with it. Names that are not here are skipped.
+    pub fn leave_group(&self, group: &str, agents: &[String]) -> Result<(), OrchError> {
+        for name in agents {
+            if self
+                .agent(name)
+                .is_some_and(|a| a.spec.groups.iter().any(|g| g == group))
+            {
+                self.inner
+                    .edit_groups(name, |groups| groups.retain(|g| g != group))?;
+            }
+        }
+        Ok(())
     }
 
     /// The tools of the person's own conversation: create an agent, hand one a task, wait
@@ -1298,6 +1320,14 @@ pub(crate) struct State {
     pub work: HashMap<String, WorkItem>,
 }
 
+/// What [`Inner::creation_room`] tells a creating turn.
+struct CreationRoom {
+    root: String,
+    limit: usize,
+    used: usize,
+    inherited: String,
+}
+
 pub(crate) struct Inner {
     me: Weak<Inner>,
     pub engine: Arc<Engine>,
@@ -1588,21 +1618,21 @@ impl Inner {
         Ok(record.spec.standing)
     }
 
-    /// Whether the task already made a call before this `role.set`: any other tool, or an
-    /// earlier `role.set` (this call is already in the list).
-    pub(crate) fn read_before(&self, task: &str) -> bool {
+    /// Whether the task already did anything before this `action` (`role.set` or `groups.set`):
+    /// any call that is not one of the two, or a successful call of `action` beside this one
+    /// (this call is already in the list). Both read only the person's own message, so each
+    /// may come first.
+    pub(crate) fn read_before(&self, task: &str, action: &str) -> bool {
         self.state.lock().unwrap().tasks.get(task).is_none_or(|t| {
-            let own = t
-                .record
-                .tool_calls
+            let calls = &t.record.tool_calls;
+            calls
                 .iter()
-                .filter(|c| c.action == tools::ROLE_SET)
-                .count();
-            own > 1
-                || t.record
-                    .tool_calls
+                .filter(|c| c.action == action && c.ok != Some(false))
+                .count()
+                > 1
+                || calls
                     .iter()
-                    .any(|c| c.action != tools::ROLE_SET)
+                    .any(|c| c.action != tools::ROLE_SET && c.action != tools::GROUPS_SET)
         })
     }
 
@@ -2464,9 +2494,13 @@ impl Inner {
         let record = match existing {
             Some(mut r) => {
                 let standing = std::mem::take(&mut r.spec.standing);
+                let groups = std::mem::take(&mut r.spec.groups);
                 r.spec = spec.clone();
                 if r.spec.standing.is_empty() {
                     r.spec.standing = standing;
+                }
+                if r.spec.groups.is_empty() {
+                    r.spec.groups = groups;
                 }
                 r.model = models.model.clone();
                 r.account = models.account.clone();
@@ -3536,9 +3570,19 @@ impl Inner {
         s.waiters = 0;
     }
 
-    /// The rules for a task: the task's sets first, then the agent's, then the project's.
+    /// The rules for a task: the task's sets first, then the agent's, then the project's, then
+    /// its groups'.
     fn rules_for(&self, task: &TaskRecord) -> Vec<ark_core::RuleSet> {
-        RuleBook::new(&self.engine.store)
+        let groups = self
+            .state
+            .lock()
+            .unwrap()
+            .agents
+            .get(&task.owner)
+            .map(|a| a.record.spec.groups.clone())
+            .unwrap_or_default();
+        let book = RuleBook::new(&self.engine.store);
+        let mut sets = book
             .resolve(&[
                 RuleScope::Task(task.id.clone()),
                 RuleScope::Agent(task.owner.clone()),
@@ -3547,7 +3591,17 @@ impl Inner {
             .unwrap_or_else(|e| {
                 tracing::warn!(task = %task.id, "could not read rule sets: {e}");
                 Vec::new()
-            })
+            });
+        for group in groups {
+            match book.get(&group::rule_set_name(&group), None) {
+                Ok(Some(set)) => sets.push(set),
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(task = %task.id, group = %group, "could not read group rules: {e}")
+                }
+            }
+        }
+        sets
     }
 
     fn agent_profile(&self, spec: &AgentSpec, delegates: &[(String, String)]) -> AgentProfile {
@@ -3735,16 +3789,29 @@ impl Inner {
             spec.tools.iter().any(|p| action_matches(p, a))
                 && (task.run.is_none() || !a.starts_with("agents."))
         });
-        if task.person
+        let person_turn = task.person
             && task.run.is_none()
             && task.schedule.is_none()
-            && matches!(task.origin, crate::record::Origin::External)
+            && matches!(task.origin, crate::record::Origin::External);
+        if person_turn
             && spec
                 .tools
                 .iter()
                 .any(|p| action_matches(p, tools::ROLE_SET))
         {
             registry.register(Arc::new(tools::RoleTools {
+                orch: self.me.clone(),
+                agent: owner.to_string(),
+                task: id.to_string(),
+            }));
+        }
+        if person_turn
+            && spec
+                .tools
+                .iter()
+                .any(|p| action_matches(p, tools::GROUPS_SET))
+        {
+            registry.register(Arc::new(tools::GroupTools {
                 orch: self.me.clone(),
                 agent: owner.to_string(),
                 task: id.to_string(),
@@ -4039,6 +4106,9 @@ impl Inner {
                 Err(error) => return Attempt::Fatal(error.to_string()),
             }
         }
+        // Work a group member sent asks before it changes anything, whatever the owner may do
+        // on its own: the person agreed to a group, not to one member acting through another.
+        let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
         let approvals = if let Some(run) = &task.run {
             match self.automation_approvals(run, id) {
                 Ok(gate) => Some(gate),
@@ -4046,7 +4116,7 @@ impl Inner {
             }
         } else {
             match &self.approvals {
-                Some(gate) if !spec.allow_mutate => {
+                Some(gate) if !allow_mutate => {
                     Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
                         orch: self.clone(),
                         agent: owner.to_string(),
@@ -4062,7 +4132,7 @@ impl Inner {
             .budget_or_auto(self.context_budget)
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
-            .allow_mutate(spec.allow_mutate)
+            .allow_mutate(allow_mutate)
             .approvals(approvals.clone())
             .cancel(Some(attempt_cancel.clone()))
             .stopping(Some(self.engine.stopping()))
@@ -4164,7 +4234,7 @@ impl Inner {
                     &scope,
                     &brief,
                     &cancel,
-                    spec.allow_mutate,
+                    allow_mutate,
                     &models.model,
                 )
                 .await;
@@ -4744,6 +4814,67 @@ impl Inner {
         Self::contact_allowed_in(&st, from, to)
     }
 
+    /// Whether a task from `origin` reached `owner` only because the two share a group: no
+    /// delegation, no parent and child.
+    /// Whether any hop of the chain that led to this task went only through a group: work a
+    /// member started, then handed on by delegation, still asks.
+    fn sent_through_group(&self, origin: &Origin, owner: &str) -> bool {
+        let st = self.state.lock().unwrap();
+        let mut origin = origin.clone();
+        let mut to = owner.to_string();
+        for _ in 0..=st.tasks.len() {
+            let Origin::Agent { agent: from, task } = origin else {
+                return false;
+            };
+            if Self::group_only_in(&st, &from, &to) {
+                return true;
+            }
+            let Some(t) = st.tasks.get(&task) else {
+                return false;
+            };
+            origin = t.record.origin.clone();
+            to = from;
+        }
+        true
+    }
+
+    /// Whether `from` may reach `to` only because they share a group: no delegation, no
+    /// parent and child.
+    pub(crate) fn group_only(&self, from: &str, to: &str) -> bool {
+        Self::group_only_in(&self.state.lock().unwrap(), from, to)
+    }
+
+    fn group_only_in(st: &State, from: &str, to: &str) -> bool {
+        let (Some(a), Some(b)) = (st.agents.get(from), st.agents.get(to)) else {
+            return false;
+        };
+        a.record.spec.shares_group(&b.record.spec)
+            && !a.record.spec.may_contact(to)
+            && a.record.spec.parent.as_deref() != Some(to)
+            && b.record.spec.parent.as_deref() != Some(from)
+    }
+
+    /// Whether `agent` runs its state-changing actions without asking.
+    pub(crate) fn acts_alone(&self, agent: &str) -> bool {
+        let st = self.state.lock().unwrap();
+        st.agents
+            .get(agent)
+            .is_some_and(|a| a.record.spec.allow_mutate)
+    }
+
+    /// Set what made an agent (`creation_request`), and keep the record.
+    pub(crate) fn set_creation_request(&self, name: &str, request: &str) {
+        let record = {
+            let mut st = self.state.lock().unwrap();
+            let Some(a) = st.agents.get_mut(name) else {
+                return;
+            };
+            a.record.creation_request = Some(request.to_string());
+            a.record.clone()
+        };
+        self.save_agent(&record);
+    }
+
     fn contact_allowed_in(st: &State, from: &str, to: &str) -> bool {
         let Some(a) = st.agents.get(from) else {
             return false;
@@ -4755,8 +4886,61 @@ impl Inner {
             && b.record.state != AgentState::Terminated
             && from != to
             && (a.record.spec.may_contact(to)
+                || a.record.spec.shares_group(&b.record.spec)
                 || (b.record.creation_task.is_some()
                     && b.record.spec.parent.as_deref() == Some(from)))
+    }
+
+    /// Where a creating turn stands: its conversation root, how many agents that request may
+    /// create, how many it did, and the model a new agent inherits. Refuses a turn that is over.
+    fn creation_room(&self, st: &State, from: &str, task: &str) -> Result<CreationRoom, OrchError> {
+        let source = st
+            .agents
+            .get(from)
+            .ok_or_else(|| OrchError::UnknownAgent(from.into()))?;
+        let t = st
+            .tasks
+            .get(task)
+            .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
+        if t.record.owner != from
+            || t.record.state.is_final()
+            || t.cancel.is_cancelled()
+            || t.stop.is_some()
+        {
+            return Err(OrchError::NotAllowed(
+                "the creating turn is no longer active".into(),
+            ));
+        }
+        let root = Self::conversation_root(st, task)?;
+        let limit = t
+            .record
+            .budget
+            .max_delegations
+            .unwrap_or(8)
+            .min(st.tasks[&root].record.budget.max_delegations.unwrap_or(8))
+            .min(8) as usize;
+        let used = st
+            .agents
+            .values()
+            .filter(|a| a.record.creation_root.as_deref() == Some(&root))
+            .count();
+        let inherited = t
+            .execution_model
+            .clone()
+            .or_else(|| {
+                source
+                    .models
+                    .as_ref()
+                    .map(|models| self.models.selection_spec(models))
+            })
+            .or_else(|| source.record.spec.model.clone())
+            .unwrap_or_else(|| source.record.model.clone());
+        Ok(CreationRoom {
+            root,
+            limit,
+            used,
+            inherited,
+        })
     }
 
     pub(crate) async fn create_colleague(
@@ -4781,7 +4965,7 @@ impl Inner {
             .to_hex()
         );
         let _guard = self.conversations.lock().await;
-        let (mut spec, root) = {
+        let (spec, root) = {
             let st = self.state.lock().unwrap();
             let source = st
                 .agents
@@ -4798,19 +4982,7 @@ impl Inner {
                     "this agent may not create agents".into(),
                 ));
             }
-            let t = st
-                .tasks
-                .get(task)
-                .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
-            if t.record.owner != from
-                || t.record.state.is_final()
-                || t.cancel.is_cancelled()
-                || t.stop.is_some()
-            {
-                return Err(OrchError::NotAllowed(
-                    "the creating turn is no longer active".into(),
-                ));
-            }
+            let room = self.creation_room(&st, from, task)?;
             if let Some(existing) = st.agents.get(name) {
                 if existing.record.creation_task.as_deref() == Some(task)
                     && existing.record.creation_request.as_deref() == Some(&request)
@@ -4821,52 +4993,21 @@ impl Inner {
                     "agent `{name}` already exists; use agents.start"
                 )));
             }
-            let root = Self::conversation_root(&st, task)?;
-            let limit = t
-                .record
-                .budget
-                .max_delegations
-                .unwrap_or(8)
-                .min(st.tasks[&root].record.budget.max_delegations.unwrap_or(8))
-                .min(8) as usize;
-            if st
-                .agents
-                .values()
-                .filter(|a| a.record.creation_root.as_deref() == Some(&root))
-                .count()
-                >= limit
-            {
+            if room.used >= room.limit {
                 return Err(OrchError::NotAllowed(format!(
-                    "this request may create {limit} agents"
+                    "this request may create {} agents",
+                    room.limit
                 )));
             }
-            let mut spec = source.record.spec.clone();
-            let inherited = t
-                .execution_model
-                .clone()
-                .or_else(|| {
-                    source
-                        .models
-                        .as_ref()
-                        .map(|models| self.models.selection_spec(models))
-                })
-                .or_else(|| source.record.spec.model.clone())
-                .unwrap_or_else(|| source.record.model.clone());
-            spec.model = selection.apply(Some(&inherited))?;
-            (spec, root)
+            let mut spec = source.record.spec.colleague(name, role, instructions, "");
+            spec.model = selection.apply(Some(&room.inherited))?;
+            (spec, room.root)
         };
         if selection.explicit() {
             if let Some(model) = &spec.model {
                 self.models.validate_selection(model).await?;
             }
         }
-        spec.name = name.to_string();
-        spec.title.clear();
-        spec.description.clear();
-        spec.role = role.to_string();
-        spec.instructions = instructions.to_string();
-        spec.parent = Some(from.to_string());
-        spec.allow_mutate = false;
         self.spawn_record(spec, Some((task, &root)), Some(&request), None, None)
             .await
     }

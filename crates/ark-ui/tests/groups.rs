@@ -9,6 +9,7 @@ use ark_interact::ark_orchestrate::Orchestrator;
 use ark_interact::App;
 use ark_model::{Completion, Message, Provider, ProviderError, ToolDef, Usage};
 use ark_sdk::prelude::*;
+use ark_store::Store;
 use ark_ui::{ArkUi, Host};
 use serde_json::{json, Value};
 
@@ -78,7 +79,7 @@ impl Provider for Model {
     }
 }
 
-async fn open(dir: &std::path::Path, script: Arc<Script>) -> Arc<Host> {
+async fn open(dir: &std::path::Path, script: Arc<Script>) -> (Arc<Host>, Arc<Store>) {
     let provider: Arc<dyn Provider> = Arc::new(Model(script));
     let ark = Ark::builder()
         .store_root(dir)
@@ -87,16 +88,18 @@ async fn open(dir: &std::path::Path, script: Arc<Script>) -> Arc<Host> {
         .critic(false)
         .build()
         .unwrap();
+    let store = ark.shared_engine().store.clone();
     let app = App::new("Test").ark(ark).orchestrate(|ark, project, gate| {
         Ok(Orchestrator::builder(ark, project)
             .approvals(gate)
             .build()?)
     });
-    ArkUi::new(app).open().await.unwrap().0
+    (ArkUi::new(app).open().await.unwrap().0, store)
 }
 
 struct Setup {
     host: Arc<Host>,
+    store: Arc<Store>,
     script: Arc<Script>,
     project: String,
     group: String,
@@ -108,7 +111,7 @@ fn member(project: &str, agent: &str) -> Value {
 
 async fn setup(dir: &std::path::Path) -> Setup {
     let script = Arc::new(Script::default());
-    let host = open(dir, script.clone()).await;
+    let (host, store) = open(dir, script.clone()).await;
     let summary = host.call("summary", json!({})).await.unwrap();
     let project = summary["project"]["id"].as_str().unwrap().to_string();
     for (name, title, role) in [("scout", "Scout", "finds things"), ("ana", "Ana", "writes")] {
@@ -132,6 +135,7 @@ async fn setup(dir: &std::path::Path) -> Setup {
         .unwrap();
     Setup {
         host,
+        store,
         script,
         project,
         group: row["id"].as_str().unwrap().to_string(),
@@ -347,4 +351,123 @@ async fn a_message_sent_while_a_member_answers_reaches_its_next_turn() {
     let seen = t.script.seen.lock().unwrap().clone();
     let last = seen.iter().rev().find(|(who, _)| who == "Scout").unwrap();
     assert!(last.1.contains("@ana beta"), "{}", last.1);
+}
+
+impl Setup {
+    /// Puts every member in the group the way `groups.set` does: its id on the spec and a
+    /// rule set under its name.
+    async fn join_with_rules(&self) {
+        let location = self.host.call("summary", json!({})).await.unwrap()["location"].clone();
+        for name in ["scout", "ana"] {
+            self.host
+                .call(
+                    "resource",
+                    json!({
+                        "ref": { "location": location, "kind": "project", "id": "" },
+                        "operation": { "kind": "spawn_agent", "input": {
+                            "spec": { "name": name, "groups": [self.group] } } },
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+        ark_sdk::prelude::ark_runtime::RuleBook::new(&self.store)
+            .put(&ark_interact::ark_orchestrate::group::rule_set(
+                &self.group,
+                "Pair",
+                &["Answer in Spanish.".to_string()],
+            ))
+            .unwrap();
+    }
+
+    async fn groups_of(&self, agent: &str) -> Value {
+        let location = self.host.call("summary", json!({})).await.unwrap()["location"].clone();
+        let agents = self
+            .host
+            .call(
+                "resource",
+                json!({
+                    "ref": { "location": location, "kind": "project", "id": "" },
+                    "operation": { "kind": "agents", "input": {} },
+                }),
+            )
+            .await
+            .unwrap();
+        agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == agent)
+            .unwrap()["spec"]
+            .get("groups")
+            .cloned()
+            .unwrap_or_else(|| json!([]))
+    }
+
+    fn rules_left(&self) -> bool {
+        ark_sdk::prelude::ark_runtime::RuleBook::new(&self.store)
+            .get(
+                &ark_interact::ark_orchestrate::group::rule_set_name(&self.group),
+                None,
+            )
+            .unwrap()
+            .is_some()
+    }
+}
+
+#[tokio::test]
+async fn removing_a_member_takes_the_group_off_its_agent_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path()).await;
+    t.join_with_rules().await;
+    assert_eq!(t.groups_of("ana").await, json!([t.group]));
+    t.host
+        .call(
+            "group_update",
+            json!({ "id": t.group, "members": [member(&t.project, "scout")] }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        t.groups_of("ana").await,
+        json!([t.group]),
+        "a refused update changes nothing"
+    );
+    let third = t
+        .host
+        .call(
+            "resource",
+            json!({
+                "ref": { "location": t.host.call("summary", json!({})).await.unwrap()["location"], "kind": "project", "id": "" },
+                "operation": { "kind": "spawn_agent", "input": { "spec": { "name": "bo" } } },
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(third["name"], "bo");
+    t.host
+        .call(
+            "group_update",
+            json!({ "id": t.group, "members": [member(&t.project, "scout"), member(&t.project, "bo")] }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(t.groups_of("ana").await, json!([]));
+    assert_eq!(t.groups_of("scout").await, json!([t.group]));
+    assert!(t.rules_left(), "the group still has its rules");
+}
+
+#[tokio::test]
+async fn deleting_a_group_takes_it_off_every_member_and_removes_its_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path()).await;
+    t.join_with_rules().await;
+    assert!(t.rules_left());
+    t.host
+        .call("group_delete", json!({ "id": t.group }))
+        .await
+        .unwrap();
+    assert_eq!(t.groups_of("scout").await, json!([]));
+    assert_eq!(t.groups_of("ana").await, json!([]));
+    assert!(!t.rules_left());
 }

@@ -1,9 +1,11 @@
 //! The native window (Tauri). The consumer's binary supplies its `tauri::Context` (window
-//! size, title bar, icons); ark-ui adds the page, two IPC commands and the event channel.
+//! size, title bar, icons); ark-ui adds the page, its IPC commands and the event channel.
 //!
 //! - `ark_call(method, params)` forwards to [`Host::call`].
 //! - `ark_subscribe(channel)` streams host events to the window.
 //! - `ark_pick_folder(title)` asks with the system's folder picker (`ark.pickFolder`).
+//! - `ark_open_link(url)` opens an http(s) link in the person's browser: the window opens no
+//!   windows of its own.
 //!
 //! The page is served through the app's own asset origin, so Tauri treats it as a local page.
 //! Files in the consumer's `frontendDist` stay reachable as a fallback.
@@ -563,6 +565,23 @@ fn ark_subscribe(
     Ok(())
 }
 
+/// A web link opens in the person's browser: the window opens no new windows of its own.
+#[tauri::command]
+async fn ark_open_link(webview: tauri::Webview, url: String) -> Result<(), String> {
+    from_own_page(&webview)?;
+    let parsed = url::Url::parse(&url).map_err(|error| error.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "only web links open outside ARK, not `{}`",
+            parsed.scheme()
+        ));
+    }
+    tokio::task::spawn_blocking(move || ark_os::open::open(parsed.as_str()))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
 /// The system's folder picker. `None` when the person dismisses it, or asked from a page
 /// elsewhere.
 #[tauri::command]
@@ -1040,6 +1059,7 @@ pub(crate) fn run(
             ark_detach_chat,
             ark_subscribe,
             ark_pick_folder,
+            ark_open_link,
             ark_browser_show,
             ark_browser_events,
             ark_browser_reach,

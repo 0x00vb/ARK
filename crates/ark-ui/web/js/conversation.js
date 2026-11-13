@@ -64,6 +64,11 @@ export class Thread {
         e.preventDefault();
         api.openInvocation(a.dataset.inv);
       }
+      const file = e.target.closest("a.file-link");
+      if (file) {
+        e.preventDefault();
+        api.openFile(file.dataset.path);
+      }
     });
   }
 

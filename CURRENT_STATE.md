@@ -8,6 +8,9 @@
 | Gates | qa: plan (4 blockers decided), implementation (1 blocker), two rechecks (2 + 2 blockers), each fixed with a test that fails without it. Release commit: see below |
 | Owner to confirm | An agent with `allow_mutate` does not ask for a schedule even in ask mode (it asks for nothing today) |
 | Not verified | A live model scheduling from chat; the real app |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests, node 22 of 22, WebKit 170 of 171 (`agent-sidebar` ⌘N fixture failed under load, 28 of 28 three times alone; it also flakes on v0.46.0), page suite 66 of 68 (the 2 known), notification 3 of 3, release build, simulated benchmark no delta |
+| Fresh clone | `verify-release.sh v0.48.0`: stopped at `ark-browser` `a_person_surface_has_its_own_context_frames_navigation_and_popups` (Chrome start under load, as on v0.36.0 to v0.44.0); it passes alone, and the release tree passed every workspace test |
+| Consumer | Desktop 0.16.0 pins this tag (committed; signing waits on the Apple developer agreement) |
 | Evidence | `../board/evidence/business-team-20261112/p4/` |
 
 # Core 0.47.0 release: an agent answers later, agents' exchanges in one line (2026-11-13)

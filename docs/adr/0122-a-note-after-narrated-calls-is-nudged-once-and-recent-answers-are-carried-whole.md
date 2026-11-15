@@ -1,4 +1,4 @@
-# 0122. Unfinished delegated work fails, recent answers are carried whole, an agent knows its changes ask
+# 0122. A note after narrated calls is asked about once, recent answers are carried whole, an agent knows its changes ask
 
 Status: Accepted. Date: 2026-11-15. Builds on 0051 (step notes), 0108 (the check nudge), 0113 and 0117 (group-reached work asks). Found in the owner's traces of 2026-11-08 to 2026-11-15 (workspace `board/evidence/trace-review-20261115/REPORT.md`).
 
@@ -15,10 +15,10 @@ Status: Accepted. Date: 2026-11-15. Builds on 0051 (step notes), 0108 (the check
 | Part | Decision |
 |---|---|
 | Step note in a brief task | A task that is not the person's chat turn (`Harness::brief_task`). When the turn made tool calls with text beside them and the final reply is one line of at most 240 characters, the model is asked once to continue (the announced-work nudge, at most one per turn). No word list: a one-line answer after calls with no text beside them, or with no calls at all, is not nudged |
-| Unfinished | A second note after that nudge sets `HarnessOutcome.unfinished`. The task ends `Failed`, keeps its `result`, `error` starts "unfinished:", and it is not retried. No new `TaskState`. `ran_out` keeps its meaning: an answer forced at the step limit can be a real answer |
-| Who sees it | `reports()` and the exchange view show the error, then the kept result. A scheduled run that ends unfinished counts as one failure toward the pause after 3 |
+| After the nudge | Whatever the model answers is the answer, and the task ends `Done`. A second note does not fail the task: a live run failed a task whose summary file was written, and a correct one-line result such as "Renamed 3 leads." or "Wrote out/brand.md." would fail the same way. There is no `unfinished` outcome and no new `TaskState` |
 | Carried answers | `CarryPolicy.newest_answer_chars` 4000 and `older_answer_chars` 2000 (serde defaults, so stored policies read). Line breaks are kept; a cut answer ends "(clipped: N of M characters)". Inputs and gists are unchanged |
-| Authority line | The agent's prompt says "Your changes ask the person first: call the action and they approve it. You are not read-only." or "You make changes without asking.", from `allow_mutate` after the group check. With no gate, a refused change says no one can approve it in this run and asks the model to say what it would have changed |
+| Authority line | The agent's prompt says "Your changes ask the person first: call the action and they approve it. You are not read-only." when its task has no `allow_mutate` and has an approval route (a gate, or an automation run), and "You make changes without asking." when `allow_mutate` is effective (after the group check). With no route there is no line: the refusal says no one can approve it in this run and asks the model to say what it would have changed, so the prompt must not promise an approval |
+| Benchmark | `recall-answer` (simulated): an 8-row table in turn 1, another answer in turn 2, a question about row 7 in turn 3. It fails on the code before this ADR (row 7 was clipped) and passes now |
 
 ## Not done
 
@@ -30,6 +30,6 @@ Status: Accepted. Date: 2026-11-15. Builds on 0051 (step notes), 0108 (the check
 ## Consequences
 
 - A long session with long answers carries about 740 tokens more per request (`crates/ark-sdk/tests/long_session.rs`: 93x the largest request at turn 500, was 144x; the request stays flat from turn 50).
-- Board items and schedules see `Failed` for unfinished work where they saw `Done`.
-- Each agent request carries the authority line (about 30 tokens; simulated `team` and `board` moved, baseline regenerated).
+- Board items and schedules see no change in state: a task that ends on a note is `Done`, as before.
+- An agent request with an approval route carries the authority line (about 24 tokens). The line sits after the agent's name in its own block, so it splits no prefix that agents share. It can push a short request over a provider's minimum cacheable size, which is how a simulated cache write of the `board` workload once rose by 1,069 tokens; the simulated runs have no approval route, so the baseline does not move for it.
 - One extra model call when a real one-line result follows narrated calls.

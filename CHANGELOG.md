@@ -4,13 +4,14 @@
 
 ### Added
 
+- Benchmark workload `recall-answer`: a table written in turn 1 is asked about in turn 3. It fails on 0.48.0 and passes now.
 - Away from the newest message, a round arrow over the composer scrolls back to it and follows the reply again.
 
 ### Changed
 
-- A delegated, scheduled or automation task whose last reply is one short line (a note on its steps, as in "Checking the project files") after it narrated its calls is sent back once to give the result. If the next reply is a note again, the task ends `Failed` with `error` "unfinished: ..." and keeps that reply as its `result`, instead of ending `Done`. It is not retried. `Harness::brief_task(bool)`, `reads_as_note` and `HarnessOutcome.unfinished` are new; the orchestrator sets `brief_task` for every task that is not the person's chat turn. A failed task that kept a result shows the error and then the result to the chat that handed it off and in the exchange view.
+- A delegated, scheduled or automation task whose last reply is one short line (a note on its steps, as in "Checking the project files") after it narrated its calls is sent back once to give the result. Whatever it answers next is its result and the task ends `Done`; nothing fails for a second note. `Harness::brief_task(bool)` and `reads_as_note` are new; the orchestrator sets `brief_task` for every task that is not the person's chat turn.
 - The carried conversation keeps the newest answer up to 4000 characters and older carried answers up to 2000, with their line breaks, and says "(clipped: N of M characters)" when it cuts one. It was 500 characters per answer, joined into one line. `CarryPolicy` gains `newest_answer_chars` and `older_answer_chars` (stored policies read with the defaults). The carried conversation of a long session is about 740 tokens larger (`long_session`: 770 to 1,507 tokens at 1,500-character answers).
-- An agent's prompt says whether its changes ask the person first ("Your changes ask the person first: call the action and they approve it. You are not read-only.") or not ("You make changes without asking."). Work that reached the agent through a group says it asks, as it does. About 30 tokens per agent request.
+- An agent's prompt says "Your changes ask the person first: call the action and they approve it. You are not read-only." when it has someone to ask (an approval gate, or an automation run), and "You make changes without asking." when it may. Work that reached the agent through a group says it asks. With no one to ask there is no line. About 24 tokens per agent request.
 - With no one to ask in the run, the refusal of a state-changing call says that no one can approve it there and to report what would have changed, and no longer tells the model to "reason from read-only evidence".
 
 ### Fixed
@@ -18,7 +19,6 @@
 - A chat opens at its newest message. It used to open where a saved position said, usually the top, and a chat surface put in the page again (a split, a tab) went back to the top.
 - A sent message no longer comes back as a draft when the chat is opened again.
 - A table or list an agent answered two turns ago is still in the next turn's carried conversation, with its rows on separate lines. The carry-over used to join an answer into one line of at most 500 characters.
-- A delegated task that narrated its steps and ended on a note no longer ends `Done` with the note as its result.
 
 ## [0.48.0] - 2026-11-13
 

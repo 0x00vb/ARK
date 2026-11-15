@@ -1,11 +1,12 @@
 //! The pictures a message carries, read from the project folder with the limits every provider
 //! accepts. One reader for the chat's `send` and for a task's admission and start.
 
+use std::io::Read;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::{inside, media, Error};
+use crate::{format, inside, kind_of, Content, Error, Format, Kind};
 
 /// Pictures one message carries, the most bytes of each and of all. A provider counts a picture
 /// as base64 (a third more): Anthropic refuses one over 5 MB and a request over 32 MB, so 3.5 MB
@@ -25,8 +26,9 @@ pub struct AttachedImage {
     pub size: u64,
 }
 
-/// Read `paths` (project files). Only PNG, JPEG, GIF and WebP, which every provider takes. The
-/// size is checked before a file is read, so a refused file is never read.
+/// Read `paths` (project files). Only PNG, JPEG, GIF and WebP, which every provider takes. Each
+/// file is read once, at most one byte past the limit: the length, the type and the hash are of
+/// the bytes read.
 pub fn images(root: &Path, paths: &[String]) -> Result<Vec<AttachedImage>, Error> {
     if paths.len() > MAX_IMAGES {
         return Err(Error::Input(format!(
@@ -36,29 +38,28 @@ pub fn images(root: &Path, paths: &[String]) -> Result<Vec<AttachedImage>, Error
     let mut total = 0;
     let mut out = Vec::with_capacity(paths.len());
     for path in paths {
-        let size = std::fs::metadata(inside(root, path)?)
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => Error::Path(format!("there is no file {path}")),
-                _ => Error::Io(e),
-            })?
-            .len() as usize;
-        if size > MAX_IMAGE_BYTES {
+        let real = inside(root, path)?;
+        let not_an_image = || Error::Input(format!("{path} is not a PNG, JPEG, GIF or WebP image"));
+        if !matches!(kind_of(path), Kind::Image) {
+            return Err(not_an_image());
+        }
+        let bytes = read_bounded(&real, path)?;
+        if bytes.len() > MAX_IMAGE_BYTES {
             return Err(Error::Input(format!(
                 "{path} is larger than {:.1} MB; make it smaller",
                 MAX_IMAGE_BYTES as f64 / 1e6
             )));
         }
-        total += size;
+        total += bytes.len();
         if total > MAX_IMAGES_BYTES {
             return Err(Error::Input(format!(
                 "the images are larger than {} MB together; send fewer",
                 MAX_IMAGES_BYTES / 1_000_000
             )));
         }
-        let not_an_image = || Error::Input(format!("{path} is not a PNG, JPEG, GIF or WebP image"));
-        let (bytes, media_type, _) = match media(root, path) {
-            Err(Error::Input(_)) => return Err(not_an_image()),
-            other => other?,
+        let media_type = match format::Image.read(&bytes)? {
+            Content::Media(m) => m.media_type,
+            _ => unreachable!("an image reads as media"),
         };
         if !matches!(
             media_type.as_str(),
@@ -75,6 +76,23 @@ pub fn images(root: &Path, paths: &[String]) -> Result<Vec<AttachedImage>, Error
         });
     }
     Ok(out)
+}
+
+fn read_bounded(real: &Path, rel: &str) -> Result<Vec<u8>, Error> {
+    let file = std::fs::File::open(real).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => Error::Path(format!("there is no file {rel}")),
+        _ => Error::Io(e),
+    })?;
+    let meta = file.metadata()?;
+    if meta.is_dir() {
+        return Err(Error::Path(format!("`{rel}` is a folder")));
+    }
+    if !meta.is_file() {
+        return Err(Error::Path(format!("`{rel}` is not a file")));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_IMAGE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -141,5 +159,43 @@ mod tests {
         }
         let names: Vec<String> = (0..6).map(|i| format!("{i}.png")).collect();
         assert!(message(images(dir.path(), &names)).contains("together"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_pointing_outside_the_folder_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("secret.png"), PIXEL).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret.png"), root.join("link.png")).unwrap();
+        assert!(message(images(&root, &strings(&["link.png"]))).contains("outside the project"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_another_file_inside_is_caught_by_the_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut other = PIXEL.to_vec();
+        other.push(0);
+        std::fs::write(dir.path().join("a.png"), PIXEL).unwrap();
+        std::fs::write(dir.path().join("b.png"), &other).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("a.png"), dir.path().join("link.png")).unwrap();
+        let before = images(dir.path(), &strings(&["link.png"])).unwrap();
+        std::fs::remove_file(dir.path().join("link.png")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("b.png"), dir.path().join("link.png")).unwrap();
+        let after = images(dir.path(), &strings(&["link.png"])).unwrap();
+        assert_ne!(before[0].sha256, after[0].sha256);
+        assert_ne!(before[0].size, after[0].size);
+    }
+
+    #[test]
+    fn a_file_over_the_limit_is_read_only_one_byte_past_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut big = PIXEL.to_vec();
+        big.resize(MAX_IMAGE_BYTES + 1_000_000, 0);
+        std::fs::write(dir.path().join("big.png"), &big).unwrap();
+        let bytes = read_bounded(&dir.path().join("big.png"), "big.png").unwrap();
+        assert_eq!(bytes.len(), MAX_IMAGE_BYTES + 1);
     }
 }

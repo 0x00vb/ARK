@@ -122,6 +122,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(multi_step()),
         Box::new(large_output()),
         Box::new(long_session(long_turns)),
+        Box::new(recall_answer()),
         Box::new(failure_recovery()),
         Box::new(duplicate()),
         Box::new(runaway()),
@@ -426,6 +427,76 @@ pub fn long_session(turns: usize) -> Spec {
                 })
                 .count();
             Verdict::all(&[(wrong == 0, "some turns answered wrong")])
+        }),
+    }
+}
+
+const RECALL_PRICE: &str = "71.50";
+
+fn recall_table() -> String {
+    let mut rows = vec![
+        "| code | item | price |".to_string(),
+        "|---|---|---|".to_string(),
+    ];
+    for n in 1..=8 {
+        let price = if n == 7 {
+            RECALL_PRICE.to_string()
+        } else {
+            format!("{}.00", n * 10 + 3)
+        };
+        rows.push(format!(
+            "| P-10{n} | Item number {n}, stainless steel with an ash handle, boxed singly for shelf display | {price} |"
+        ));
+    }
+    rows.join("\n")
+}
+
+/// An answer written in turn 1 is asked about in turn 3, after another answer: the carried
+/// conversation must still hold the row, with its line breaks.
+pub fn recall_answer() -> Spec {
+    Spec {
+        name: "recall-answer",
+        class: "long-session",
+        description:
+            "a table written in turn 1, an unrelated turn 2, then a question about row 7 in turn 3",
+        turns: Arc::new(|_| {
+            vec![
+                TurnSpec::new("Write a table of 8 rows: code P-101 to P-108, item and price."),
+                TurnSpec::new("What is 12 times 12?"),
+                TurnSpec::new("What price did your table give for code P-107?"),
+            ]
+        }),
+        policy: Arc::new(|r: &SimRequest| {
+            if let Some(reply) = housekeeping(r) {
+                return reply;
+            }
+            let task = r.task();
+            if task.contains("table of 8 rows") {
+                Reply::Text(recall_table())
+            } else if task.contains("12 times 12") {
+                Reply::Text("It is 144.".into())
+            } else if r.mentions(RECALL_PRICE) {
+                Reply::Text(format!("The table gives {RECALL_PRICE} for P-107."))
+            } else {
+                Reply::Text("I no longer have that row. Please paste the table again.".into())
+            }
+        }),
+        prepare: None,
+        check: Arc::new(|o| {
+            let rows = o
+                .turns
+                .first()
+                .map(|t| t.answer.lines().count())
+                .unwrap_or(0);
+            Verdict::all(&[
+                (rows == 10, "the table was not written"),
+                (
+                    o.turns
+                        .get(2)
+                        .is_some_and(|t| t.answer.contains(RECALL_PRICE)),
+                    "the answer to turn 3 does not have row 7",
+                ),
+            ])
         }),
     }
 }

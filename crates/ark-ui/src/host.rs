@@ -69,13 +69,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-/// Images one message carries, the most bytes of each and of all. A provider counts an image as
-/// base64 (a third more): Anthropic refuses one over 5 MB and a request over 32 MB, so 3.5 MB each
-/// and 20 MB in all stay under both. The page shrinks a larger image before it sends it.
-const MAX_IMAGES: usize = 8;
-const MAX_IMAGE_BYTES: usize = 3_500_000;
-const MAX_IMAGES_BYTES: usize = 20_000_000;
-
 /// How long a stop waits for the task to end before it answers that it is stopping.
 const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -3607,7 +3600,13 @@ impl Host {
                 if o.general_work_state(&receipt.id)? == GeneralWorkState::Pending {
                     let conv = self.chat_conv(&receipt.conversation, "", true).await?;
                     anyhow::ensure!(!conv.is_running(), "this conversation is already working");
-                    self.start_turn_on(conv, o.general_work_input(&receipt.id)?, true)?;
+                    let (paths, pictures) = o.general_work_pictures(&receipt.id)?;
+                    self.start_turn_with(
+                        conv,
+                        o.general_work_input(&receipt.id)?,
+                        true,
+                        ark_interact::Attachments { paths, pictures },
+                    )?;
                 }
                 Ok(serde_json::to_value(receipt)?)
             }
@@ -3897,9 +3896,11 @@ impl Host {
                         .as_object()
                         .ok_or_else(|| anyhow::anyhow!("a chat turn needs an objective"))?;
                     anyhow::ensure!(
-                        task.keys()
-                            .all(|key| matches!(key.as_str(), "objective" | "context" | "thread")),
-                        "idempotent chat turns accept only objective, context and thread"
+                        task.keys().all(|key| matches!(
+                            key.as_str(),
+                            "objective" | "context" | "thread" | "images"
+                        )),
+                        "idempotent chat turns accept only objective, context, thread and images"
                     );
                     let mut task: TaskSpec = serde_json::from_value(input["task"].clone())?;
                     task.person = true;
@@ -4670,6 +4671,9 @@ impl Host {
                     "version": env!("CARGO_PKG_VERSION"),
                     "project_terminal": true,
                     "file_snapshots": cfg!(unix),
+                    // `submit_task` and `work_admit` take `task.images` (ADR 0121). A runtime
+                    // without this key drops them without saying so.
+                    "images": true,
                     // This runtime's store id: another runtime knows it by this (ADR 0052).
                     "runtime": ark_interact::held::runtime_id(&self.engine),
                 }))
@@ -6615,54 +6619,18 @@ impl Host {
         if paths.is_empty() {
             return Ok(ark_interact::Attachments::default());
         }
-        anyhow::ensure!(
-            paths.len() <= MAX_IMAGES,
-            "at most {MAX_IMAGES} images go with one message"
-        );
         anyhow::ensure!(!conv.is_running(), "the agent is already working");
         let (root, _) = conv.ix.lock().await.workspace()?;
         let list = paths.clone();
         // Off the async runtime: the files are read here, whole.
-        let pictures =
-            tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ark_model::Picture>> {
-                let mut total = 0;
-                let mut pictures = Vec::new();
-                for path in &list {
-                    // The size first: a refused file is never read.
-                    let size = std::fs::metadata(ark_files::inside(&root, path)?)?.len() as usize;
-                    anyhow::ensure!(
-                        size <= MAX_IMAGE_BYTES,
-                        "{path} is larger than {:.1} MB; make it smaller",
-                        MAX_IMAGE_BYTES as f64 / 1e6
-                    );
-                    total += size;
-                    anyhow::ensure!(
-                        total <= MAX_IMAGES_BYTES,
-                        "the images are larger than {} MB together; send fewer",
-                        MAX_IMAGES_BYTES / 1_000_000
-                    );
-                    let (bytes, media_type, _) = match ark_files::media(&root, path) {
-                        // A text file, a sheet: not a picture.
-                        Err(ark_files::Error::Input(_)) => {
-                            anyhow::bail!("{path} is not a PNG, JPEG, GIF or WebP image")
-                        }
-                        other => other?,
-                    };
-                    anyhow::ensure!(
-                        matches!(
-                            media_type.as_str(),
-                            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
-                        ),
-                        "{path} is not a PNG, JPEG, GIF or WebP image"
-                    );
-                    pictures.push(ark_model::Picture {
-                        media_type,
-                        bytes: Arc::new(bytes),
-                    });
-                }
-                Ok(pictures)
+        let pictures = tokio::task::spawn_blocking(move || ark_files::images(&root, &list))
+            .await??
+            .into_iter()
+            .map(|image| ark_model::Picture {
+                media_type: image.media_type,
+                bytes: Arc::new(image.bytes),
             })
-            .await??;
+            .collect();
         Ok(ark_interact::Attachments { paths, pictures })
     }
 

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+Pictures go with a message in a named agent's chat (ADR 0121).
+
+### Added
+
+- `submit_task` and `work_admit` take `task.images` (project paths, at most 8, 3.5 MB each, 20 MB together, PNG, JPEG, GIF or WebP), as `chat_send` does. The orchestrator reads each picture when it admits the message and records its `sha256` and `size` on the task (`TaskRecord.images`, `TaskImage`) and on the work submission. When the turn starts it reads them again and fails the task, naming the file, if one was removed or changed. The model is shown what was checked, the stored turn lists the paths, and `TaskNode.images` lets a client draw them. An agent on a program is sent no picture: its brief lists `ATTACHED IMAGES` with the paths. Only the person's own message carries pictures: delegation, `agents.start`, schedules, automations, group turns and posted results refuse them. Steering (`message_agent`) stays text only.
+- `hello` answers `"images": true`; a client attaches pictures only when it is there. The page's `ark.taskImages()` says it, and `ark.chatView` passes `{ images, named }` to `submit` and exposes `addImages`, `stashImages` and `restoreImages`. A dropped image still over 3.5 MB after the page shrinks it is refused with a message and goes into the project as a file.
+- `ark_files::images(root, paths)` and `AttachedImage`: the one reader of a message's pictures (the limits of ADR 0106), used by `chat_send` and by tasks. `ark-orchestrate` depends on `ark-files`.
+
+### Breaking
+
+- `TaskSpec` has a new public field, `images: Vec<String>`. Build one with `TaskSpec::new` (or `..Default::default()`), or add `images: vec![]`. Stored tasks, graph nodes and submissions load as before.
+
 ## [0.48.1] - 2026-11-15
 
 A chat opens at its newest message, and a round arrow returns to it.

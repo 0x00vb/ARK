@@ -31,6 +31,7 @@ impl Client {
             | "spawn_agent"
             | "agents"
             | "submit_task"
+            | "work_admit"
             | "orch_events"
             | "task"
             | "task_call"
@@ -886,6 +887,100 @@ async fn chat_turn_request_retries_exact_payload_and_refuses_unsupported_fields(
         changed["request_id"] = request;
         assert!(host.call("submit_task", changed).await.is_err());
     }
+}
+
+/// A 1x1 PNG.
+const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+#[tokio::test]
+async fn a_picture_goes_with_a_chat_turn_and_every_other_use_of_one_is_refused() {
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    host.call("spawn_agent", json!({"spec":{"name":"writer"}}))
+        .await
+        .unwrap();
+    let folder = std::path::PathBuf::from(
+        host.call("workspace", json!({})).await.unwrap()["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(PIXEL)
+        .unwrap();
+    std::fs::write(folder.join("shot.png"), &png).unwrap();
+    std::fs::write(folder.join("notes.txt"), "hello").unwrap();
+    let mut big = png.clone();
+    big.resize(3_600_000, 0);
+    std::fs::write(folder.join("big.png"), &big).unwrap();
+    let hello = host.call("hello", json!({})).await.unwrap();
+    assert_eq!(hello["images"], true);
+
+    // Refused as typed, with and without a request id: no task exists afterwards.
+    let nine: Vec<String> = (0..9).map(|i| format!("{i}.png")).collect();
+    for (images, why) in [
+        (json!(["big.png"]), "larger than 3.5 MB"),
+        (json!(["notes.txt"]), "not a PNG"),
+        (json!(["../outside.png"]), "outside the project folder"),
+        (json!(nine), "at most 8"),
+    ] {
+        for request in [None, Some("bad")] {
+            let mut input = json!({"agent":"writer","task":{"objective":"look","images":images}});
+            if let Some(request) = request {
+                input["request_id"] = json!(request);
+            }
+            let error = host.call("submit_task", input).await.unwrap_err();
+            assert!(error.to_string().contains(why), "{images}: {error}");
+        }
+    }
+    let mut group = json!({"agent":"writer","task":{"objective":"look","images":["shot.png"],"group_turn":true}});
+    let error = host.call("submit_task", group.clone()).await.unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("only with a message the person sends"),
+        "{error}"
+    );
+    group["task"] = json!({"objective":"look","images":["shot.png"],"reply":true});
+    host.call("submit_task", group).await.unwrap_err();
+    let error = host
+        .call(
+            "work_admit",
+            json!({"request_id":"w","target":{"kind":"agent","name":"writer"},
+                "task":{"objective":"look","images":["notes.txt"]}}),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("not a PNG"), "{error}");
+    assert!(
+        host.call("graph", json!({})).await.unwrap()["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a refused message starts no task"
+    );
+
+    // Accepted, with a request id as the Desktop sends it: retried once, one task, the picture on it.
+    let input = json!({"agent":"writer","request_id":"one","task":{"objective":"what is this","images":["shot.png"]}});
+    let first = host.call("submit_task", input.clone()).await.unwrap();
+    let retry = host.call("submit_task", input.clone()).await.unwrap();
+    assert_eq!(first["task"], retry["task"]);
+    let mut other = input.clone();
+    other["task"]["images"] = json!([]);
+    host.call("submit_task", other).await.unwrap_err();
+    let graph = host.call("graph", json!({})).await.unwrap();
+    let nodes = graph["tasks"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0]["images"], json!(["shot.png"]));
+    // The form without a request id takes them too.
+    let plain = host
+        .call(
+            "submit_task",
+            json!({"agent":"writer","task":{"objective":"again","images":["shot.png"]}}),
+        )
+        .await
+        .unwrap();
+    assert!(plain["task"].is_string());
 }
 
 #[tokio::test]

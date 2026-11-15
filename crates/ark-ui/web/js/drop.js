@@ -149,7 +149,9 @@ function choose(attrs, picked) {
 async function addToProject(api, complete, list, progressTarget, attach = false) {
   if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
   if (attach) await Promise.all(list.filter((f) => !f.path.includes("/") && isImage(f.file)).map(fitImage));
-  const pictures = attach ? uniquePictures(list) : [];
+  const fits = attach ? uniquePictures(list) : [];
+  const pictures = fits.filter((p) => p.file.size <= IMAGE_BYTES);
+  for (const p of fits) if (!pictures.includes(p)) api.toast(`${p.path} is too large to show the agent (3.5 MB at most).`);
   const progress = new Progress(list, "Adding", undefined, progressTarget);
   try {
     const { added, as } = await send(api, list, progress, { method: "upload_add", params: {} });

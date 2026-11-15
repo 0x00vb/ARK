@@ -166,3 +166,4 @@ Local integration decisions:
 - [0118-an-agent-answers-later-in-the-same-chat](0118-an-agent-answers-later-in-the-same-chat.md)
 - [0119-agent-exchanges-are-read-from-what-agents-already-keep](0119-agent-exchanges-are-read-from-what-agents-already-keep.md)
 - [0120-an-agent-schedules-work-from-its-own-chat](0120-an-agent-schedules-work-from-its-own-chat.md)
+- [0121-pictures-go-with-an-agent-chat-message](0121-pictures-go-with-an-agent-chat-message.md)

@@ -67,6 +67,9 @@ const views = new Map();
 const api = {
   h, icon, markdown,
   fileSnapshots: () => !!state.fileSnapshots,
+  // Whether this page's runtime takes `task.images` in `submit_task` and `work_admit` (its hello
+  // says so). A runtime without the flag drops them without saying so.
+  taskImages: () => !!state.taskImages,
   on: onExt,
   call: (method, params = {}) => resourceMethod(method, params)
     ? scopedApi(currentLocation()).call(method, params)
@@ -395,6 +398,7 @@ function scopedApi(location) {
     return true;
   };
   scoped.remoteResource = location.runtime !== state.runtime;
+  scoped.taskImages = () => !scoped.remoteResource && !!state.taskImages;
   scoped.destinationBrowser = scoped.remoteResource || transport.kind === "browser";
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
   if (scoped.destinationBrowser) scoped.browserView = undefined;
@@ -2785,6 +2789,7 @@ async function bootOnce(again) {
   state.ui = hello.ui || {};
   state.runtime = hello.runtime;
   state.fileSnapshots = !!hello.file_snapshots;
+  state.taskImages = !!hello.images;
   setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;

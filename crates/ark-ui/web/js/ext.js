@@ -61,11 +61,16 @@ import { setAgentIdentity } from "./dom.js";
 //                      a conversation the app draws from its own records with the chat's
 //                      own view, so it looks and reads and behaves as a chat (ADR 0076).
 //                      Returns `{ render(turns, { empty }), reset(), input, actions, focus(),
-//                      set(text), addLine(text, { focus }), uploads,
+//                      set(text), addLine(text, { focus }), addImages(items), stashImages(),
+//                      restoreImages(kept), uploads,
 //                      setComposer({ placeholder, disabled, running, modelLabel, modelDisabled, submitDisabled }), dispose() }`.
 //                      Optional `model.open(anchor)` opens the consumer's real model picker.
 //                      Optional `files.captureOrigin()` runs before the chooser opens and returns
-//                      `{ uploadApi, appendDraft, progressTarget, started?, finished? }`, all bound to that origin.
+//                      `{ uploadApi, appendDraft(line, images?), progressTarget, started?, finished?,
+//                      attachImages? }`, all bound to that origin. With `attachImages`, a dropped image
+//                      comes to `appendDraft` as `images` (`{ path, name, url }`, for `addImages`) and
+//                      leaves with the message: `submit(text, { images, named })`, `named` meaning the
+//                      text is only their file names. Answer `attachImages` from `ark.taskImages()`.
 //                      `uploads` is this view's upload container.
 //                      Optional `exchanges` (ADR 0119): `{ project, agent, session?, name?, look? }`, or
 //                      a function returning it or null, read at each use. Turns keyed `task:<id>`

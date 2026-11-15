@@ -40,9 +40,16 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     if (history && base.history) { void base.history((history[1] || "").trim()); return true; }
     return false;
   };
-  api.submit = (text) => shared(text) ? undefined : submitDisabled ? composer.set(text) : submit(text);
+  // `{ images, named }` is the composer's: the pictures sent with the text (`files.captureOrigin`
+  // with `attachImages`), and whether the text is only their file names. A message that is not
+  // taken now puts them back.
+  const keep = (text, options) => {
+    if (!options?.named) composer.set(text);
+    if (options?.images?.length) composer.addImages(options.images);
+  };
+  api.submit = (text, options) => shared(text) ? undefined : submitDisabled ? keep(text, options) : submit(text, options);
   api.send = api.submit;
-  api.steer = api.submit;
+  api.steer = (text) => api.submit(text);
   api.cancel = () => {};
   let running = false;
 
@@ -297,6 +304,10 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     input,
     actions,
     uploads: elements.uploads,
+    /// The pictures of the composer: `{ path, name, url? }` in, out as `stashImages` takes them.
+    addImages: (items) => composer.addImages(items),
+    stashImages: () => composer.stashImages(),
+    restoreImages: (kept) => composer.restoreImages(kept),
     addLine: (text, options) => {
       composer.addLine(text, options);
       input.dispatchEvent(new Event("input", { bubbles: true }));

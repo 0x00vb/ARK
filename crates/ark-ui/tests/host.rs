@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ark_interact::ark_orchestrate::{Models, Orchestrator};
 use ark_interact::{App, ChannelApprover, Start, TurnControl};
 use ark_sdk::prelude::ark_model::{estimate_tokens, Completion, MockProvider, ToolCall, Usage};
 use ark_sdk::prelude::*;
@@ -613,6 +614,121 @@ async fn a_model_that_reads_no_images_is_told_so_and_the_turn_still_lists_the_im
         .any(|m| m.content.contains("this model is not sent images")));
     let turns = host.call("transcript", json!({})).await.unwrap();
     assert_eq!(turns[0]["images"], json!(["shot.png"]));
+}
+
+/// A host with an orchestrator over a model that reads images and answers at once.
+async fn seeing_work(dir: &std::path::Path) -> (Arc<Host>, Arc<MockProvider>, Orchestrator) {
+    let model = Arc::new(
+        MockProvider::new("m", vec![]).with_fallback(|_| Completion {
+            content: "It is one pixel.".into(),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        }),
+    );
+    let provider: Arc<dyn ark_model::Provider> = Arc::new(Sees(model.clone()));
+    let ark = Ark::builder()
+        .store_root(dir)
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("work", "test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("m")
+                .provider("m", provider)
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let chosen = project.clone();
+    let app = App::new("work test")
+        .ark(ark)
+        .project(move |_| Ok(chosen.clone()))
+        .orchestrator(o.clone());
+    (ArkUi::new(app).open().await.unwrap().0, model, o)
+}
+
+#[tokio::test]
+async fn pictures_go_with_a_new_chats_first_message_and_stay_with_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, model, o) = seeing_work(dir.path()).await;
+    let hello = host.call("hello", json!({})).await.unwrap();
+    assert_eq!(hello["images"], true, "a client learns pictures are taken");
+    drop_file(&host, "shot.png", PIXEL).await;
+    drop_file(&host, "notes.txt", "aGVsbG8=").await;
+    for (name, why) in [("notes.txt", "not a PNG"), ("../outside.png", "outside")] {
+        let error = project_call(
+            &host,
+            "work_admit",
+            json!({"request_id":"bad","target":{"kind":"general","model":null},
+                "task":{"objective":"look","images":[name]}}),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains(why), "{name}: {error}");
+        let receipt = project_call(&host, "work_receipt", json!({"request_id":"bad"}))
+            .await
+            .unwrap();
+        assert!(receipt.is_null(), "a refused message admits nothing");
+    }
+    let input = json!({"request_id":"first","target":{"kind":"general","model":null},
+        "task":{"objective":"what is this","images":["shot.png"]}});
+    let receipt = project_call(&host, "work_admit", input.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        project_call(&host, "work_admit", input).await.unwrap(),
+        receipt,
+        "the same request admits once"
+    );
+    assert!(model.recorded().is_empty(), "admission runs no turn");
+    let mut rx = host.subscribe();
+    project_call(&host, "work_execute", json!({"receipt":receipt["id"]}))
+        .await
+        .unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["ok"], true, "{done}");
+    let shown: usize = model
+        .recorded()
+        .iter()
+        .flat_map(|r| &r.messages)
+        .map(|m| m.pictures.len())
+        .sum();
+    assert_eq!(shown, 1, "the model saw the picture once");
+    let read = host
+        .call("chat_read", json!({"session":receipt["conversation"]}))
+        .await
+        .unwrap();
+    assert_eq!(read["transcript"][0]["images"], json!(["shot.png"]));
+    assert!(o.agents().is_empty());
+}
+
+#[tokio::test]
+async fn a_picture_removed_before_a_new_chat_starts_stops_it_and_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, model, _) = seeing_work(dir.path()).await;
+    drop_file(&host, "shot.png", PIXEL).await;
+    let receipt = project_call(
+        &host,
+        "work_admit",
+        json!({"request_id":"first","target":{"kind":"general","model":null},
+            "task":{"objective":"what is this","images":["shot.png"]}}),
+    )
+    .await
+    .unwrap();
+    let root = find(dir.path(), "shot.png").unwrap();
+    std::fs::remove_file(root).unwrap();
+    let error = project_call(&host, "work_execute", json!({"receipt":receipt["id"]}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "The picture shot.png changed or was removed after it was sent."
+    );
+    assert!(model.recorded().is_empty());
 }
 
 /// The folder `name` landed in, found by looking for it under the store.

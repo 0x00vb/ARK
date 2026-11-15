@@ -438,6 +438,7 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Both | `/agent new <name> [provider:model]`, `/agent pause|resume|end <name>`, `/agent message <name> <text>`, `/task <agent> <objective>`, `/task cancel|retry <task>`. Each is an `ark_interact::orchestration::Control` run by `control`; the window's methods (`spawn_agent`, `submit_task`, ...) build the same `Control`s, so a change means the same in both |
 | Terminal, headless | `app -p "/agents"` prints the same report; any slash command runs this way (`app -p "/task lead summarize notes.md"`) |
 | Window | read: `graph`, `agents`, `tools`, `task`, `task_trace`, `orch_events {after, limit}`. Control: `spawn_agent`, `submit_task`, `cancel_task`, `retry_task`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent`. Live: `{kind: "orch", event, line, tone, activity}`, which page scripts receive as `ark:orch`. With `App::orchestrate` each project has its own orchestrator. Details: [`UI.md`](UI.md#protocol) |
+| Pictures | `TaskSpec.images` (the person's, ADR 0121): read and fingerprinted at admission (`TaskRecord.images`: path, sha256, size), read again and compared when the turn starts, shown to the model with the task message, stored with the turn, listed on `TaskNode.images`. Refused for delegation, `agents.start`, schedules, automations, group turns and posted results. A program's brief lists their paths (`ATTACHED IMAGES`) and gets no picture |
 
 ## Limits
 

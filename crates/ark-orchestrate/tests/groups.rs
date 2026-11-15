@@ -1005,8 +1005,8 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
     let asks = "Your changes ask the person first";
     let free = "You make changes without asking.";
     assert!(
-        ops[0].contains(asks) && !ops[0].contains(free),
-        "work through the group asks, so its prompt says so"
+        !ops[0].contains(asks) && !ops[0].contains(free),
+        "work through the group has no one to ask here, so its prompt names no authority"
     );
     let last = ops.last().unwrap();
     assert!(

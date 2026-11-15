@@ -2878,27 +2878,44 @@ async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_w
 
 #[tokio::test]
 async fn an_agents_prompt_says_whether_its_changes_ask_the_person_first() {
-    let f = fixture();
-    let m = Script::new("m", vec![]);
-    let o = orch(&f, vec![("m", m.clone())], vec![]);
-    o.spawn(AgentSpec::new("asks").model("m")).await.unwrap();
-    o.spawn(AgentSpec::new("acts").model("m").allow_mutate(true))
-        .await
-        .unwrap();
-    for agent in ["asks", "acts"] {
-        let t = o.submit(agent, TaskSpec::new("say hello")).unwrap();
-        o.wait(&t).await.unwrap();
-    }
     let asked = "Your changes ask the person first: call the action and they approve it. You are not read-only.";
     let free = "You make changes without asking.";
-    let seen = m.seen.lock().unwrap();
-    let system = |agent: &str| {
-        seen.iter()
-            .map(|(s, _)| s.clone())
-            .find(|s| s.contains(&format!("You are the agent \"{agent}\"")))
-            .unwrap()
-    };
-    let (asks, acts) = (system("asks"), system("acts"));
-    assert!(asks.contains(asked) && !asks.contains(free), "{asks}");
-    assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+    for gate in [false, true] {
+        let f = fixture();
+        let m = Script::new("m", vec![]);
+        let model = m.clone();
+        let mut b = Orchestrator::builder(&f.ark, &f.project)
+            .configure_models(move |b| b.provider("m", model as Arc<dyn Provider>));
+        if gate {
+            b = b.approvals(Arc::new(ApprovalGate::new(Arc::new(Yes(Arc::new(
+                AtomicUsize::new(0),
+            ))))));
+        }
+        let o = b.build().unwrap();
+        o.spawn(AgentSpec::new("asks").model("m")).await.unwrap();
+        o.spawn(AgentSpec::new("acts").model("m").allow_mutate(true))
+            .await
+            .unwrap();
+        for agent in ["asks", "acts"] {
+            let t = o.submit(agent, TaskSpec::new("say hello")).unwrap();
+            o.wait(&t).await.unwrap();
+        }
+        let seen = m.seen.lock().unwrap();
+        let system = |agent: &str| {
+            seen.iter()
+                .map(|(s, _)| s.clone())
+                .find(|s| s.contains(&format!("You are the agent \"{agent}\"")))
+                .unwrap()
+        };
+        let (asks, acts) = (system("asks"), system("acts"));
+        assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+        if gate {
+            assert!(asks.contains(asked) && !asks.contains(free), "{asks}");
+        } else {
+            assert!(
+                !asks.contains(asked) && !asks.contains(free),
+                "no one to ask, so no authority line: {asks}"
+            );
+        }
+    }
 }

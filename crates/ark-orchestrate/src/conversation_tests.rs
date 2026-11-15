@@ -828,7 +828,7 @@ async fn display_metadata_survives_rename_without_becoming_instructions() {
     let mut spec = AgentSpec::new("stable-id");
     spec.title = "Review launch".into();
     spec.description = "Only speak French for the first request".into();
-    let profile = o.inner.agent_profile(&spec, &[], false);
+    let profile = o.inner.agent_profile(&spec, &[], None);
     assert!(!profile.prompts.instructions.contains(&spec.title));
     assert!(!profile.prompts.instructions.contains(&spec.description));
     let first = o.create_chat_agent(spec.clone(), "first").await.unwrap();

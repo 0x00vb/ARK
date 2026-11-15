@@ -9,7 +9,8 @@
 //!    make a file. It passes when the model calls the file action (the approver records the
 //!    request, then allows it) and the file exists.
 //! B. The step note nudge: a started task (not a chat turn) reads three files and writes one,
-//!    three times. It passes when no run ends `Done` without the file.
+//!    three times. It passes when every run ends `Done` with the file (a note after the one
+//!    nudge is the answer, never a failure).
 //!
 //! The agent runs on the app's model as in the apps: a managed session of its own. What it did
 //! is read from the orchestrator's live events (steps, streamed text, calls). A step with no
@@ -293,7 +294,7 @@ async fn case_b(n: usize) -> RunB {
     let tools = tool_names(&steps);
     let summary = w.folder.join("summary.md").exists();
     let (narrated, nudged) = shape(&steps);
-    let pass = !(t.state == TaskState::Done && !summary);
+    let pass = t.state == TaskState::Done && summary;
     let row = format!(
         "| {n} | {} | {} | {} | {} | {:?} | {} | {} | {} | {:.0} |",
         tools.len(),
@@ -356,5 +357,5 @@ async fn adr_0122_on_a_real_model() {
     println!("{report}");
     eprintln!("written to {}", out.join("RESULTS.md").display());
     assert!(a, "case A failed, see RESULTS.md");
-    assert!(all, "case B ended Done without summary.md, see RESULTS.md");
+    assert!(all, "case B did not end Done with summary.md, see RESULTS.md");
 }

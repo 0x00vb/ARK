@@ -828,7 +828,7 @@ async fn display_metadata_survives_rename_without_becoming_instructions() {
     let mut spec = AgentSpec::new("stable-id");
     spec.title = "Review launch".into();
     spec.description = "Only speak French for the first request".into();
-    let profile = o.inner.agent_profile(&spec, &[]);
+    let profile = o.inner.agent_profile(&spec, &[], None);
     assert!(!profile.prompts.instructions.contains(&spec.title));
     assert!(!profile.prompts.instructions.contains(&spec.description));
     let first = o.create_chat_agent(spec.clone(), "first").await.unwrap();
@@ -2680,6 +2680,91 @@ async fn automation_admission_is_atomic_deduplicated_and_approval_resumes_only_e
             .turn_count(),
         2
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_automation_step_that_ends_on_a_note_after_narrated_calls_is_asked_once() {
+    use crate::automation::*;
+    use ark_model::{Completion, ToolCall};
+    use ark_tools::{ActionOutput, Adapter, RunCtx};
+    struct Look;
+    #[async_trait::async_trait]
+    impl Adapter for Look {
+        fn name(&self) -> &str {
+            "look"
+        }
+        fn actions(&self) -> Vec<ark_core::ActionDescriptor> {
+            vec![ark_core::ActionDescriptor::new(
+                "look.read",
+                "read a file",
+                ark_core::RiskTier::Read,
+            )]
+        }
+        async fn run(
+            &self,
+            _: &str,
+            _: serde_json::Value,
+            _: &RunCtx<'_>,
+        ) -> ark_tools::Result<ActionOutput> {
+            Ok(ActionOutput::json(serde_json::json!({"text": "seed"})))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let reply = |text: &str, calls: Vec<ToolCall>| Completion {
+        content: text.into(),
+        tool_calls: calls,
+        usage: Default::default(),
+    };
+    let read = ToolCall {
+        id: "c1".into(),
+        name: "look.read".into(),
+        arguments: serde_json::json!({}),
+    };
+    let provider = Arc::new(ark_model::MockProvider::new(
+        "test",
+        vec![
+            reply("Reading the seed file.", vec![read]),
+            reply("Checking the project files and verifying the seed.", vec![]),
+            reply("Lead list: Acme, Birch, Cora.", vec![]),
+        ],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .tool(Arc::new(Look))
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("project", "test").unwrap();
+    let models = Arc::new(
+        crate::Models::builder()
+            .default_model("test")
+            .provider("test", provider.clone())
+            .build(),
+    );
+    let o = Orchestrator::builder(&ark, &project)
+        .models(models)
+        .build()
+        .unwrap();
+    let saved = o
+        .save_automation("create", None, None, sequence_draft())
+        .unwrap();
+    let run = o
+        .admit_confirmed_test_run(
+            &saved.automation,
+            1,
+            RunOrigin::Manual {
+                request: "run".into(),
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    o.execute_automation_run(&run.id).unwrap();
+    let completed = wait_automation(&o, &run.id, RunPhase::Completed).await;
+    assert_eq!(completed.output.text, "Lead list: Acme, Birch, Cora.");
+    assert_eq!(provider.calls.lock().unwrap().len(), 3);
 }
 
 #[tokio::test(flavor = "multi_thread")]

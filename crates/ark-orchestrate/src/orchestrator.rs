@@ -1452,6 +1452,10 @@ fn reports(t: &TaskRecord) -> Option<(bool, String)> {
     }
 }
 
+/// What an agent is told about its changes, from the authority its task runs with.
+const CHANGES_ASK: &str = "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only.";
+const CHANGES_FREE: &str = "You make changes without asking.";
+
 enum Attempt {
     Done(String),
     SavedResultFailed {
@@ -3618,7 +3622,14 @@ impl Inner {
         sets
     }
 
-    fn agent_profile(&self, spec: &AgentSpec, delegates: &[(String, String)]) -> AgentProfile {
+    /// `changes` is what the agent is told about its changes: nothing when no one can approve
+    /// them in this run (the refusal says so).
+    fn agent_profile(
+        &self,
+        spec: &AgentSpec,
+        delegates: &[(String, String)],
+        changes: Option<&str>,
+    ) -> AgentProfile {
         let named = spec
             .profile_name
             .as_ref()
@@ -3636,6 +3647,10 @@ impl Inner {
             who.push_str(&format!(" ({})", spec.role.trim()));
         }
         who.push_str(". Each request is one task; its brief names the requester.");
+        if let Some(line) = changes {
+            who.push('\n');
+            who.push_str(line);
+        }
         if !delegates.is_empty() {
             who.push_str("\nYour contacts:\n");
             for (n, r) in delegates {
@@ -4008,7 +4023,17 @@ impl Inner {
         } else {
             self.engine.scoped_for(&scope, registry)
         };
-        let mut profile = self.agent_profile(spec, &delegates);
+        // Work a group member sent asks before it changes anything, whatever the owner may do
+        // on its own: the person agreed to a group, not to one member acting through another.
+        let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
+        let changes = if allow_mutate {
+            Some(CHANGES_FREE)
+        } else if task.run.is_some() || self.approvals.is_some() {
+            Some(CHANGES_ASK)
+        } else {
+            None
+        };
+        let mut profile = self.agent_profile(spec, &delegates, changes);
         if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
             let mut sources: Vec<_> = profile.acquisition.take().into_iter().collect();
@@ -4137,9 +4162,6 @@ impl Inner {
                 Err(error) => return Attempt::Fatal(error.to_string()),
             }
         }
-        // Work a group member sent asks before it changes anything, whatever the owner may do
-        // on its own: the person agreed to a group, not to one member acting through another.
-        let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
         let approvals = if let Some(run) = &task.run {
             match self.automation_approvals(run, id) {
                 Ok(gate) => Some(gate),
@@ -4169,6 +4191,7 @@ impl Inner {
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(allow_mutate)
+            .brief_task(!task.is_chat_turn())
             .approvals(approvals.clone())
             .cancel(Some(attempt_cancel.clone()))
             .stopping(Some(self.engine.stopping()))

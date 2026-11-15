@@ -2,13 +2,25 @@
 
 ## [Unreleased]
 
-Pictures go with a message in a named agent's chat (ADR 0121).
+Pictures go with a message in a named agent's chat (ADR 0121). A delegated task that ends on a note is asked once for its result, recent answers are carried whole, and an agent knows its changes ask (ADR 0122).
 
 ### Added
 
 - `submit_task` and `work_admit` take `task.images` (project paths, at most 8, 3.5 MB each, 20 MB together, PNG, JPEG, GIF or WebP), as `chat_send` does. The orchestrator reads each picture when it admits the message and records its `sha256` and `size` on the task (`TaskRecord.images`, `TaskImage`) and on the work submission. When the turn starts it reads them again and fails the task, naming the file, if one was removed or changed. The model is shown what was checked, the stored turn lists the paths, and `TaskNode.images` lets a client draw them. An agent on a program is sent no picture: its brief lists `ATTACHED IMAGES` with the paths. Only the person's own message carries pictures: delegation, `agents.start`, schedules, automations, group turns and posted results refuse them. Steering (`message_agent`) stays text only.
 - `hello` answers `"images": true`; a client attaches pictures only when it is there. A chat asks `ark.at(location).taskImages()` with its own location (true only for the page's own runtime with the flag, false for another computer); `ark.taskImages()` answers for the page's own runtime. `ark.chatView` passes `{ images, named }` to `submit` and exposes `addImages`, `stashImages` and `restoreImages`. A dropped image still over 3.5 MB after the page shrinks it is refused with a message and goes into the project as a file.
 - `ark_files::images(root, paths)` and `AttachedImage`: the one reader of a message's pictures (the limits of ADR 0106), used by `chat_send` and by tasks. `ark-orchestrate` depends on `ark-files`. New exports: `ark_orchestrate::TaskImage`, `Orchestrator::general_work_pictures` (what a new chat's first turn is sent, checked as a task's start checks it).
+- Benchmark workload `recall-answer`: a table written in turn 1 is asked about in turn 3. It fails on 0.48.0 and passes now.
+
+### Changed
+
+- A delegated, started, scheduled or automation task (an automation step included) whose last reply is one short line (a note on its steps, as in "Checking the project files") after it narrated its calls is sent back once to give the result. Whatever it answers next is its result and the task ends `Done`; nothing fails for a second note. `Harness::brief_task(bool)` and `reads_as_note` are new; the orchestrator sets `brief_task` for every task that is not the person's chat turn.
+- The carried conversation keeps the newest answer up to 4000 characters and older carried answers up to 2000, with their line breaks, and says "(clipped: N of M characters)" when it cuts one. It was 500 characters per answer, joined into one line. `CarryPolicy` gains `newest_answer_chars` and `older_answer_chars` (stored policies read with the defaults). The carried conversation of a long session is about 740 tokens larger (`long_session`: 770 to 1,507 tokens at 1,500-character answers).
+- An agent's prompt says "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only." when it has someone to ask (an approval gate, or an automation run), and "You make changes without asking." when it may. Work that reached the agent through a group says it asks. With no one to ask there is no line. About 24 tokens per agent request.
+- With no one to ask in the run, the refusal of a state-changing call says that no one can approve it there and to report what would have changed, and no longer tells the model to "reason from read-only evidence".
+
+### Fixed
+
+- A table or list an agent answered two turns ago is still in the next turn's carried conversation, with its rows on separate lines. The carry-over used to join an answer into one line of at most 500 characters.
 
 ### Breaking
 

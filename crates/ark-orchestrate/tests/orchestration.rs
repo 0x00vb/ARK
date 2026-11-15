@@ -2811,3 +2811,117 @@ async fn completed_model_effect_replay_preserves_newer_edits_and_busy_state() {
     assert!(o.tasks().is_empty());
     assert!(model.seen.lock().unwrap().is_empty());
 }
+
+fn narrated_diagram(text: &str) -> Completion {
+    Completion {
+        content: text.into(),
+        ..calls(vec![(
+            "diagram.create",
+            json!({"kind": "sequence", "title": "Flow", "source": "sequenceDiagram\n  A->>B: request\n  B-->>A: reply"}),
+        )])
+    }
+}
+
+const STEP_NOTE: &str = "Checking the project files and verifying the seed leads.";
+const STEP_NOTE_AGAIN: &str = "Reading the price lines now.";
+
+#[tokio::test]
+async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_with_it() {
+    for last in [STEP_NOTE_AGAIN, "Renamed 3 leads."] {
+        delegated_note_ends_done(last).await;
+    }
+}
+
+async fn delegated_note_ends_done(last: &str) {
+    let f = fixture();
+    let lead = Script::new(
+        "lead",
+        vec![
+            calls(vec![delegate("drafter", "qualify the seed leads")]),
+            answer("got it"),
+        ],
+    );
+    let drafter = Script::new(
+        "drafter",
+        vec![
+            narrated_diagram("Reading the seed file."),
+            answer(STEP_NOTE),
+            answer(last),
+        ],
+    );
+    let o = orch(
+        &f,
+        vec![("lead", lead.clone()), ("drafter", drafter.clone())],
+        vec![],
+    );
+    o.spawn(
+        AgentSpec::new("lead")
+            .model("lead")
+            .delegates_to(["drafter"]),
+    )
+    .await
+    .unwrap();
+    o.spawn(
+        AgentSpec::new("drafter")
+            .model("drafter")
+            .diagrams(true)
+            .tools(Vec::<String>::new()),
+    )
+    .await
+    .unwrap();
+    let t = o.submit("lead", TaskSpec::new("get the leads")).unwrap();
+    o.wait(&t).await.unwrap();
+    let worker = o
+        .tasks()
+        .into_iter()
+        .find(|t| t.owner == "drafter")
+        .expect("the delegated task");
+    assert_eq!(worker.state, TaskState::Done);
+    assert_eq!(worker.result.as_deref(), Some(last));
+    assert_eq!(worker.error, None);
+    assert_eq!(drafter.texts().len(), 3, "one nudge, no third call");
+}
+
+#[tokio::test]
+async fn an_agents_prompt_says_whether_its_changes_ask_the_person_first() {
+    let asked = "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only.";
+    let free = "You make changes without asking.";
+    for gate in [false, true] {
+        let f = fixture();
+        let m = Script::new("m", vec![]);
+        let model = m.clone();
+        let mut b = Orchestrator::builder(&f.ark, &f.project)
+            .configure_models(move |b| b.provider("m", model as Arc<dyn Provider>));
+        if gate {
+            b = b.approvals(Arc::new(ApprovalGate::new(Arc::new(Yes(Arc::new(
+                AtomicUsize::new(0),
+            ))))));
+        }
+        let o = b.build().unwrap();
+        o.spawn(AgentSpec::new("asks").model("m")).await.unwrap();
+        o.spawn(AgentSpec::new("acts").model("m").allow_mutate(true))
+            .await
+            .unwrap();
+        for agent in ["asks", "acts"] {
+            let t = o.submit(agent, TaskSpec::new("say hello")).unwrap();
+            o.wait(&t).await.unwrap();
+        }
+        let seen = m.seen.lock().unwrap();
+        let system = |agent: &str| {
+            seen.iter()
+                .map(|(s, _)| s.clone())
+                .find(|s| s.contains(&format!("You are the agent \"{agent}\"")))
+                .unwrap()
+        };
+        let (asks, acts) = (system("asks"), system("acts"));
+        assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+        if gate {
+            assert!(asks.contains(asked) && !asks.contains(free), "{asks}");
+        } else {
+            assert!(
+                !asks.contains(asked) && !asks.contains(free),
+                "no one to ask, so no authority line: {asks}"
+            );
+        }
+    }
+}

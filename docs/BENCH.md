@@ -78,6 +78,7 @@ neighbors.
 | multi-step | dependent calls, each using a value from the last |
 | large-output | one line among 3,000 (`get_evidence` with `match`) |
 | long-session | many turns; the prompt must stay flat |
+| recall-answer | an 8-row table written in turn 1, another answer in turn 2, then a question about row 7: the carried answer must still hold it |
 | failure-recovery | a tool that always fails; retry once, then switch |
 | duplicate | the model repeats an identical call |
 | runaway | the model repeats one search forever; the loop must end |

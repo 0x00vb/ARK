@@ -34,12 +34,26 @@ pub struct CarryPolicy {
     pub recent_turns: usize,
     /// Characters kept from each carried user message.
     pub input_chars: usize,
-    /// Characters kept from each carried answer.
+    /// Characters kept from an answer posted by work the chat set up, and from older posts.
     pub answer_chars: usize,
+    /// Characters kept from the newest carried answer, with its line breaks.
+    #[serde(default = "default_newest_answer_chars")]
+    pub newest_answer_chars: usize,
+    /// Characters kept from each older carried answer, with its line breaks.
+    #[serde(default = "default_older_answer_chars")]
+    pub older_answer_chars: usize,
     /// One-line gists of older turns kept (newest win).
     pub max_gists: usize,
     /// Characters per gist.
     pub gist_chars: usize,
+}
+
+fn default_newest_answer_chars() -> usize {
+    4000
+}
+
+fn default_older_answer_chars() -> usize {
+    2000
 }
 
 impl Default for CarryPolicy {
@@ -48,6 +62,8 @@ impl Default for CarryPolicy {
             recent_turns: 3,
             input_chars: 300,
             answer_chars: 500,
+            newest_answer_chars: default_newest_answer_chars(),
+            older_answer_chars: default_older_answer_chars(),
             max_gists: 8,
             gist_chars: 160,
         }
@@ -1151,7 +1167,8 @@ impl Session {
         }
         if !self.recent.is_empty() {
             let _ = writeln!(s, "Most recent exchanges:");
-            for t in &self.recent {
+            let newest = self.recent.len().saturating_sub(1);
+            for (i, t) in self.recent.iter().enumerate() {
                 let _ = writeln!(s, "  [user] {}", clip(&t.user_text(), p.input_chars));
                 let reply = if t.cancelled {
                     "(cancelled before answering)".to_string()
@@ -1160,10 +1177,12 @@ impl Session {
                         "(did not finish: {})",
                         t.error.as_deref().unwrap_or("unknown reason")
                     )
+                } else if i == newest {
+                    clip_block(&t.answer, p.newest_answer_chars)
                 } else {
-                    clip(&t.answer, p.answer_chars)
+                    clip_block(&t.answer, p.older_answer_chars)
                 };
-                let _ = writeln!(s, "  [you] {reply}");
+                write_block(&mut s, "[you]", &reply);
             }
         }
         if !self.unread.is_empty() {
@@ -1175,12 +1194,18 @@ impl Session {
             if older > 0 {
                 let _ = writeln!(s, "  (+{older} earlier posts)");
             }
-            for (_, p) in &self.unread[older..] {
+            let newest_post = self.unread.len() - 1;
+            for (i, (_, p)) in self.unread.iter().enumerate().skip(older) {
                 let failed = if p.ok { "" } else { ", failed" };
-                let text = clip(&p.text, self.record.policy.answer_chars);
                 if p.kind == PostKind::Message {
-                    let _ = writeln!(s, "  [you, later{failed}] {text}");
+                    let text = if i == newest_post {
+                        clip_block(&p.text, self.record.policy.newest_answer_chars)
+                    } else {
+                        clip(&p.text, self.record.policy.answer_chars)
+                    };
+                    write_block(&mut s, &format!("[you, later{failed}]"), &text);
                 } else {
+                    let text = clip(&p.text, self.record.policy.answer_chars);
                     let _ = writeln!(s, "  [{} · {}{failed}] {text}", p.from, p.title);
                 }
             }
@@ -1657,6 +1682,35 @@ fn clip_lines(s: &str, max: usize) -> String {
     }
 }
 
+/// `s` trimmed, with its line breaks, cut at `max` characters with a marker that says how
+/// much was cut.
+fn clip_block(s: &str, max: usize) -> String {
+    let t = s.trim();
+    let total = t.chars().count();
+    if total <= max {
+        return t.to_string();
+    }
+    let kept = t.chars().take(max).collect::<String>();
+    format!(
+        "{}…\n(clipped: {max} of {total} characters)",
+        kept.trim_end()
+    )
+}
+
+/// Writes `label` and `text`: a single line stays on the label's line, several lines follow
+/// it, indented.
+fn write_block(out: &mut String, label: &str, text: &str) {
+    use std::fmt::Write as _;
+    if text.contains('\n') {
+        let _ = writeln!(out, "  {label}");
+        for line in text.lines() {
+            let _ = writeln!(out, "    {line}");
+        }
+    } else {
+        let _ = writeln!(out, "  {label} {text}");
+    }
+}
+
 fn flat(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1862,6 +1916,60 @@ mod tests {
             .conversation_digest()
             .unwrap()
             .contains("Posted in this chat"));
+    }
+
+    #[test]
+    fn a_table_answered_in_turn_one_is_whole_at_turn_three() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        let mut table = String::from("| item | price |\n|---|---|\n");
+        for i in 1..=8 {
+            table.push_str(&format!("| item {i} | {i}0 |\n"));
+        }
+        s.record_turn(&engine, "make the price table", &outcome(&table))
+            .unwrap();
+        s.record_turn(&engine, "thanks", &outcome("You're welcome."))
+            .unwrap();
+        let digest = s.conversation_digest().unwrap();
+        for i in 1..=8 {
+            assert!(
+                digest.contains(&format!("\n    | item {i} | {i}0 |\n")),
+                "row {i} on its own line: {digest}"
+            );
+        }
+        assert!(!digest.contains("clipped"), "{digest}");
+    }
+
+    #[test]
+    fn long_carried_answers_stay_bounded_and_say_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        for i in 0..3 {
+            let answer = format!("line {i}\n{}", "x".repeat(4993));
+            s.record_turn(&engine, "go on", &outcome(&answer)).unwrap();
+        }
+        let digest = s.conversation_digest().unwrap();
+        assert_eq!(
+            digest.matches("(clipped: 2000 of 5000 characters)").count(),
+            2
+        );
+        assert_eq!(
+            digest.matches("(clipped: 4000 of 5000 characters)").count(),
+            1
+        );
+        assert!(digest.len() < 2000 * 2 + 4000 + 1500, "{}", digest.len());
+    }
+
+    #[test]
+    fn a_stored_policy_without_the_new_fields_reads() {
+        let old = r#"{"recent_turns":3,"input_chars":300,"answer_chars":500,"max_gists":8,"gist_chars":160}"#;
+        let p: CarryPolicy = serde_json::from_str(old).unwrap();
+        assert_eq!(p.newest_answer_chars, 4000);
+        assert_eq!(p.older_answer_chars, 2000);
     }
 
     #[test]

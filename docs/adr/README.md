@@ -167,3 +167,4 @@ Local integration decisions:
 - [0119-agent-exchanges-are-read-from-what-agents-already-keep](0119-agent-exchanges-are-read-from-what-agents-already-keep.md)
 - [0120-an-agent-schedules-work-from-its-own-chat](0120-an-agent-schedules-work-from-its-own-chat.md)
 - [0121-pictures-go-with-an-agent-chat-message](0121-pictures-go-with-an-agent-chat-message.md)
+- [0122-a-note-after-narrated-calls-is-nudged-once-and-recent-answers-are-carried-whole](0122-a-note-after-narrated-calls-is-nudged-once-and-recent-answers-are-carried-whole.md)

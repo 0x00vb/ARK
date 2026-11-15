@@ -2931,3 +2931,30 @@ async fn a_scheduled_run_that_ends_unfinished_counts_as_one_failure() {
     assert_eq!(run.result.as_deref(), Some(STEP_NOTE_AGAIN));
     assert_eq!(o.schedules()[0].failures, 1);
 }
+
+#[tokio::test]
+async fn an_agents_prompt_says_whether_its_changes_ask_the_person_first() {
+    let f = fixture();
+    let m = Script::new("m", vec![]);
+    let o = orch(&f, vec![("m", m.clone())], vec![]);
+    o.spawn(AgentSpec::new("asks").model("m")).await.unwrap();
+    o.spawn(AgentSpec::new("acts").model("m").allow_mutate(true))
+        .await
+        .unwrap();
+    for agent in ["asks", "acts"] {
+        let t = o.submit(agent, TaskSpec::new("say hello")).unwrap();
+        o.wait(&t).await.unwrap();
+    }
+    let asked = "Your changes ask the person first: call the action and they approve it. You are not read-only.";
+    let free = "You make changes without asking.";
+    let seen = m.seen.lock().unwrap();
+    let system = |agent: &str| {
+        seen.iter()
+            .map(|(s, _)| s.clone())
+            .find(|s| s.contains(&format!("You are the agent \"{agent}\"")))
+            .unwrap()
+    };
+    let (asks, acts) = (system("asks"), system("acts"));
+    assert!(asks.contains(asked) && !asks.contains(free), "{asks}");
+    assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+}

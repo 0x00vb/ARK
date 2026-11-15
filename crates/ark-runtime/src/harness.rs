@@ -1363,7 +1363,7 @@ impl Harness {
                             });
                             round.push(Message::tool_result(
                                 call,
-                                "denied: this action changes state and needs human approval. Do not retry; reason from read-only evidence instead.",
+                                "denied: this action changes state and needs human approval, and no one can approve it in this run, so it did not run. Do not retry. Say in your answer what you would have changed and that it needs approval; work from what you can read.",
                             ));
                             continue;
                         }

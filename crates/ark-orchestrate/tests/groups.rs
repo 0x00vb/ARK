@@ -848,16 +848,23 @@ async fn members_of_a_window_group_join_when_a_chat_sets_it() {
 }
 
 /// Answers each agent from its own list, so agents that run at once get their own replies.
-struct ByAgent(Mutex<std::collections::HashMap<String, VecDeque<Completion>>>);
+struct ByAgent(
+    Mutex<std::collections::HashMap<String, VecDeque<Completion>>>,
+    /// The system prompt of every request, in order.
+    Mutex<Vec<String>>,
+);
 
 impl ByAgent {
     fn new(script: &[(&str, Vec<Completion>)]) -> Arc<Self> {
-        Arc::new(ByAgent(Mutex::new(
-            script
-                .iter()
-                .map(|(a, r)| (a.to_string(), r.clone().into()))
-                .collect(),
-        )))
+        Arc::new(ByAgent(
+            Mutex::new(
+                script
+                    .iter()
+                    .map(|(a, r)| (a.to_string(), r.clone().into()))
+                    .collect(),
+            ),
+            Mutex::new(Vec::new()),
+        ))
     }
 }
 
@@ -877,6 +884,7 @@ impl Provider for ByAgent {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+        self.1.lock().unwrap().push(system.to_string());
         let mut all = self.0.lock().unwrap();
         let reply = all
             .iter_mut()
@@ -986,6 +994,24 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
         saves.load(std::sync::atomic::Ordering::SeqCst),
         1,
         "the person's own request still runs without asking"
+    );
+    let ops: Vec<String> =
+        m.1.lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.contains("You are the agent \"ops\""))
+            .cloned()
+            .collect();
+    let asks = "Your changes ask the person first";
+    let free = "You make changes without asking.";
+    assert!(
+        ops[0].contains(asks) && !ops[0].contains(free),
+        "work through the group asks, so its prompt says so"
+    );
+    let last = ops.last().unwrap();
+    assert!(
+        last.contains(free) && !last.contains(asks),
+        "the person's own request does not"
     );
 }
 

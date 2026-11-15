@@ -1455,6 +1455,10 @@ pub(crate) fn failure_text(t: &TaskRecord) -> String {
     }
 }
 
+/// What an agent is told about its changes, from the authority its task runs with.
+const CHANGES_ASK: &str = "Your changes ask the person first: call the action and they approve it. You are not read-only.";
+const CHANGES_FREE: &str = "You make changes without asking.";
+
 enum Attempt {
     Done(String),
     /// The task answered with a note on its steps, not a result: it keeps the note and fails.
@@ -3635,7 +3639,13 @@ impl Inner {
         sets
     }
 
-    fn agent_profile(&self, spec: &AgentSpec, delegates: &[(String, String)]) -> AgentProfile {
+    /// `allow_mutate` is the authority this task runs with, after the group check.
+    fn agent_profile(
+        &self,
+        spec: &AgentSpec,
+        delegates: &[(String, String)],
+        allow_mutate: bool,
+    ) -> AgentProfile {
         let named = spec
             .profile_name
             .as_ref()
@@ -3653,6 +3663,12 @@ impl Inner {
             who.push_str(&format!(" ({})", spec.role.trim()));
         }
         who.push_str(". Each request is one task; its brief names the requester.");
+        who.push('\n');
+        who.push_str(if allow_mutate {
+            CHANGES_FREE
+        } else {
+            CHANGES_ASK
+        });
         if !delegates.is_empty() {
             who.push_str("\nYour contacts:\n");
             for (n, r) in delegates {
@@ -4025,7 +4041,10 @@ impl Inner {
         } else {
             self.engine.scoped_for(&scope, registry)
         };
-        let mut profile = self.agent_profile(spec, &delegates);
+        // Work a group member sent asks before it changes anything, whatever the owner may do
+        // on its own: the person agreed to a group, not to one member acting through another.
+        let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
+        let mut profile = self.agent_profile(spec, &delegates, allow_mutate);
         if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
             let mut sources: Vec<_> = profile.acquisition.take().into_iter().collect();
@@ -4154,9 +4173,6 @@ impl Inner {
                 Err(error) => return Attempt::Fatal(error.to_string()),
             }
         }
-        // Work a group member sent asks before it changes anything, whatever the owner may do
-        // on its own: the person agreed to a group, not to one member acting through another.
-        let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
         let approvals = if let Some(run) = &task.run {
             match self.automation_approvals(run, id) {
                 Ok(gate) => Some(gate),

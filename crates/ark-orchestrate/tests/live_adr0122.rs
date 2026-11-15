@@ -357,5 +357,8 @@ async fn adr_0122_on_a_real_model() {
     println!("{report}");
     eprintln!("written to {}", out.join("RESULTS.md").display());
     assert!(a, "case A failed, see RESULTS.md");
-    assert!(all, "case B did not end Done with summary.md, see RESULTS.md");
+    assert!(
+        all,
+        "case B did not end Done with summary.md, see RESULTS.md"
+    );
 }

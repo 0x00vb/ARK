@@ -70,7 +70,8 @@ import { setAgentIdentity } from "./dom.js";
 //                      attachImages? }`, all bound to that origin. With `attachImages`, a dropped image
 //                      comes to `appendDraft` as `images` (`{ path, name, url }`, for `addImages`) and
 //                      leaves with the message: `submit(text, { images, named })`, `named` meaning the
-//                      text is only their file names. Answer `attachImages` from `ark.taskImages()`.
+//                      text is only their file names. Answer `attachImages` from `ark.at(location).taskImages()`, with
+//                      the chat's own location.
 //                      `uploads` is this view's upload container.
 //                      Optional `exchanges` (ADR 0119): `{ project, agent, session?, name?, look? }`, or
 //                      a function returning it or null, read at each use. Turns keyed `task:<id>`

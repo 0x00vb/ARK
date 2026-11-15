@@ -219,6 +219,15 @@ test("a message typed while the agent works carries no pictures", () => fixture(
   assert.deepEqual(await sent(page), [{ text: "one more thing", images: [], named: false }]);
 }));
 
+test("a chat asks for its own runtime: another computer takes no pictures whatever the page's hello says", () => fixture(async (page) => {
+  const flags = await page.evaluate(() => ({
+    page: window.ark.taskImages(),
+    own: window.ark.at(window.ark.summary().location).taskImages(),
+    far: window.ark.at({ runtime: "far", project: "p", session: "s" }).taskImages(),
+  }));
+  assert.deepEqual(flags, { page: true, own: true, far: false });
+}));
+
 test("a runtime without the flag keeps today's line: the file is named in the draft", () => fixture(async (page) => {
   await choose(page, [file("shot.png")]);
   await page.waitForFunction(() => window.view.input.value.includes("Added to the project: shot.png"));

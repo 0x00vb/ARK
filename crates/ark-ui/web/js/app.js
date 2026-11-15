@@ -67,8 +67,9 @@ const views = new Map();
 const api = {
   h, icon, markdown,
   fileSnapshots: () => !!state.fileSnapshots,
-  // Whether this page's runtime takes `task.images` in `submit_task` and `work_admit` (its hello
-  // says so). A runtime without the flag drops them without saying so.
+  // Whether this page's own runtime takes `task.images` in `submit_task` and `work_admit` (its
+  // hello says so). A runtime without the flag drops them without saying so. A chat asks for its
+  // own runtime: `ark.at(location).taskImages()`, false for another computer.
   taskImages: () => !!state.taskImages,
   on: onExt,
   call: (method, params = {}) => resourceMethod(method, params)

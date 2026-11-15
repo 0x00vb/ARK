@@ -118,8 +118,11 @@ async fn five_hundred_turns_keep_a_flat_prompt() {
         "prompt must plateau: turn 50 = {at_50}, turn 500 = {at_500}"
     );
     let (_, _, _, transcript_at_500) = rows.last().unwrap();
+    // ADR 0122 carries recent answers whole up to 4000 and 2000 characters, so a request
+    // holds about 740 tokens more here than at 500 characters (144x then, 93x now). The
+    // plateau above is what keeps the transcript out of the prompt.
     assert!(
-        *transcript_at_500 > 100 * at_500 as u64,
+        *transcript_at_500 > 80 * at_500 as u64,
         "the transcript is far larger than any prompt"
     );
     assert!(at_500 < 6000, "stays under the default budget: {at_500}");

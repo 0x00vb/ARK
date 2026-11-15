@@ -91,7 +91,8 @@ fn read_bounded(real: &Path, rel: &str) -> Result<Vec<u8>, Error> {
         return Err(Error::Path(format!("`{rel}` is not a file")));
     }
     let mut bytes = Vec::new();
-    file.take(MAX_IMAGE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_IMAGE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 

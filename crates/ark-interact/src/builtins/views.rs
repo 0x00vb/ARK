@@ -836,8 +836,12 @@ impl Command for Config {
             .field(
                 "carry-over",
                 format!(
-                    "last {} turns (clipped to {}/{} chars), {} gists",
-                    p.recent_turns, p.input_chars, p.answer_chars, p.max_gists
+                    "last {} turns (requests clipped to {} chars, answers to {} for the newest and {} for older ones, line breaks kept), {} gists",
+                    p.recent_turns,
+                    p.input_chars,
+                    p.newest_answer_chars,
+                    p.older_answer_chars,
+                    p.max_gists
                 ),
             )
             .data("config", &s)

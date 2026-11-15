@@ -64,8 +64,8 @@ pub use orchestrator::{
 };
 pub use participants::chat_participants;
 pub use record::{
-    AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,
-    ToolCallRecord, Usage,
+    AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskImage, TaskRecord,
+    TaskState, ToolCallRecord, Usage,
 };
 pub use schedule::{
     all_tasks, projects_with_work, scheduled_projects, tasks_where, try_projects_with_work,

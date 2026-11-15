@@ -13,6 +13,15 @@ use ark_orchestrate::*;
 use ark_sdk::prelude::*;
 use serde_json::{json, Value};
 
+/// A 1x1 PNG.
+const PIXEL: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x64, 0x60, 0xf8, 0x5f,
+    0x0f, 0x00, 0x02, 0x87, 0x01, 0x80, 0xeb, 0x47, 0xba, 0x92, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];
+
 /// The program, when this binary runs as one (`ARK_FAKE_PROGRAM` set).
 #[test]
 fn fake_program() {
@@ -342,6 +351,39 @@ async fn a_program_asks_ark_keeps_the_question_and_another_client_answers() {
         call("answer ")["outcome"]["optionId"],
         "allow",
         "never 'always'"
+    );
+}
+
+/// A program is sent no pictures: its brief names them, and it reads them from the folder.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_is_told_the_picture_names_and_is_sent_no_picture() {
+    let s = setup();
+    std::env::set_var("FAKE_MODE", "bypassPermissions");
+    let (ark, o) = open(&s, Arc::new(AtomicUsize::new(0)));
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    std::fs::write(folder(&ark).join("shot.png"), PIXEL).unwrap();
+    let mut spec = TaskSpec::new("write the report").images(["shot.png"]);
+    spec.person = true;
+    let id = o.submit("w", spec).unwrap();
+    until_asked(&o, &id).await;
+    o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+    let done = o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(done.images[0].path, "shot.png");
+    let log = calls(&s);
+    let prompt = log
+        .lines()
+        .find(|l| l.starts_with("session/prompt "))
+        .unwrap_or_else(|| panic!("no prompt: {log}"));
+    assert!(
+        prompt.contains("ATTACHED IMAGES") && prompt.contains("shot.png"),
+        "{prompt}"
+    );
+    assert!(
+        !prompt.contains("\"type\":\"image\""),
+        "no picture goes to a program: {prompt}"
     );
 }
 

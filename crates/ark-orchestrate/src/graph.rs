@@ -90,6 +90,9 @@ pub struct TaskNode {
     /// The agent's own conversation it runs in ([`crate::TaskSpec::thread`]).
     #[serde(default)]
     pub thread: Option<String>,
+    /// The pictures the person attached to it (project paths).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
     pub origin: Origin,
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -236,6 +239,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 owner: r.owner.clone(),
                 objective: r.objective.clone(),
                 thread: r.thread.clone(),
+                images: r.images.iter().map(|i| i.path.clone()).collect(),
                 origin: r.origin.clone(),
                 schedule: r.schedule.clone(),
                 parent: r.parent.clone(),

@@ -70,6 +70,7 @@ mod webhooks;
 pub use admission::{WorkReceipt, WorkTarget};
 pub use general::{GeneralWorkResult, GeneralWorkStart, GeneralWorkState};
 mod ownership;
+mod pictures;
 mod resolution;
 mod results;
 pub use resolution::{WorkFailure, WorkRunRef};
@@ -527,6 +528,7 @@ impl Orchestrator {
                 || task.objective != spec.objective
                 || task.context != spec.context
                 || task.thread != spec.thread
+                || !task.images.iter().map(|i| &i.path).eq(&spec.images)
             {
                 return Err(OrchError::NotAllowed(
                     "the request already names another message".into(),
@@ -871,6 +873,11 @@ impl Orchestrator {
         }
         if task.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
+        }
+        if !task.images.is_empty() {
+            return Err(OrchError::NotAllowed(
+                "a schedule cannot carry pictures".into(),
+            ));
         }
         let mut rec = ScheduleRecord::new(self.inner.project.id.as_str(), agent, task, when);
         if rec.next_ms.is_none() {
@@ -2808,6 +2815,7 @@ impl Inner {
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
+        let images = self.admit_images(&spec, &origin)?;
         let id = format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
@@ -2836,6 +2844,7 @@ impl Inner {
         );
         record.handoff_key = handoff_key.map(str::to_string);
         record.parent = parent.map(str::to_string);
+        record.images = images;
         {
             let mut st = self.state.lock().unwrap();
             if let (Some(_), Origin::Agent { agent, task }) = (handoff_key, &origin) {
@@ -4149,7 +4158,12 @@ impl Inner {
                 _ => None,
             }
         };
+        let pictures = match self.start_pictures(&task.images) {
+            Ok(pictures) => pictures,
+            Err(why) => return Attempt::Fatal(why),
+        };
         let mut harness = Harness::new(models.router.clone_view())
+            .pictures(pictures)
             .max_steps(budget.max_steps.unwrap_or(self.max_steps))
             .budget_or_auto(self.context_budget)
             .planner(spec.planner.unwrap_or(self.planner))
@@ -4266,7 +4280,10 @@ impl Inner {
             self.keep_late_inputs(id, owner, &steer, &task.thread);
             return ran;
         }
-        if let Err(e) = session.begin_turn(&self.engine, &conversation_input) {
+        let image_paths = task.images.iter().map(|i| i.path.clone()).collect();
+        if let Err(e) =
+            session.begin_turn_with(&self.engine, &conversation_input, None, image_paths)
+        {
             if task.conversation.is_some() {
                 if let Some(timer) = timer {
                     timer.abort();

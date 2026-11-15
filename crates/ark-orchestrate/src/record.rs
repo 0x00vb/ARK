@@ -298,6 +298,15 @@ pub struct Mail {
     pub thread: Option<String>,
 }
 
+/// A picture as it was when the task was admitted. The run reads the file again and fails when
+/// it is another file (ADR 0121).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskImage {
+    pub path: String,
+    pub sha256: String,
+    pub size: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,
@@ -330,6 +339,9 @@ pub struct TaskRecord {
     /// A group chat's driver submitted it ([`crate::TaskSpec::group_turn`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub group_turn: bool,
+    /// The pictures the person attached, as admitted ([`crate::TaskSpec::images`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<TaskImage>,
     /// The task that delegated this one.
     #[serde(default)]
     pub parent: Option<String>,
@@ -475,6 +487,7 @@ impl TaskRecord {
             origin,
             person: spec.person,
             group_turn: spec.group_turn,
+            images: Vec::new(),
             parent: None,
             children: Vec::new(),
             after: spec.after.clone(),
@@ -524,5 +537,54 @@ impl TaskRecord {
             (Some(s), None) => now_ms().saturating_sub(s),
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_task_stored_before_pictures_loads_and_writes_without_them() {
+        let spec = TaskSpec::new("x");
+        let new = TaskRecord::queued(
+            "t-1".into(),
+            "p".into(),
+            "w".into(),
+            &spec,
+            Origin::External,
+            Budget::default(),
+            vec![],
+        );
+        let mut stored = serde_json::to_value(&new).unwrap();
+        assert!(stored.get("images").is_none());
+        stored.as_object_mut().unwrap().remove("images");
+        let old: TaskRecord = serde_json::from_value(stored).unwrap();
+        assert!(old.images.is_empty());
+        let mut with = new.clone();
+        with.images = vec![TaskImage {
+            path: "a.png".into(),
+            sha256: "ab".into(),
+            size: 2,
+        }];
+        let back: TaskRecord =
+            serde_json::from_value(serde_json::to_value(&with).unwrap()).unwrap();
+        assert_eq!(back.images, with.images);
+    }
+
+    #[test]
+    fn a_graph_node_stored_before_pictures_loads() {
+        let node: crate::graph::TaskNode = serde_json::from_value(serde_json::json!({
+            "id": "task:t-1", "task": "t-1", "owner": "w", "objective": "x",
+            "origin": serde_json::to_value(Origin::External).unwrap(), "parent": null, "children": [], "after": [],
+            "state": "done", "waiting_on": null, "waiting_for": [], "attempts": 1,
+            "max_attempts": 1, "elapsed_ms": 0, "run_ms": 0,
+            "usage": serde_json::to_value(Usage::default()).unwrap(), "budget": {}, "tool_calls": [], "inputs": [], "outputs": [],
+            "rules": [], "rules_held_back": 0, "brief_tokens": 0, "model": "",
+            "result": null, "error": null, "created_ms": 0, "started_ms": null,
+            "finished_ms": null
+        }))
+        .unwrap();
+        assert!(node.images.is_empty());
     }
 }

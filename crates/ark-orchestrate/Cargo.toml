@@ -12,6 +12,7 @@ ark-core.workspace = true
 ark-model.workspace = true
 ark-store.workspace = true
 ark-tools.workspace = true
+ark-files.workspace = true
 ark-runtime.workspace = true
 jiff.workspace = true
 url.workspace = true

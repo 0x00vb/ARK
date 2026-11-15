@@ -107,6 +107,10 @@ impl Brief<'_> {
                 }
             }
         }
+        if !t.images.is_empty() {
+            let paths: Vec<&str> = t.images.iter().map(|i| i.path.as_str()).collect();
+            let _ = write!(s, "\n== ATTACHED IMAGES ==\n{}\n", paths.join("\n"));
+        }
         if let Some(w) = self.item {
             let _ = write!(s, "\n== BOARD ITEM ==\n{} {}\n", w.id, w.title);
             if !w.note.trim().is_empty() {
@@ -196,6 +200,7 @@ mod tests {
                 task: "t-1".into(),
             },
             person: false,
+            images: vec![],
             parent: Some("t-1".into()),
             children: vec![],
             after: vec![],
@@ -262,6 +267,42 @@ mod tests {
         assert!(b.len() < 2000, "a dependency's result is clipped");
         assert!(b.contains("4 steps"));
         assert!(!b.contains("BOARD ITEM"));
+    }
+
+    #[test]
+    fn a_brief_names_the_attached_pictures() {
+        let mut t = task("t-2", "w");
+        t.images = vec![crate::record::TaskImage {
+            path: "shots/one.png".into(),
+            sha256: "0".repeat(64),
+            size: 3,
+        }];
+        let brief = Brief {
+            task: &t,
+            deps: vec![],
+            children: vec![],
+            inbox: &[],
+            resumed: false,
+            done: &[],
+            item: None,
+        }
+        .render();
+        assert!(
+            brief.contains("== ATTACHED IMAGES ==\nshots/one.png"),
+            "{brief}"
+        );
+        t.images.clear();
+        let plain = Brief {
+            task: &t,
+            deps: vec![],
+            children: vec![],
+            inbox: &[],
+            resumed: false,
+            done: &[],
+            item: None,
+        }
+        .render();
+        assert!(!plain.contains("ATTACHED IMAGES"));
     }
 
     #[test]

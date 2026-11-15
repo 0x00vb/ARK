@@ -346,6 +346,10 @@ pub struct TaskSpec {
     /// it decides whether the task is offered `role.set` (ADR 0116).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person: bool,
+    /// Pictures the person attached (project files, at most 8, 3.5 MB each). Admitted only
+    /// from the person's own message (ADR 0121): every other path refuses them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 impl TaskSpec {
@@ -402,6 +406,11 @@ impl TaskSpec {
     /// Run in the agent's conversation `session` ([`TaskSpec::thread`]).
     pub fn thread(mut self, session: impl Into<String>) -> Self {
         self.thread = Some(session.into());
+        self
+    }
+    /// The pictures the person attached ([`TaskSpec::images`]).
+    pub fn images<S: Into<String>>(mut self, paths: impl IntoIterator<Item = S>) -> Self {
+        self.images = paths.into_iter().map(Into::into).collect();
         self
     }
 }

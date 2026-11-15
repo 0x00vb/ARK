@@ -41,6 +41,9 @@ pub(super) struct Submission {
     pub rules: Vec<RuleBinding>,
     #[serde(default)]
     pub agent: Option<AgentSpec>,
+    /// The pictures as admitted ([`TaskSpec::images`]); the turn start compares them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<crate::record::TaskImage>,
 }
 
 pub(super) struct ScheduleAdmission<'a> {
@@ -455,6 +458,12 @@ impl Inner {
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
+        if scheduled.is_some() && !spec.images.is_empty() {
+            return Err(OrchError::NotAllowed(
+                "a schedule cannot carry pictures".into(),
+            ));
+        }
+        let images = self.admit_images(&spec, &Origin::External)?;
         let agent = match &target {
             WorkTarget::General { .. } => None,
             WorkTarget::Agent { name } => {
@@ -706,6 +715,7 @@ impl Inner {
                         inputs,
                     );
                     task.item = Some(item.id.clone());
+                    task.images = images.clone();
                     task.conversation = Some(conversation.clone());
                     task.execution_scope = header.execution_scope.as_ref().map(|scope| scope.to_string());
                     task.submission = Some(id.clone());
@@ -798,6 +808,7 @@ impl Inner {
                     artifacts,
                     rules,
                     agent: agent.as_ref().map(|agent| agent.spec.clone()),
+                    images: images.clone(),
                 };
                 tx.put_record(WORK, &item.id, &serde_json::to_value(&item)?)?;
                 tx.insert_record(SUBMISSION, &id, &serde_json::to_value(&submission)?)?;

@@ -400,6 +400,7 @@ dependencies = [
  "pdf-extract",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -454,6 +455,7 @@ version = "0.48.1"
 dependencies = [
  "ark-acp",
  "ark-core",
+ "ark-files",
  "ark-model",
  "ark-os",
  "ark-runtime",

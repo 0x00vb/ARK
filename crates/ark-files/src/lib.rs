@@ -23,6 +23,7 @@ use std::path::{Component, Path, PathBuf};
 
 mod format;
 pub mod formula;
+mod images;
 pub mod model;
 mod package;
 pub mod snapshot;
@@ -30,6 +31,7 @@ mod tool;
 mod view;
 mod xml;
 
+pub use images::{images, AttachedImage, MAX_IMAGES, MAX_IMAGES_BYTES, MAX_IMAGE_BYTES};
 pub use model::{
     Block, BlockKind, Cell, Content, Document, Edit, Fmt, Kind, Media, Sheet, Value, Workbook,
 };

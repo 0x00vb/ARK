@@ -503,6 +503,7 @@ impl Inner {
                         artifacts,
                         rules: vec![],
                         agent: Some(frozen.clone()),
+                        images: Vec::new(),
                     };
                     let child = Child {
                         run: run_id.into(),

@@ -2078,6 +2078,7 @@ impl Inner {
                 spec: task_spec,
                 artifacts,
                 agent: Some(spec.clone()),
+                images: Vec::new(),
             };
             tx.insert_record(TASK, &task_id, &serde_json::to_value(task)?)?;
             tx.insert_record(

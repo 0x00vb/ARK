@@ -1584,6 +1584,7 @@ impl Inner {
             .planner(self.planner)
             .critic(self.critic)
             .guard(guard.clone())
+            .brief_task(true)
             .done_before(done)
             .chat(run.id.as_str())
             .approvals(Some(gate))

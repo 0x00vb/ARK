@@ -1002,7 +1002,7 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
             .filter(|s| s.contains("You are the agent \"ops\""))
             .cloned()
             .collect();
-    let asks = "Your changes ask the person first";
+    let asks = "Your changes ask for approval first";
     let free = "You make changes without asking.";
     assert!(
         !ops[0].contains(asks) && !ops[0].contains(free),

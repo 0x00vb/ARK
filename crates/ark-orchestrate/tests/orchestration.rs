@@ -2884,7 +2884,7 @@ async fn delegated_note_ends_done(last: &str) {
 
 #[tokio::test]
 async fn an_agents_prompt_says_whether_its_changes_ask_the_person_first() {
-    let asked = "Your changes ask the person first: call the action and they approve it. You are not read-only.";
+    let asked = "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only.";
     let free = "You make changes without asking.";
     for gate in [false, true] {
         let f = fixture();

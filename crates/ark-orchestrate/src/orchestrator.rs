@@ -1446,7 +1446,7 @@ fn reports(t: &TaskRecord) -> Option<(bool, String)> {
 }
 
 /// What an agent is told about its changes, from the authority its task runs with.
-const CHANGES_ASK: &str = "Your changes ask the person first: call the action and they approve it. You are not read-only.";
+const CHANGES_ASK: &str = "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only.";
 const CHANGES_FREE: &str = "You make changes without asking.";
 
 enum Attempt {

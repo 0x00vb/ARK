@@ -2827,6 +2827,12 @@ const STEP_NOTE_AGAIN: &str = "Reading the price lines now.";
 
 #[tokio::test]
 async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_with_it() {
+    for last in [STEP_NOTE_AGAIN, "Renamed 3 leads."] {
+        delegated_note_ends_done(last).await;
+    }
+}
+
+async fn delegated_note_ends_done(last: &str) {
     let f = fixture();
     let lead = Script::new(
         "lead",
@@ -2840,7 +2846,7 @@ async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_w
         vec![
             narrated_diagram("Reading the seed file."),
             answer(STEP_NOTE),
-            answer(STEP_NOTE_AGAIN),
+            answer(last),
         ],
     );
     let o = orch(
@@ -2871,7 +2877,7 @@ async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_w
         .find(|t| t.owner == "drafter")
         .expect("the delegated task");
     assert_eq!(worker.state, TaskState::Done);
-    assert_eq!(worker.result.as_deref(), Some(STEP_NOTE_AGAIN));
+    assert_eq!(worker.result.as_deref(), Some(last));
     assert_eq!(worker.error, None);
     assert_eq!(drafter.texts().len(), 3, "one nudge, no third call");
 }

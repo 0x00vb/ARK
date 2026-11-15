@@ -1,3 +1,12 @@
+# Pictures in agent chats: ADR 0121 on branch agent-images, not released (2026-11-15)
+
+| State | Value |
+| --- | --- |
+| Change | `submit_task` and `work_admit` take `task.images`; read and fingerprinted at admission, checked at the turn start, shown to the model, stored with the turn, on `TaskNode.images`; `hello.images`; `chatView` passes `{ images, named }` and exposes `addImages`, `stashImages`, `restoreImages`; `ark_files::images` is the one reader |
+| Next | Release v0.49.0 (`TaskSpec` has a new public field: Breaking), then Desktop bumps its pin. Commits `f188daa`, `084e8b8` (and one for this note) |
+| Open | A project on another computer keeps the "Added to the project" line: the page cannot read that runtime's hello (`ark.taskImages()` is false there). A busy chat refuses a picture with a message (the chat view's composer does not queue). The phone sends no pictures to a task (card `phone-agent-images-20261115`) |
+| Evidence | `../board/evidence/agent-chat-images-20261115/` |
+
 # Core 0.48.1 release: a chat opens at its newest message (2026-11-15)
 
 | Release state | Value |

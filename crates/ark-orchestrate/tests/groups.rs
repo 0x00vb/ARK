@@ -915,9 +915,56 @@ impl Adapter for Doc {
     }
 }
 
+/// Says no to every question, counting them.
+struct Refuse(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait::async_trait]
+impl Approver for Refuse {
+    async fn decide(&self, _: &ApprovalRequest) -> ApprovalDecision {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ApprovalDecision::Deny
+    }
+}
+
 #[tokio::test]
 async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_act_alone() {
+    let ops = through_the_group(false).await;
+    let (asks, free) = (
+        "Your changes ask for approval first",
+        "You make changes without asking.",
+    );
+    assert!(
+        !ops[0].contains(asks) && !ops[0].contains(free),
+        "work through the group has no one to ask here, so its prompt names no authority"
+    );
+    let last = ops.last().unwrap();
+    assert!(
+        last.contains(free) && !last.contains(asks),
+        "the person's own request does not"
+    );
+}
+
+#[tokio::test]
+async fn work_through_the_group_with_a_gate_is_told_it_asks_and_does_ask() {
+    let ops = through_the_group(true).await;
+    let (asks, free) = (
+        "Your changes ask for approval first",
+        "You make changes without asking.",
+    );
+    assert!(
+        ops[0].contains(asks) && !ops[0].contains(free),
+        "work through the group asks, so its prompt says so"
+    );
+    let last = ops.last().unwrap();
+    assert!(last.contains(free) && !last.contains(asks));
+}
+
+/// The system prompts of `ops` (an agent that may act alone) when `cmo` hands it work through a
+/// group and then the person asks it directly. With a gate, the group's work is asked about
+/// once and refused; the person's own request still runs.
+async fn through_the_group(gate: bool) -> Vec<String> {
     let saves = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let m = ByAgent::new(&[
         (
             "ceo",
@@ -962,10 +1009,12 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
         .unwrap();
     let project = ark.create_project("team", "a test").unwrap();
     let mm = m.clone();
-    let o = Orchestrator::builder(&ark, &project)
-        .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>))
-        .build()
-        .unwrap();
+    let mut builder = Orchestrator::builder(&ark, &project)
+        .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>));
+    if gate {
+        builder = builder.approvals(Arc::new(ApprovalGate::new(Arc::new(Refuse(asked.clone())))));
+    }
+    let o = builder.build().unwrap();
     ceo(&o).await;
     o.spawn(AgentSpec::new("ops").model("m").allow_mutate(true))
         .await
@@ -995,24 +1044,21 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
         1,
         "the person's own request still runs without asking"
     );
-    let ops: Vec<String> =
+    if gate {
+        assert_eq!(
+            asked.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the group's work asked once"
+        );
+    }
+    let ops =
         m.1.lock()
             .unwrap()
             .iter()
             .filter(|s| s.contains("You are the agent \"ops\""))
             .cloned()
             .collect();
-    let asks = "Your changes ask for approval first";
-    let free = "You make changes without asking.";
-    assert!(
-        !ops[0].contains(asks) && !ops[0].contains(free),
-        "work through the group has no one to ask here, so its prompt names no authority"
-    );
-    let last = ops.last().unwrap();
-    assert!(
-        last.contains(free) && !last.contains(asks),
-        "the person's own request does not"
-    );
+    ops
 }
 
 #[tokio::test]

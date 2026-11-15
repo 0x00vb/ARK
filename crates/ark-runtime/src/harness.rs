@@ -233,6 +233,10 @@ pub struct HarnessOutcome {
     /// answer was asked for (`force_answer`): the work may not be done. The next turn
     /// continues its goal (ADR 0050).
     pub ran_out: bool,
+    /// Set on a brief task whose last reply is still a one-line note on its steps after it
+    /// was asked once to give the result: the work has no result, and the answer is that
+    /// note. The text says why.
+    pub unfinished: Option<String>,
 }
 
 impl HarnessOutcome {
@@ -246,6 +250,8 @@ impl HarnessOutcome {
 pub struct Harness {
     router: ModelRouter,
     allow_mutate: bool,
+    /// The task is a result for whoever handed it over, not the person's chat turn.
+    brief_task: bool,
     max_steps: usize,
     /// What this turn works on when it continues an unfinished one (ADR 0050). `None`: the
     /// question is the goal.
@@ -351,6 +357,7 @@ impl Harness {
         Harness {
             router,
             allow_mutate: false,
+            brief_task: false,
             max_steps: 16,
             goal: None,
             chat: String::new(),
@@ -484,6 +491,12 @@ impl Harness {
     }
     pub fn allow_mutate(mut self, yes: bool) -> Self {
         self.allow_mutate = yes;
+        self
+    }
+    /// The task is a brief handed over by another agent, a schedule or an automation: its
+    /// final reply is the result, so a one-line note on the steps is not one.
+    pub fn brief_task(mut self, yes: bool) -> Self {
+        self.brief_task = yes;
         self
     }
     pub fn execution_mode(mut self, mode: ExecutionMode) -> Self {
@@ -809,6 +822,11 @@ impl Harness {
         let mut corrected_claim = false;
         // Whether the model was told once that its answer announced work it had not done.
         let mut corrected_announce = false;
+        // A brief task's reply that reads as a note was sent back once (it shares the flag
+        // above), and some reply of this turn wrote text beside its tool calls.
+        let mut note_nudged = false;
+        let mut narrated_calls = false;
+        let mut unfinished: Option<String> = None;
         // The answer the model last wrote beside a check of its own changes (see `rechecks`).
         let mut checked: Option<String> = None;
         // Calls run this turn in order: the last change, the last look, how many changes, and
@@ -1035,7 +1053,14 @@ impl Harness {
                 // An answer that ends by saying what it will do next ("I will now call
                 // files.edit") while it can still call tools stopped before the work: a small
                 // model does this after reading what it was asked to change. Say so once.
-                if !corrected_announce && !tools.is_empty() && announces_work(&completion.content) {
+                if !corrected_announce
+                    && !tools.is_empty()
+                    && (announces_work(&completion.content)
+                        || (self.brief_task
+                            && narrated_calls
+                            && reads_as_note(&completion.content)))
+                {
+                    note_nudged = !announces_work(&completion.content);
                     corrected_announce = true;
                     show_held!();
                     tracing::info!("the answer announces work it has not done; asking again");
@@ -1061,9 +1086,13 @@ impl Harness {
                 answer = completion.content.trim().to_string();
                 answered = true;
                 streamed = !answer.is_empty();
+                if note_nudged && reads_as_note(&answer) {
+                    unfinished = Some(UNFINISHED_NOTE.to_string());
+                }
                 break;
             }
 
+            narrated_calls |= !completion.content.trim().is_empty();
             show_held!();
             // The model's note with its calls stays in the round for the ledger (it is not sent
             // while the round is shown: `budget::sent`) and goes on each call's record, so work
@@ -1482,6 +1511,7 @@ impl Harness {
                 interrupted,
                 steered,
                 ran_out: false,
+                unfinished: None,
             });
         }
 
@@ -1537,6 +1567,7 @@ impl Harness {
                         interrupted,
                         steered,
                         ran_out: false,
+                        unfinished: None,
                     });
                 }
             }
@@ -1630,6 +1661,7 @@ impl Harness {
             interrupted: false,
             steered,
             ran_out,
+            unfinished,
         })
     }
 
@@ -3248,6 +3280,23 @@ const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice i
 const REPEATED_FAILURE_NOTE: &str = "not run: this exact call already failed twice in this turn. ARK already gave it one retry. Use a different tool or input, or answer from what you know.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
+
+const UNFINISHED_NOTE: &str = "the last reply is a note on the steps, not the result";
+
+/// A brief task's final reply that is one short line: a note on what the agent is doing, as
+/// it writes beside its calls, and not a result. Language-neutral; a result of several lines
+/// or more than [`NOTE_CHARS`] characters is not a note.
+pub fn reads_as_note(text: &str) -> bool {
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    match (lines.next(), lines.next()) {
+        (Some(line), None) => line.chars().count() <= NOTE_CHARS,
+        _ => false,
+    }
+}
+
+/// The longest one-line reply that reads as a note on the steps (ADR 0051 measured them at 39
+/// to 205 characters).
+const NOTE_CHARS: usize = 240;
 
 /// Text at least this long, over at least [`ANSWER_LINES`] lines, reads as a full answer rather
 /// than a note on the next step. From the owner's run (ADR 0051): notes beside tool calls were

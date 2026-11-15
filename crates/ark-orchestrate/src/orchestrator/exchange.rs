@@ -4,6 +4,7 @@
 //! an `agents.message` note (the message record, which now keeps its text), the brief of a
 //! task an agent started or delegated for another, and that task's reply once it is final.
 
+use super::failure_text;
 use super::threads::own_thread;
 use super::{AGENT, MESSAGE, TASK};
 use crate::graph::MessageEdge;
@@ -133,7 +134,11 @@ pub fn said(store: &Store, project: &str) -> Result<Vec<Said>, OrchError> {
                 }
             }
             TaskState::Failed => {
-                out.push(said(&t.owner, String::new(), at, true, false));
+                let text = match t.result.as_deref() {
+                    Some(r) if !r.trim().is_empty() => scrub_text(&failure_text(t)),
+                    _ => String::new(),
+                };
+                out.push(said(&t.owner, text, at, true, false));
             }
             _ => {}
         }

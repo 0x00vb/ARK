@@ -19,6 +19,8 @@ pub(super) struct SavedResult {
     interrupted: bool,
     steered: Vec<String>,
     ran_out: bool,
+    #[serde(default)]
+    unfinished: Option<String>,
 }
 
 impl SavedResult {
@@ -36,6 +38,7 @@ impl SavedResult {
             interrupted: outcome.interrupted,
             steered: outcome.steered.clone(),
             ran_out: outcome.ran_out,
+            unfinished: outcome.unfinished.clone(),
         }
     }
     pub(super) fn outcome(&self) -> HarnessOutcome {
@@ -50,6 +53,7 @@ impl SavedResult {
             interrupted: self.interrupted,
             steered: self.steered.clone(),
             ran_out: self.ran_out,
+            unfinished: self.unfinished.clone(),
         }
     }
 }
@@ -135,6 +139,7 @@ impl Inner {
             interrupted: outcome.interrupted,
             steered: outcome.steered.clone(),
             ran_out: outcome.ran_out,
+            unfinished: outcome.unfinished.clone(),
         };
         let value = serde_json::to_value(&result)?;
         self.engine
@@ -240,7 +245,10 @@ impl Inner {
         };
         Ok(Some(match restore() {
             Ok(()) if saved.cancelled => Final::cancelled("cancelled"),
-            Ok(()) => Final::done(saved.answer),
+            Ok(()) => match saved.unfinished {
+                Some(why) => Final::unfinished(saved.answer, &why),
+                None => Final::done(saved.answer),
+            },
             Err(error) => Final::saved_result_failed(
                 saved.answer,
                 format!("the answer is retained but its conversation could not be saved: {error}"),
@@ -260,9 +268,9 @@ impl Inner {
                     tx.get_record(TASK, id)?
                         .ok_or_else(|| OrchError::UnknownTask(id.into()))?,
                 )?;
-                if task.state == TaskState::Done
-                    && task.result.as_deref() == Some(saved.answer.as_str())
-                {
+                let ended = task.state == TaskState::Done
+                    || (task.state == TaskState::Failed && saved.unfinished.is_some());
+                if ended && task.result.as_deref() == Some(saved.answer.as_str()) {
                     tx.delete_record(RESULT, id)?;
                 }
                 Ok(())

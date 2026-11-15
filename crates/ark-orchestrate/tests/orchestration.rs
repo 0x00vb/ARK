@@ -2811,3 +2811,123 @@ async fn completed_model_effect_replay_preserves_newer_edits_and_busy_state() {
     assert!(o.tasks().is_empty());
     assert!(model.seen.lock().unwrap().is_empty());
 }
+
+fn narrated_diagram(text: &str) -> Completion {
+    Completion {
+        content: text.into(),
+        ..calls(vec![(
+            "diagram.create",
+            json!({"kind": "sequence", "title": "Flow", "source": "sequenceDiagram\n  A->>B: request\n  B-->>A: reply"}),
+        )])
+    }
+}
+
+const STEP_NOTE: &str = "Checking the project files and verifying the seed leads.";
+const STEP_NOTE_AGAIN: &str = "Reading the price lines now.";
+
+#[tokio::test]
+async fn a_delegated_worker_that_ends_on_a_step_note_fails_and_the_parent_sees_it() {
+    let f = fixture();
+    let lead = Script::new(
+        "lead",
+        vec![
+            calls(vec![delegate("drafter", "qualify the seed leads")]),
+            answer("it did not finish"),
+        ],
+    );
+    let drafter = Script::new(
+        "drafter",
+        vec![
+            narrated_diagram("Reading the seed file."),
+            answer(STEP_NOTE),
+            answer(STEP_NOTE_AGAIN),
+        ],
+    );
+    let o = orch(
+        &f,
+        vec![("lead", lead.clone()), ("drafter", drafter.clone())],
+        vec![],
+    );
+    o.spawn(
+        AgentSpec::new("lead")
+            .model("lead")
+            .delegates_to(["drafter"]),
+    )
+    .await
+    .unwrap();
+    o.spawn(
+        AgentSpec::new("drafter")
+            .model("drafter")
+            .diagrams(true)
+            .tools(Vec::<String>::new()),
+    )
+    .await
+    .unwrap();
+    let t = o.submit("lead", TaskSpec::new("get the leads")).unwrap();
+    o.wait(&t).await.unwrap();
+    let worker = o
+        .tasks()
+        .into_iter()
+        .find(|t| t.owner == "drafter")
+        .expect("the delegated task");
+    assert_eq!(worker.state, TaskState::Failed);
+    assert_eq!(worker.result.as_deref(), Some(STEP_NOTE_AGAIN));
+    assert!(
+        worker
+            .error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("unfinished")),
+        "{:?}",
+        worker.error
+    );
+    assert_eq!(drafter.texts().len(), 3, "one nudge, no retry");
+    let seen = lead.texts().last().unwrap().clone();
+    assert!(seen.contains("drafter failed task"), "{seen}");
+    assert!(seen.contains(STEP_NOTE_AGAIN), "{seen}");
+    let reply = said(&f.ark.engine().store, f.project.id.as_str())
+        .unwrap()
+        .into_iter()
+        .find(|s| s.author == "drafter")
+        .expect("the worker's reply");
+    assert!(reply.failed);
+    assert!(
+        reply.text.contains("unfinished") && reply.text.contains(STEP_NOTE_AGAIN),
+        "{}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn a_scheduled_run_that_ends_unfinished_counts_as_one_failure() {
+    let f = fixture();
+    let m = Script::new(
+        "m",
+        vec![
+            narrated_diagram("Reading the seed file."),
+            answer(STEP_NOTE),
+            answer(STEP_NOTE_AGAIN),
+        ],
+    );
+    let o = orch(&f, vec![("m", m)], vec![]);
+    o.spawn(
+        AgentSpec::new("w")
+            .model("m")
+            .diagrams(true)
+            .tools(Vec::<String>::new()),
+    )
+    .await
+    .unwrap();
+    let s = o
+        .schedule(
+            "w",
+            TaskSpec::new("qualify the leads"),
+            When::every_minutes(10),
+        )
+        .unwrap();
+    let started = o.tick_schedules(s.next_ms.unwrap()).await;
+    assert_eq!(started.len(), 1);
+    let run = o.wait(&started[0]).await.unwrap();
+    assert_eq!(run.state, TaskState::Failed);
+    assert_eq!(run.result.as_deref(), Some(STEP_NOTE_AGAIN));
+    assert_eq!(o.schedules()[0].failures, 1);
+}

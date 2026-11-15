@@ -60,7 +60,9 @@ pub use context_report::ContextReport;
 pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::{Engine, Restored};
 pub use error::{AgentError, UNUSABLE_REPLY};
-pub use harness::{FileBefore, Harness, HarnessEvent, HarnessOutcome, STATE_DIGEST_ITEMS};
+pub use harness::{
+    reads_as_note, FileBefore, Harness, HarnessEvent, HarnessOutcome, STATE_DIGEST_ITEMS,
+};
 pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use ledger::StoreLedger;
 pub use metrics::{role_name, Metrics};

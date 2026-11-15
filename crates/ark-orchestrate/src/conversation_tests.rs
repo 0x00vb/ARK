@@ -4032,6 +4032,7 @@ async fn automation_recovery_restores_journaled_answer_after_owner_dies() {
             interrupted: false,
             steered: vec![],
             ran_out: false,
+            unfinished: None,
         };
         let input = "Review the supplied text";
         let result = results::SavedResult::capture(&session, input, &outcome);

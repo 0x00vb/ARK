@@ -319,6 +319,38 @@ async fn a_picture_that_changed_or_was_removed_fails_the_task_and_names_it() {
     assert_eq!(ended(unchanged).await.state, TaskState::Done);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_out_of_the_folder_is_refused_and_a_link_moved_to_another_file_fails_the_task() {
+    let w = world(true, 0).await;
+    let outside = w.folder.parent().unwrap().join("outside.png");
+    std::fs::write(&outside, PIXEL).unwrap();
+    std::os::unix::fs::symlink(&outside, w.folder.join("out.png")).unwrap();
+    refused(
+        w.o.submit("w", person("look", &["out.png"])),
+        "outside the project folder",
+    );
+    assert!(w.o.tasks().is_empty());
+    std::fs::write(w.folder.join("other.png"), [PIXEL, &[0]].concat()).unwrap();
+    std::os::unix::fs::symlink(w.folder.join("shot.png"), w.folder.join("link.png")).unwrap();
+    w.hold.store(true, Ordering::SeqCst);
+    let first = w.o.submit("w", person("first", &[])).unwrap();
+    let linked = w.o.submit("w", person("linked", &["link.png"])).unwrap();
+    std::fs::remove_file(w.folder.join("link.png")).unwrap();
+    std::os::unix::fs::symlink(w.folder.join("other.png"), w.folder.join("link.png")).unwrap();
+    w.hold.store(false, Ordering::SeqCst);
+    w.o.wait(&first).await.unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), w.o.wait(&linked))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ended.state, TaskState::Failed);
+    assert_eq!(
+        ended.error.as_deref(),
+        Some("The picture link.png changed or was removed after it was sent.")
+    );
+}
+
 #[test]
 fn records_from_before_images_load_and_write_without_them() {
     let node: serde_json::Value = serde_json::to_value(TaskSpec::new("x")).unwrap();

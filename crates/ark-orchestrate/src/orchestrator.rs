@@ -4158,7 +4158,7 @@ impl Inner {
                 _ => None,
             }
         };
-        let pictures = match self.start_pictures(&task.images) {
+        let pictures = match self.start_pictures(&task.images).await {
             Ok(pictures) => pictures,
             Err(why) => return Attempt::Fatal(why),
         };

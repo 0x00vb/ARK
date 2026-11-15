@@ -28,7 +28,8 @@ impl Inner {
             ));
         }
         let root = self.engine.workspace_dir(&self.project.id)?;
-        let read = ark_files::images(&root, &spec.images)
+        let paths = spec.images.clone();
+        let read = off_the_runtime(|| ark_files::images(&root, &paths))
             .map_err(|error| OrchError::NotAllowed(error.to_string()))?;
         Ok(read
             .into_iter()
@@ -42,7 +43,7 @@ impl Inner {
 
     /// The admitted pictures as the model is shown them. A file that is gone or is another file
     /// since admission fails the turn, naming it.
-    pub(super) fn start_pictures(
+    pub(super) async fn start_pictures(
         &self,
         admitted: &[TaskImage],
     ) -> Result<Vec<ark_model::Picture>, String> {
@@ -53,34 +54,55 @@ impl Inner {
             .engine
             .workspace_dir(&self.project.id)
             .map_err(|error| error.to_string())?;
-        admitted
-            .iter()
-            .map(|was| {
-                let changed = || {
-                    format!(
-                        "The picture {} changed or was removed after it was sent.",
-                        was.path
-                    )
-                };
-                let [now] = ark_files::images(&root, std::slice::from_ref(&was.path))
-                    .map_err(|_| changed())?
-                    .try_into()
-                    .map_err(|_| changed())?;
-                if now.sha256 != was.sha256 || now.size != was.size {
-                    return Err(changed());
-                }
-                Ok(ark_model::Picture {
-                    media_type: now.media_type,
-                    bytes: Arc::new(now.bytes),
-                })
-            })
-            .collect()
+        let admitted = admitted.to_vec();
+        tokio::task::spawn_blocking(move || read_admitted(&root, &admitted))
+            .await
+            .map_err(|error| error.to_string())?
     }
+}
+
+/// Run file reads where they do not hold an async worker. On a multi-thread runtime the worker
+/// hands its queue to another; a current-thread runtime or none has no other worker to free.
+fn off_the_runtime<T>(read: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(read)
+        }
+        _ => read(),
+    }
+}
+
+fn read_admitted(
+    root: &std::path::Path,
+    admitted: &[TaskImage],
+) -> Result<Vec<ark_model::Picture>, String> {
+    admitted
+        .iter()
+        .map(|was| {
+            let changed = || {
+                format!(
+                    "The picture {} changed or was removed after it was sent.",
+                    was.path
+                )
+            };
+            let [now] = ark_files::images(root, std::slice::from_ref(&was.path))
+                .map_err(|_| changed())?
+                .try_into()
+                .map_err(|_| changed())?;
+            if now.sha256 != was.sha256 || now.size != was.size {
+                return Err(changed());
+            }
+            Ok(ark_model::Picture {
+                media_type: now.media_type,
+                bytes: Arc::new(now.bytes),
+            })
+        })
+        .collect()
 }
 
 impl Orchestrator {
     /// The pictures of an admitted General message, checked as a turn start checks them.
-    pub fn general_work_pictures(
+    pub async fn general_work_pictures(
         &self,
         receipt: &str,
     ) -> Result<(Vec<String>, Vec<ark_model::Picture>), OrchError> {
@@ -98,6 +120,7 @@ impl Orchestrator {
         let pictures = self
             .inner
             .start_pictures(&admitted)
+            .await
             .map_err(OrchError::NotAllowed)?;
         Ok((admitted.into_iter().map(|i| i.path).collect(), pictures))
     }

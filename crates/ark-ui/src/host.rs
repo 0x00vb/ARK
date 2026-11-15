@@ -3600,7 +3600,7 @@ impl Host {
                 if o.general_work_state(&receipt.id)? == GeneralWorkState::Pending {
                     let conv = self.chat_conv(&receipt.conversation, "", true).await?;
                     anyhow::ensure!(!conv.is_running(), "this conversation is already working");
-                    let (paths, pictures) = o.general_work_pictures(&receipt.id)?;
+                    let (paths, pictures) = o.general_work_pictures(&receipt.id).await?;
                     self.start_turn_with(
                         conv,
                         o.general_work_input(&receipt.id)?,

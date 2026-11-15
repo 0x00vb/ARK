@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-11-15
+
+A chat opens at its newest message, and a round arrow returns to it.
+
 ### Added
 
 - Away from the newest message, a round arrow over the composer scrolls back to it and follows the reply again.

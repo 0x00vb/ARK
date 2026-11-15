@@ -1,3 +1,15 @@
+# Core 0.48.1 release: a chat opens at its newest message (2026-11-15)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.48.1 (2026-11-15), over v0.48.0 (766d8b8) |
+| Change | A chat opens at its newest message (the saved scroll position is gone; `Thread.restore()` after the workspace re-attaches a surface, which WebKit resets to the top). Away from the end, a round arrow over the composer goes back and follows again. A sent message no longer stays the saved draft; queued ones and text put back after a failed send do |
+| Found from | The owner on 2026-11-15, with a screenshot of the arrow they wanted |
+| Gates | qa (haiku): 2 blockers (queued and failed-send drafts) and a leak, fixed with tests that fail without them; recheck pass, one pre-existing gap carded (`queued-message-reload-20261115`). WebKit 181 of 181, node 22 of 22, page suite 67 of 69 (the 2 known). Release commit: see below |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests, node 22 of 22, WebKit 178 of 178, page suite 67 of 69 (the 2 known); notification 3 of 3; release build; simulated benchmark no token or cost delta |
+| Consumer | Desktop 0.16.1 pins this tag |
+| Evidence | `../board/evidence/chat-scroll-end-20261115/` |
+
 # Core 0.48.0 release: an agent schedules work from its own chat (2026-11-13)
 
 | Release state | Value |

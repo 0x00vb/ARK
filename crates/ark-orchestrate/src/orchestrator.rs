@@ -1440,18 +1440,8 @@ pub const EMPTY_ANSWER: &str = "It finished without an answer.";
 fn reports(t: &TaskRecord) -> Option<(bool, String)> {
     match t.state {
         TaskState::Done => Some((true, t.result.clone().unwrap_or_default())),
-        TaskState::Failed => Some((false, failure_text(t))),
+        TaskState::Failed => Some((false, t.error.clone().unwrap_or_default())),
         _ => None,
-    }
-}
-
-/// The error of a failed task, then the result it kept (an unfinished task's last reply).
-pub(crate) fn failure_text(t: &TaskRecord) -> String {
-    let error = t.error.clone().unwrap_or_default();
-    match t.result.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-        Some(result) if error.is_empty() => result.to_string(),
-        Some(result) => format!("{error}\n\n{result}"),
-        None => error,
     }
 }
 
@@ -1461,11 +1451,6 @@ const CHANGES_FREE: &str = "You make changes without asking.";
 
 enum Attempt {
     Done(String),
-    /// The task answered with a note on its steps, not a result: it keeps the note and fails.
-    Unfinished {
-        answer: String,
-        why: String,
-    },
     SavedResultFailed {
         answer: String,
         error: String,
@@ -1495,14 +1480,6 @@ impl Final {
             state: TaskState::Failed,
             result: Some(answer),
             error: Some(error),
-        }
-    }
-    fn unfinished(answer: String, why: &str) -> Self {
-        Self {
-            _agent_guard: None,
-            state: TaskState::Failed,
-            result: Some(answer),
-            error: Some(format!("unfinished: {why}")),
         }
     }
     fn done(r: String) -> Self {
@@ -3228,9 +3205,6 @@ impl Inner {
             self.release(id).await;
             match attempt {
                 Attempt::Done(answer) => return Final::done(answer).holding(guard),
-                Attempt::Unfinished { answer, why } => {
-                    return Final::unfinished(answer, &why).holding(guard)
-                }
                 Attempt::SavedResultFailed { answer, error } => {
                     return Final::saved_result_failed(answer, error).holding(guard)
                 }
@@ -4358,13 +4332,7 @@ impl Inner {
                 {
                     tracing::warn!(task = %id, %error, "could not record the turn");
                 }
-                match outcome.unfinished {
-                    Some(why) => Attempt::Unfinished {
-                        answer: outcome.answer,
-                        why,
-                    },
-                    None => Attempt::Done(outcome.answer),
-                }
+                Attempt::Done(outcome.answer)
             }
             Ok(outcome) => {
                 if task.submission.is_some() && !outcome.interrupted {
@@ -5669,45 +5637,6 @@ mod allowed_tests {
             .collect();
         assert_eq!(names, ["computer.look"]);
         assert!(a.asks_a_person("computer"));
-    }
-}
-
-#[cfg(test)]
-mod reports_tests {
-    use super::*;
-    use crate::Budget;
-
-    fn failed(result: Option<&str>, error: Option<&str>) -> TaskRecord {
-        let mut t = TaskRecord::queued(
-            "t-1".into(),
-            "p".into(),
-            "a".into(),
-            &TaskSpec::new("x"),
-            Origin::External,
-            Budget::default(),
-            Vec::new(),
-        );
-        t.state = TaskState::Failed;
-        t.result = result.map(str::to_string);
-        t.error = error.map(str::to_string);
-        t
-    }
-
-    #[test]
-    fn a_failed_task_reports_its_error_then_the_result_it_kept() {
-        let t = failed(
-            Some("Reading the price lines now."),
-            Some("unfinished: a note"),
-        );
-        assert_eq!(
-            reports(&t),
-            Some((
-                false,
-                "unfinished: a note\n\nReading the price lines now.".into()
-            ))
-        );
-        let t = failed(None, Some("budget exceeded"));
-        assert_eq!(reports(&t), Some((false, "budget exceeded".into())));
     }
 }
 

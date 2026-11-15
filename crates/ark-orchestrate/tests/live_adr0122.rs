@@ -293,19 +293,14 @@ async fn case_b(n: usize) -> RunB {
     let tools = tool_names(&steps);
     let summary = w.folder.join("summary.md").exists();
     let (narrated, nudged) = shape(&steps);
-    let unfinished = t
-        .error
-        .as_deref()
-        .is_some_and(|e| e.starts_with("unfinished"));
     let pass = !(t.state == TaskState::Done && !summary);
     let row = format!(
-        "| {n} | {} | {} | {} | {} | {:?}{} | {} | {} | {} | {:.0} |",
+        "| {n} | {} | {} | {} | {} | {:?} | {} | {} | {} | {:.0} |",
         tools.len(),
         steps.len(),
         narrated,
         nudged,
         t.state,
-        if unfinished { " (unfinished)" } else { "" },
         summary,
         if pass { "PASS" } else { "FAIL" },
         cost(&t),

@@ -233,10 +233,6 @@ pub struct HarnessOutcome {
     /// answer was asked for (`force_answer`): the work may not be done. The next turn
     /// continues its goal (ADR 0050).
     pub ran_out: bool,
-    /// Set on a brief task whose last reply is still a one-line note on its steps after it
-    /// was asked once to give the result: the work has no result, and the answer is that
-    /// note. The text says why.
-    pub unfinished: Option<String>,
 }
 
 impl HarnessOutcome {
@@ -822,11 +818,8 @@ impl Harness {
         let mut corrected_claim = false;
         // Whether the model was told once that its answer announced work it had not done.
         let mut corrected_announce = false;
-        // A brief task's reply that reads as a note was sent back once (it shares the flag
-        // above), and some reply of this turn wrote text beside its tool calls.
-        let mut note_nudged = false;
+        // Some reply of this turn wrote text beside its tool calls.
         let mut narrated_calls = false;
-        let mut unfinished: Option<String> = None;
         // The answer the model last wrote beside a check of its own changes (see `rechecks`).
         let mut checked: Option<String> = None;
         // Calls run this turn in order: the last change, the last look, how many changes, and
@@ -1060,7 +1053,6 @@ impl Harness {
                             && narrated_calls
                             && reads_as_note(&completion.content)))
                 {
-                    note_nudged = !announces_work(&completion.content);
                     corrected_announce = true;
                     show_held!();
                     tracing::info!("the answer announces work it has not done; asking again");
@@ -1086,9 +1078,6 @@ impl Harness {
                 answer = completion.content.trim().to_string();
                 answered = true;
                 streamed = !answer.is_empty();
-                if note_nudged && reads_as_note(&answer) {
-                    unfinished = Some(UNFINISHED_NOTE.to_string());
-                }
                 break;
             }
 
@@ -1511,7 +1500,6 @@ impl Harness {
                 interrupted,
                 steered,
                 ran_out: false,
-                unfinished: None,
             });
         }
 
@@ -1567,7 +1555,6 @@ impl Harness {
                         interrupted,
                         steered,
                         ran_out: false,
-                        unfinished: None,
                     });
                 }
             }
@@ -1661,7 +1648,6 @@ impl Harness {
             interrupted: false,
             steered,
             ran_out,
-            unfinished,
         })
     }
 
@@ -3280,8 +3266,6 @@ const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice i
 const REPEATED_FAILURE_NOTE: &str = "not run: this exact call already failed twice in this turn. ARK already gave it one retry. Use a different tool or input, or answer from what you know.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
-
-const UNFINISHED_NOTE: &str = "the last reply is a note on the steps, not the result";
 
 /// A brief task's final reply that is one short line: a note on what the agent is doing, as
 /// it writes beside its calls, and not a result. Language-neutral; a result of several lines

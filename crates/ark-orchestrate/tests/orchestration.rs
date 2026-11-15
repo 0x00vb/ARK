@@ -2826,13 +2826,13 @@ const STEP_NOTE: &str = "Checking the project files and verifying the seed leads
 const STEP_NOTE_AGAIN: &str = "Reading the price lines now.";
 
 #[tokio::test]
-async fn a_delegated_worker_that_ends_on_a_step_note_fails_and_the_parent_sees_it() {
+async fn a_delegated_worker_that_answers_with_a_note_after_the_nudge_ends_done_with_it() {
     let f = fixture();
     let lead = Script::new(
         "lead",
         vec![
             calls(vec![delegate("drafter", "qualify the seed leads")]),
-            answer("it did not finish"),
+            answer("got it"),
         ],
     );
     let drafter = Script::new(
@@ -2870,66 +2870,10 @@ async fn a_delegated_worker_that_ends_on_a_step_note_fails_and_the_parent_sees_i
         .into_iter()
         .find(|t| t.owner == "drafter")
         .expect("the delegated task");
-    assert_eq!(worker.state, TaskState::Failed);
+    assert_eq!(worker.state, TaskState::Done);
     assert_eq!(worker.result.as_deref(), Some(STEP_NOTE_AGAIN));
-    assert!(
-        worker
-            .error
-            .as_deref()
-            .is_some_and(|e| e.starts_with("unfinished")),
-        "{:?}",
-        worker.error
-    );
-    assert_eq!(drafter.texts().len(), 3, "one nudge, no retry");
-    let seen = lead.texts().last().unwrap().clone();
-    assert!(seen.contains("drafter failed task"), "{seen}");
-    assert!(seen.contains(STEP_NOTE_AGAIN), "{seen}");
-    let reply = said(&f.ark.engine().store, f.project.id.as_str())
-        .unwrap()
-        .into_iter()
-        .find(|s| s.author == "drafter")
-        .expect("the worker's reply");
-    assert!(reply.failed);
-    assert!(
-        reply.text.contains("unfinished") && reply.text.contains(STEP_NOTE_AGAIN),
-        "{}",
-        reply.text
-    );
-}
-
-#[tokio::test]
-async fn a_scheduled_run_that_ends_unfinished_counts_as_one_failure() {
-    let f = fixture();
-    let m = Script::new(
-        "m",
-        vec![
-            narrated_diagram("Reading the seed file."),
-            answer(STEP_NOTE),
-            answer(STEP_NOTE_AGAIN),
-        ],
-    );
-    let o = orch(&f, vec![("m", m)], vec![]);
-    o.spawn(
-        AgentSpec::new("w")
-            .model("m")
-            .diagrams(true)
-            .tools(Vec::<String>::new()),
-    )
-    .await
-    .unwrap();
-    let s = o
-        .schedule(
-            "w",
-            TaskSpec::new("qualify the leads"),
-            When::every_minutes(10),
-        )
-        .unwrap();
-    let started = o.tick_schedules(s.next_ms.unwrap()).await;
-    assert_eq!(started.len(), 1);
-    let run = o.wait(&started[0]).await.unwrap();
-    assert_eq!(run.state, TaskState::Failed);
-    assert_eq!(run.result.as_deref(), Some(STEP_NOTE_AGAIN));
-    assert_eq!(o.schedules()[0].failures, 1);
+    assert_eq!(worker.error, None);
+    assert_eq!(drafter.texts().len(), 3, "one nudge, no third call");
 }
 
 #[tokio::test]

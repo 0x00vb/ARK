@@ -1746,7 +1746,6 @@ mod tests {
             interrupted: false,
             steered: vec![],
             ran_out: false,
-            unfinished: None,
         }
     }
 

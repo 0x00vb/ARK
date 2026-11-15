@@ -654,6 +654,16 @@ async fn a_reply_the_model_redoes_shows_once_and_one_it_cannot_fix_says_so_plain
     drive("unusable", vec![], Duration::ZERO).await;
 }
 
+/// A chat opens at its newest message; away from it, a round arrow goes back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chat_opens_at_its_newest_message_and_an_arrow_returns_to_it() {
+    let long =
+        "A paragraph long enough to fill some of the page, said plainly and at length. ".repeat(6);
+    let answer = format!("{long}\n\n{long}\n\n{long}");
+    let script = (0..4).map(|_| say(&answer, false)).collect();
+    drive("scroll-end", script, Duration::ZERO).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_row_after_the_streamed_answer_does_not_repeat_it() {
     // An unknown tool cites nothing, so the self-check flags the answer after it streamed.

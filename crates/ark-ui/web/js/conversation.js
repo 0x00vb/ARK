@@ -31,7 +31,7 @@ export class Thread {
     this.live = null;
     this.stick = true;
     this.queued = false;
-    let top = scroller.scrollTop;
+    this.top = scroller.scrollTop;
     // The person's hand on the scroller lets go of the end at once: a snap already queued
     // would otherwise land after the scroll event that says they moved.
     const release = () => { this.stick = false; };
@@ -54,10 +54,22 @@ export class Thread {
     scroller.addEventListener("scroll", () => {
       const s = scroller;
       const gap = s.scrollHeight - s.scrollTop - s.clientHeight;
-      if (gap < 4 || (s.scrollTop > top && gap < 80)) this.stick = true;
-      else if (s.scrollTop < top) this.stick = false;
-      top = s.scrollTop;
+      if (gap < 4 || (s.scrollTop > this.top && gap < 80)) this.stick = true;
+      else if (s.scrollTop < this.top) this.stick = false;
+      this.top = s.scrollTop;
+      this.showEnd();
+    }, { passive: true });
+    // Away from the newest message, a round arrow above the composer goes back to it.
+    this.end = h("button.jump-end", { type: "button", "aria-label": "Scroll to latest", tabindex: "-1", "data-show": "false", "aria-hidden": "true", onclick: () => this.toEnd() }, icon("arrow-down"));
+    scroller.after(h("div.jump-end-dock", this.end));
+    // Content that grows on its own (an image loads, a block opens) and a window that changes
+    // size keep the end in view.
+    const resized = this.resized = new ResizeObserver(() => {
+      if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+      this.showEnd();
     });
+    resized.observe(root);
+    resized.observe(scroller);
     root.addEventListener("click", (e) => {
       const a = e.target.closest("a.cite");
       if (a) {
@@ -70,6 +82,11 @@ export class Thread {
         api.openFile(file.dataset.path);
       }
     });
+  }
+
+  /// A closed chat stops watching its size.
+  dispose() {
+    this.resized.disconnect();
   }
 
   clear() {
@@ -86,6 +103,31 @@ export class Thread {
       this.queued = false;
       if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
     });
+  }
+
+  /// Back where the person was after the scroller was put in the page again (a moved element
+  /// starts at the top and says nothing).
+  restore() {
+    requestAnimationFrame(() => {
+      this.scroller.scrollTop = this.stick ? this.scroller.scrollHeight : this.top;
+      this.showEnd();
+    });
+  }
+
+  /// The arrow shows while the newest message is more than a little out of view.
+  showEnd() {
+    const s = this.scroller;
+    const away = s.clientHeight > 0 && s.scrollHeight - s.scrollTop - s.clientHeight > 160;
+    if (this.end.dataset.show === String(away)) return;
+    this.end.dataset.show = String(away);
+    this.end.tabIndex = away ? 0 : -1;
+    this.end.setAttribute("aria-hidden", String(!away));
+  }
+
+  toEnd() {
+    this.stick = true;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.scroller.scrollTo({ top: this.scroller.scrollHeight, behavior: still ? "auto" : "smooth" });
   }
 
   isEmpty() {

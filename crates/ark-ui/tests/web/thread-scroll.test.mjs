@@ -20,7 +20,7 @@ before(async () => {
     if (url.pathname === "/t.html") {
       res.setHeader("content-type", "text/html");
       res.end(`<!doctype html><link rel="stylesheet" href="/app.css"><body>
-<div id="scroller" style="height:400px;width:600px;overflow:auto"><div id="thread" class="thread"></div></div>
+<div style="width:600px"><div id="scroller" style="height:400px;overflow:auto"><div id="thread" class="thread"></div></div></div>
 <script type="module">
 import { Thread } from "/js/conversation.js";
 const api = { call: async () => ({}), toast() {} };
@@ -135,5 +135,86 @@ test("a click in the margin beside the thread does not stop the stream following
   await page.mouse.click(20, 200);
   await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => window.thread.stick), true);
+  await page.close();
+});
+
+test("a conversation opens at its newest message, with no arrow", async () => {
+  const page = await browser.newPage({ viewport: { width: 700, height: 600 } });
+  await page.goto(`${base}/t.html`);
+  await page.waitForFunction(() => window.ready);
+  await page.waitForFunction(() => scroller.scrollTop > 0);
+  assert.ok(await gap(page) < 4, `at the end: gap ${await gap(page)}`);
+  const arrow = page.locator(".jump-end");
+  assert.equal(await arrow.getAttribute("data-show"), "false");
+  assert.equal(await arrow.isVisible(), false);
+  assert.equal(await arrow.evaluate((b) => b.tabIndex), -1);
+  await page.close();
+});
+
+test("away from the newest message an arrow appears, and it takes the person back and follows", async () => {
+  const page = await streaming();
+  const arrow = page.locator(".jump-end");
+  assert.equal(await arrow.isVisible(), false, "no arrow while following");
+  await page.mouse.wheel(0, -600);
+  await page.waitForFunction(() => document.querySelector(".jump-end").dataset.show === "true");
+  await page.waitForTimeout(250);
+  assert.equal(await arrow.isVisible(), true);
+  assert.equal(await arrow.evaluate((b) => b.tabIndex), 0);
+  assert.equal(await page.evaluate(() => window.thread.stick), false);
+  // It sits over the bottom of the conversation, centred.
+  const box = await arrow.boundingBox();
+  const area = await page.locator("#scroller").boundingBox();
+  assert.ok(box.y + box.height <= area.y + area.height && box.y + box.height > area.y + area.height - 60, `near the bottom: ${JSON.stringify(box)}`);
+  assert.ok(Math.abs(box.x + box.width / 2 - (area.x + area.width / 2)) < 2, "centred");
+  await arrow.click();
+  await page.waitForFunction(() => window.thread.stick && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 4);
+  await page.waitForFunction(() => document.querySelector(".jump-end").dataset.show === "false");
+  // Still streaming: it keeps following after the jump.
+  const before = await page.evaluate(() => scroller.scrollHeight);
+  await page.waitForFunction((b) => scroller.scrollHeight > b, before);
+  await page.waitForTimeout(150);
+  assert.ok(await gap(page) < 4, `follows: gap ${await gap(page)}`);
+  await page.close();
+});
+
+test("content that grows on its own keeps the end in view while following", async () => {
+  const page = await browser.newPage({ viewport: { width: 700, height: 600 } });
+  await page.goto(`${base}/t.html`);
+  await page.waitForFunction(() => window.ready && scroller.scrollTop > 0);
+  await page.evaluate(() => {
+    const late = document.createElement("div");
+    late.style.height = "1px";
+    window.thread.root.append(late);
+    setTimeout(() => { late.style.height = "500px"; }, 50);
+  });
+  await page.waitForTimeout(300);
+  assert.ok(await gap(page) < 4, `at the end: gap ${await gap(page)}`);
+  await page.close();
+});
+
+test("with reduced motion the arrow jumps to the end at once", async () => {
+  const page = await browser.newPage({ viewport: { width: 700, height: 600 }, reducedMotion: "reduce" });
+  await page.goto(`${base}/t.html`);
+  await page.waitForFunction(() => window.ready && scroller.scrollTop > 0);
+  await page.evaluate(() => { scroller.scrollTop = 0; });
+  await page.waitForFunction(() => document.querySelector(".jump-end").dataset.show === "true");
+  await page.evaluate(() => document.querySelector(".jump-end").click());
+  assert.ok(await gap(page) < 4, `at once: gap ${await gap(page)}`);
+  await page.close();
+});
+
+test("a closed conversation stops following its size", async () => {
+  const page = await browser.newPage({ viewport: { width: 700, height: 600 } });
+  await page.goto(`${base}/t.html`);
+  await page.waitForFunction(() => window.ready && scroller.scrollTop > 0);
+  const top = await page.evaluate(() => scroller.scrollTop);
+  await page.evaluate(() => {
+    window.thread.dispose();
+    const late = document.createElement("div");
+    late.style.height = "500px";
+    window.thread.root.append(late);
+  });
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => scroller.scrollTop), top);
   await page.close();
 });

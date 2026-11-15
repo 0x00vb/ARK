@@ -555,6 +555,67 @@ const scenarios = {
     assert.ok(!/not JSON|malformed|column 1573/i.test(stored), stored);
   },
 
+  // A chat opens at its newest message, also after the person read it from the top. Away from
+  // the end, a round arrow over the composer goes back to it.
+  async "scroll-end"(page) {
+    for (const ask of ["First question.", "Second question.", "Third question.", "Fourth question."]) {
+      await finished(page, () => page.locator("#input").fill(ask).then(() => page.keyboard.press("Enter")));
+    }
+    const scroller = page.locator("#scroller");
+    const gap = () => scroller.evaluate((s) => s.scrollHeight - s.scrollTop - s.clientHeight);
+    const arrow = page.locator(".chat-surface.primary .jump-end");
+    assert.ok(await scroller.evaluate((s) => s.scrollHeight > s.clientHeight * 2), "long enough to scroll");
+    assert.ok(await gap() < 4, "at the end after the last answer");
+    // Read from the top, then open the chat again.
+    await scroller.hover();
+    await page.mouse.wheel(0, -100000);
+    await page.waitForFunction(() => document.querySelector("#scroller").scrollTop === 0);
+    await page.waitForTimeout(200);
+    await page.reload();
+    await page.locator(".turn.stored").first().waitFor();
+    await page.waitForTimeout(400);
+    assert.ok(await gap() < 4, `opens at the newest message: gap ${await gap()}`);
+    assert.equal(await page.locator("#input").inputValue(), "", "a sent message does not come back as a draft");
+    assert.equal(await arrow.isVisible(), false);
+    await shot(page, "scroll-end-open");
+    await scroller.hover();
+    await page.mouse.wheel(0, -900);
+    await arrow.waitFor({ state: "visible" });
+    await page.waitForTimeout(250);
+    const box = await arrow.boundingBox();
+    const dock = await page.locator("#composer").boundingBox();
+    assert.ok(box.y + box.height < dock.y, "above the composer");
+    await shot(page, "scroll-end-arrow");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForTimeout(250);
+    await shot(page, "scroll-end-arrow-dark");
+    await arrow.click();
+    await page.waitForFunction(() => { const s = document.querySelector("#scroller"); return s.scrollHeight - s.scrollTop - s.clientHeight < 4; });
+    await arrow.waitFor({ state: "hidden" });
+    // A split draws the chats again: the person scrolled up keeps their place, not the top.
+    await page.emulateMedia({ colorScheme: "light" });
+    const a = await page.evaluate(() => window.ark.summary().session.id);
+    await page.evaluate(() => window.ark.newSession());
+    await page.waitForFunction((a) => window.ark.summary().session.id !== a, a);
+    await page.evaluate((id) => window.ark.shown(id), await page.evaluate(() => window.ark.summary().session.id));
+    await page.evaluate((id) => window.ark.openSession(id), a);
+    await page.waitForFunction((a) => window.ark.summary().session.id === a, a);
+    await page.evaluate((id) => window.ark.shown(id), a);
+    await page.locator(".turn.stored").first().waitFor();
+    await page.waitForTimeout(300);
+    assert.ok(await gap() < 4, `opened again at the newest message: gap ${await gap()}`);
+    await scroller.hover();
+    await page.mouse.wheel(0, -700);
+    await arrow.waitFor({ state: "visible" });
+    await page.locator("#chat-split").click();
+    await page.locator(".secondary textarea").waitFor();
+    await page.waitForTimeout(300);
+    const kept = await scroller.evaluate((s) => ({ top: s.scrollTop, gap: s.scrollHeight - s.scrollTop - s.clientHeight }));
+    assert.ok(kept.top > 200 && kept.gap > 160, `kept the place: ${JSON.stringify(kept)}`);
+    assert.equal(await arrow.isVisible(), true);
+    await shot(page, "scroll-end-split");
+  },
+
   // A row that arrives after the streamed answer (a failed self-check) does not make the page
   // draw the answer a second time.
   async selfcheck(page) {

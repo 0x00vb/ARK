@@ -161,7 +161,8 @@ export class Composer {
   set(text) {
     this.dictation.cancel();
     this.input.value = text;
-    this.changed();
+    // Saved as a draft, as typing would be: text put back after a failed send survives a reload.
+    this.input.dispatchEvent(new Event("input"));
     this.focus();
     this.input.setSelectionRange(text.length, text.length);
   }
@@ -341,6 +342,10 @@ export class Composer {
     this.changed();
     const view = command && viewForCommand(text, this.api.project?.());
     if (view) return this.api.openView(view.id);
+    // A queued message stays the saved draft until it is sent (the queue lives in this window).
+    const waits = this.running && (command || queue || images.length);
+    // Otherwise the saved draft empties, as typing would, so a sent message does not come back.
+    if (!waits) this.saved();
     if (!this.running) return this.api.submit(text, { images, named: !typed });
     if (command) {
       this.enqueue(text);
@@ -348,6 +353,11 @@ export class Composer {
     }
     if (queue || images.length) this.enqueue(text, images, !typed);
     else this.api.steer(text);
+  }
+
+  /// Tells the draft keepers what the field holds now.
+  saved() {
+    this.input.dispatchEvent(new Event("input"));
   }
 
   enqueue(text, images = [], named = false) {
@@ -377,6 +387,8 @@ export class Composer {
     this.queue = [...first.map((text) => ({ text, images: [], named: false })), ...this.queue];
     const next = this.queue.shift();
     this.paintQueue();
+    // The last queued message leaves: the saved draft is what the field holds now.
+    if (next && !this.queue.length) this.saved();
     return next;
   }
 

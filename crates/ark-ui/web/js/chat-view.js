@@ -337,6 +337,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
       open?.close();
       for (const entry of views.values()) entry.view.stop();
       views = new Map();
+      thread.dispose();
       composer.dispose();
       surface.remove();
     },

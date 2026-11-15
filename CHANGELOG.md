@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Away from the newest message, a round arrow over the composer scrolls back to it and follows the reply again.
+
+### Fixed
+
+- A chat opens at its newest message. It used to open where a saved position said, usually the top, and a chat surface put in the page again (a split, a tab) went back to the top.
+- A sent message no longer comes back as a draft when the chat is opened again.
+
 ## [0.48.0] - 2026-11-13
 
 A named agent schedules work from its own chat, and each run answers there as its next message (ADR 0120).

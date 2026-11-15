@@ -24,6 +24,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
     calls.push({ method, params });
     if (method === "hello") return { summary: summary(), ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime };
     if (method === "summary") return summary();
+    if (method === "send" && outcome === "sent") return null;
     if (method === "execution_mode" || method === "chat_execution_mode") return { ...summary(), execution_mode: params.mode, execution_mode_revision: 1 };
     if (method === "chat_read") return { summary: summary(chats.find(chat => chat.id === params.session)), transcript: [], approvals: [], running: null };
     if (method === "projects") return projects.map(p => ({ ...p, current: p.id === current.project }));
@@ -67,6 +68,10 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
       if (req.url === "/rpc") {
         let body = ""; for await (const chunk of req) body += chunk;
         const { method, params } = JSON.parse(body);
+        if (method === "send" && outcome === "send-failure") {
+          calls.push({ method, params });
+          res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ok: false, error: "No model answered" })); return;
+        }
         const result = await rpc(method, params);
         if (outcome === "failure" && method === "resource" && params.operation.kind === "upload_add") {
           res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ok: false, error: "Upload refused" })); return;
@@ -292,3 +297,28 @@ for (const next of ["general", "other-project"]) {
     if (next === "other-project") assert.deepEqual(await page.evaluate(() => window.mainConversations.map(item=>item.location.project)), ["a", "b"]);
   }));
 }
+
+const draft = (page) => page.evaluate(() => localStorage.getItem("ark-draft:fixture:chat-a"));
+
+test("a sent message does not stay the saved draft; one queued behind a running turn does until it is sent", async () => fixture(async (page, { settle }) => {
+  const input = page.locator("#input");
+  await input.fill("Plan the week.");
+  assert.equal(await draft(page), "Plan the week.");
+  await input.press("Enter");
+  await settle();
+  assert.equal(await draft(page), "", "sent");
+  await input.fill("Then the month.");
+  await input.press("Meta+Enter");
+  await page.locator(".queued").waitFor();
+  assert.equal(await input.inputValue(), "");
+  assert.equal(await draft(page), "Then the month.", "queued, not sent yet");
+}, "sent"));
+
+test("text put back after a failed send is saved as the draft", async () => fixture(async (page, { settle }) => {
+  const input = page.locator("#input");
+  await input.fill("Plan the week.");
+  await input.press("Enter");
+  await settle();
+  await page.waitForFunction(() => document.querySelector("#input").value === "Plan the week.");
+  assert.equal(await draft(page), "Plan the week.");
+}, "send-failure"));

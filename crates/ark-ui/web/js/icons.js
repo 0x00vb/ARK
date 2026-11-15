@@ -23,6 +23,7 @@ export const ICONS = {
   "chevron-down": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"/></g>",
   "chevron-right": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m9 6 6 6-6 6\"/></g>",
   "arrow-up": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 20V4 M5 11l7-7 7 7\"/></g>",
+  "arrow-down": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 4v16 M5 13l7 7 7-7\"/></g>",
   "stop": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 5h14v14H5Z\"/></g>",
   "x": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 6 12 12 M18 6 6 18\"/></g>",
   "check": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m4 12 5 5L20 6\"/></g>",

@@ -483,10 +483,6 @@ function draftKey(session, runtime = state.runtime) {
   return `ark-draft:${runtime || "runtime"}:${session}`;
 }
 
-function scrollKey(session) {
-  return `ark-scroll:${state.runtime || "runtime"}:${session}`;
-}
-
 function saveDraft(session = state.sessionId, value = composer?.input?.value, runtime = state.runtime) {
   if (!session || value == null) return;
   try { localStorage.setItem(draftKey(session, runtime), value); } catch (error) { console.error(error); }
@@ -517,18 +513,6 @@ function captureDraft(location) {
       saveDraft(location.session, `${draft}\n${text}`, runtime);
     }
   };
-}
-
-function saveScroll(session, element) {
-  if (!session || !element) return;
-  try { localStorage.setItem(scrollKey(session), String(element.scrollTop)); } catch {}
-}
-
-function restoreScroll(session, element) {
-  if (!session || !element) return;
-  let top = 0;
-  try { top = Number(localStorage.getItem(scrollKey(session)) || 0); } catch {}
-  requestAnimationFrame(() => { element.scrollTop = Number.isFinite(top) ? top : 0; });
 }
 
 function saveTabs() {
@@ -850,6 +834,8 @@ class SecondaryChat {
     this.applySummary(read.summary);
     if (read.transcript?.length) this.thread.renderStored(read.transcript, { hasMore: read.transcript.length === 30 });
     else this.thread.greet(this.session);
+    // A chat opens at its newest message.
+    this.thread.scroll(true);
     if (read.running) {
       this.thread.begin(read.running);
       this.setRunning(true);
@@ -862,8 +848,6 @@ class SecondaryChat {
     imageStash.delete(this.session);
     this.composer.changed();
     this.composer.input.addEventListener("input", () => saveDraft(this.session, this.composer.input.value));
-    elements.scroller.addEventListener("scroll", () => saveScroll(this.session, elements.scroller), { passive: true });
-    restoreScroll(this.session, elements.scroller);
   }
 
   applySummary(summary) {
@@ -956,10 +940,10 @@ class SecondaryChat {
   }
 
   dispose() {
+    this.thread.dispose();
     this.composer.dispose();
     imageStash.set(this.session, this.composer.stashImages());
     saveDraft(this.session, this.composer.input.value);
-    saveScroll(this.session, this.elements.scroller);
     this.elements.surface.remove();
   }
 }
@@ -1138,6 +1122,8 @@ function renderWorkspace() {
   if (!workspace || !chatLayout) return;
   chatLayout = pruneLayout(chatLayout) || chatLeaf(state.sessionId);
   clear(workspace).append(renderLayoutNode(chatLayout, []));
+  thread?.restore();
+  for (const chat of secondaryChats.values()) chat.thread?.restore();
   const divided = visibleChats(chatLayout).length > 1;
   workspace.dataset.split = String(divided);
   appEl.dataset.split = String(divided);
@@ -1848,7 +1834,6 @@ async function loadSession() {
   thread.scroll(true);
   sidebar.refresh(state.sessionId);
   refreshRing();
-  restoreScroll(state.sessionId, $("#scroller"));
 }
 
 function showWelcome() {
@@ -3003,8 +2988,6 @@ async function start() {
     if (path) api.openFile(path, { recover: true });
   } catch {}
   composer.input.addEventListener("input", () => saveDraft());
-  const primaryScroller = primarySurface.querySelector("#scroller");
-  primaryScroller.addEventListener("scroll", () => saveScroll(state.sessionId, primaryScroller), { passive: true });
   (secondaryChats.get(activeSession)?.composer || composer).focus();
   requestAnimationFrame(() => appEl.classList.add("ready"));
 }

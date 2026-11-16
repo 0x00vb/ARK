@@ -139,13 +139,16 @@ fn change(name: &str) -> ActionDescriptor {
     ActionDescriptor::new(name, "change", RiskTier::Mutate)
 }
 
-/// Records each question and answers no.
-struct Refuse(Arc<Mutex<Vec<String>>>);
+/// Records each question and answers no, or never answers when `wait`.
+struct Refuse(Arc<Mutex<Vec<String>>>, bool);
 
 #[async_trait::async_trait]
 impl Approver for Refuse {
     async fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision {
         self.0.lock().unwrap().push(request.action.clone());
+        if self.1 {
+            std::future::pending::<()>().await;
+        }
         ApprovalDecision::Deny
     }
 }
@@ -160,6 +163,10 @@ struct World {
 }
 
 fn world(hold: bool) -> World {
+    world_with(hold, false)
+}
+
+fn world_with(hold: bool, wait: bool) -> World {
     let ran = Arc::new(Mutex::new(Vec::new()));
     let asked = Arc::new(Mutex::new(Vec::new()));
     let m = Arc::new(Model {
@@ -191,7 +198,10 @@ fn world(hold: bool) -> World {
     let mm = m.clone();
     let o = Orchestrator::builder(&ark, &project)
         .max_parallel(if hold { 1 } else { 8 })
-        .approvals(Arc::new(ApprovalGate::new(Arc::new(Refuse(asked.clone())))))
+        .approvals(Arc::new(ApprovalGate::new(Arc::new(Refuse(
+            asked.clone(),
+            wait,
+        )))))
         .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>))
         .build()
         .unwrap();
@@ -529,4 +539,54 @@ async fn the_work_of_a_turn_in_another_agents_chat_does_not_take_its_mode() {
     w.o.run("ceo", forged).await.unwrap();
     assert_eq!(w.ran(), Vec::<String>::new());
     assert_eq!(w.asked(), strs(&REPLAY));
+}
+
+#[tokio::test]
+async fn a_scheduled_run_of_an_agent_that_acts_alone_asks_for_what_asks_every_time() {
+    let w = world(false);
+    w.agent("ceo", |s| s.allow_mutate(true)).await;
+    let chat = w.chat("ceo", ExecutionMode::Auto);
+    w.o.run("ceo", said("zzping").thread(&chat)).await.unwrap();
+    let s =
+        w.o.schedule(
+            "ceo",
+            TaskSpec::new("zzask").report_to(&chat),
+            When::daily_at("02:00").in_zone("UTC"),
+        )
+        .unwrap();
+    let id = w.o.run_schedule_now(&s.id).await.unwrap();
+    w.o.wait(&id).await.unwrap();
+    assert_eq!(w.ran(), strs(&["process.start"]));
+    assert_eq!(w.asked(), strs(&["computer.look", "pay.send"]));
+}
+
+#[tokio::test]
+async fn an_unanswered_question_keeps_the_run_waiting_until_it_is_stopped() {
+    let w = world_with(false, true);
+    w.agent("ceo", |s| s.allow_mutate(true)).await;
+    let chat = w.chat("ceo", ExecutionMode::Auto);
+    w.o.run("ceo", said("zzping").thread(&chat)).await.unwrap();
+    let s =
+        w.o.schedule(
+            "ceo",
+            TaskSpec::new("zzask").report_to(&chat),
+            When::daily_at("02:00").in_zone("UTC"),
+        )
+        .unwrap();
+    let id = w.o.run_schedule_now(&s.id).await.unwrap();
+    until("it waits for the person", || {
+        w.o.task(&id).is_some_and(|t| {
+            t.state == TaskState::Waiting && t.waiting_on.as_deref() == Some(WAITING_PERSON)
+        })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let waiting = w.o.task(&id).unwrap();
+    assert_eq!(waiting.state, TaskState::Waiting, "no timeout ends it");
+    let question = waiting.question.expect("its question stays");
+    assert_eq!(question.request.action, "computer.look");
+    assert!(w.o.questions().iter().any(|t| t.id == id));
+    assert_eq!(w.ran(), strs(&["process.start"]));
+    w.o.cancel_and_wait(&id).await.unwrap();
+    assert_eq!(w.o.task(&id).unwrap().state, TaskState::Cancelled);
 }

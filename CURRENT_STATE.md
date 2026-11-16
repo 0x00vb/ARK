@@ -1,3 +1,16 @@
+# Core 0.50.0 release: an agent chat in Auto stops asking, its files are in the agent's folder (2026-11-16)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.50.0 (2026-11-16), over v0.49.0 (6d77090). ADR 0123 (a named agent's chat turn follows the chat's mode), ADR 0124 (an agent chat's files are in the agent's folder) |
+| Change | The person's own turn in a named agent's chat (and its `work.later` continuation, checked against the same agent and chat) runs in that chat's mode; Auto asks only `ask_each_time` and `person_only`. Group, delegated, started, scheduled and automation work stays Manual. An agent with `allow_mutate` and a gate asks for `ask_each_time` and `person_only` (it skipped them); unattended runs wait for that answer with no timeout. File calls from an agent chat (`fileLocation`, hello `agent_chat_files`) resolve the agent's own folder for open, list, upload, restore, thumbnails and pictures; other kinds resolve as before; a missing file says "<name> is not in <folder>" |
+| Found from | The owner on 2026-11-15 and 16: an Auto agent chat asked before every change (18 `process.start`, 6 `files.write`, 3 `files.edit` in one evening); "No such file or directory (os error 2)" opening csv and docs after changing the agent's folder |
+| Gates | qa (haiku): Auto plan (3 blockers), implementation (1 blocker overruled with reasons: every protocol client is the person's, tokens are hashed), recheck pass; folder plan (3 blockers), implementation (2 majors), fixed with tests that fail without them. Release commit: see below |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests, node 22 of 22, WebKit 194 of 194, page suite 65 of 69 then 67 of 69: the two agent scenarios that expected a question on the person's own turn now use a chat set to ask (both pass), the 2 known still fail; notification 3 of 3, release build, simulated benchmark no delta |
+| Consumer | Desktop 0.17.1 pins this tag |
+| Not verified | The real window with a live model in an Auto agent chat; a folder change on another computer |
+| Evidence | `../board/evidence/agent-auto-20261115/`, `../board/evidence/agent-folder-files-20261116/` |
+
 # Core 0.49.0 release: pictures in agent chats, fixes from the owner's traces (2026-11-15)
 
 | Release state | Value |

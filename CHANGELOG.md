@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-16
+
 A named agent's chat turn follows the chat's mode (ADR 0123). Files in a named agent's chat are in the agent's folder (ADR 0124).
 
 ### Fixed

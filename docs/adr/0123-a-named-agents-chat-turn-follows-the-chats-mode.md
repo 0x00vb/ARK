@@ -41,3 +41,4 @@ The owner's real trace of 2026-11-15 (after 20:00 UTC): the agent `online-ecomme
 - An agent with `allow_mutate` asks for `ask_each_time` and `person_only` actions where it ran them before, including `agents.schedule` in ask mode (0120 said it did not ask). This settles the point 0120 left to the owner.
 - The cut-short rule (an action whose result was lost asks again) now also applies to agents with `allow_mutate` that have a gate.
 - Verified with scripted models only. Not verified: the real app, a live model on the owner's agent.
+- An agent that runs commands without asking in an Auto chat cannot borrow the person's access: saved access tokens are kept only as SHA-256 hashes (`crates/ark-ui/src/access.rs`), so no usable token is on disk. A plain chat in Auto already ran commands without asking before this decision.

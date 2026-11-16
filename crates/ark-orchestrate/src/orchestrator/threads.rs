@@ -24,6 +24,41 @@ pub(super) fn continues_chat(task: &TaskRecord) -> bool {
     task.own_chat_turn() || (task.continues.is_some() && task.origin == Origin::External)
 }
 
+/// The inbox mail that carries `task`'s result to the chat that started it, when it is a
+/// colleague a person's chat turn started and it has ended (ADR 0126). Secrets are scrubbed
+/// before the text is clipped.
+pub(super) fn result_mail(st: &State, task: &TaskRecord) -> Option<(String, Mail)> {
+    let Origin::Agent { agent, task: from } = &task.origin else {
+        return None;
+    };
+    let parent = &st.tasks.get(from)?.record;
+    if task.handoff_key.is_none() || !task.state.is_final() || !continues_chat(parent) {
+        return None;
+    }
+    let objective = clip(&task.objective, 160);
+    let (text, context) = match task.state {
+        TaskState::Done => (format!("finished: {objective}"), task.result.as_deref()),
+        TaskState::Failed => (
+            format!("could not finish: {objective}"),
+            task.error.as_deref(),
+        ),
+        _ => (format!("was stopped before it finished: {objective}"), None),
+    };
+    let scrubbed = ark_store::scrub_text(context.unwrap_or_default());
+    Some((
+        agent.clone(),
+        Mail {
+            context: clip(&scrubbed, RESULT_CHARS),
+            from: task.owner.clone(),
+            text: ark_store::scrub_text(&text),
+            task: Some(task.id.clone()),
+            at_ms: now_ms(),
+            thread: parent.thread.clone(),
+            result: true,
+        },
+    ))
+}
+
 /// The lane of the agent's default conversation. Work and automations run on it too.
 pub(super) const DEFAULT_LANE: &str = "default";
 
@@ -457,7 +492,16 @@ impl Inner {
                         && matches!(&t.record.origin, Origin::Agent { task, .. } if task == from)
                 })
             });
-            if open_sibling {
+            // The person stopped the turn that started them, or it failed: nothing goes on.
+            let starter_ended = waiting.iter().any(|h| {
+                let Origin::Agent { task: from, .. } = &h.origin else {
+                    return false;
+                };
+                st.tasks.get(from).is_some_and(|t| {
+                    matches!(t.record.state, TaskState::Cancelled | TaskState::Failed)
+                })
+            });
+            if open_sibling || starter_ended {
                 return;
             }
             let Some(turn) = st

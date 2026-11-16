@@ -4096,7 +4096,10 @@ impl Inner {
         }
         .render();
         let brief_tokens = estimate_tokens(&brief);
-        let conversation_input = if task.conversation.is_some() {
+        // Nobody wrote a continuation: its stored turn has no person's message (ADR 0126).
+        let conversation_input = if task.continues.is_some() {
+            String::new()
+        } else if task.conversation.is_some() {
             if task.context.trim().is_empty() {
                 task.objective.clone()
             } else {
@@ -4652,7 +4655,15 @@ impl Inner {
                     }
                     task.record.question = None;
                     task.answer = None;
-                    Ok((task.record.clone(), task.cancel.clone()))
+                    let done = (task.record.clone(), task.cancel.clone());
+                    // A colleague's result is in its chat's inbox the moment it is final, so a
+                    // check of that chat never sees it ended without its result (ADR 0126).
+                    if let Some((agent, mail)) = threads::result_mail(&state, &done.0) {
+                        if let Some(a) = state.agents.get_mut(&agent) {
+                            a.record.inbox.push(mail);
+                        }
+                    }
+                    Ok(done)
                 }
             };
             match pending {
@@ -4701,6 +4712,7 @@ impl Inner {
         }
         // Nobody is waiting for a task delegated without `wait` whose parent has ended: tell
         // the parent's agent in its next brief.
+        let mut wake = None;
         if let Origin::Agent { agent, task } = &rec.origin {
             let (parent_open, parent_thread, from_chat) = {
                 let st = self.state.lock().unwrap();
@@ -4712,39 +4724,10 @@ impl Inner {
                         && parent.is_some_and(|t| threads::continues_chat(&t.record)),
                 )
             };
-            // A colleague a person's chat turn started: its result goes to that chat whole, as
-            // data, and continues it (ADR 0126).
             if from_chat {
-                let (text, context) = match rec.state {
-                    TaskState::Done => (
-                        format!("finished: {}", clip(&rec.objective, 160)),
-                        rec.result.clone().unwrap_or_default(),
-                    ),
-                    TaskState::Failed => (
-                        format!("could not finish: {}", clip(&rec.objective, 160)),
-                        rec.error.clone().unwrap_or_default(),
-                    ),
-                    _ => (
-                        format!(
-                            "was stopped before it finished: {}",
-                            clip(&rec.objective, 160)
-                        ),
-                        String::new(),
-                    ),
-                };
-                let context = ark_store::scrub_text(&clip(&context, threads::RESULT_CHARS));
-                self.update_agent(agent, |a| {
-                    a.inbox.push(Mail {
-                        context,
-                        from: rec.owner.clone(),
-                        text,
-                        task: Some(rec.id.clone()),
-                        at_ms: now_ms(),
-                        thread: parent_thread.clone(),
-                        result: true,
-                    })
-                });
-                self.continue_chat(agent, parent_thread.clone()).await;
+                // Its result went to the inbox with its final state; this keeps it.
+                self.update_agent(agent, |_| {});
+                wake = Some((agent.clone(), parent_thread));
             } else if !parent_open {
                 let text = format!(
                     "Task {} ({}) is {}: {}",
@@ -4789,12 +4772,14 @@ impl Inner {
         if rec.schedule.is_some() {
             self.run_ended(&rec);
         }
+        if let Some(t) = self.state.lock().unwrap().tasks.get(id) {
+            t.done.send_replace(true);
+        }
+        if let Some((agent, thread)) = wake {
+            self.continue_chat(&agent, thread).await;
+        }
         if rec.conversation.is_none() && rec.run.is_none() && rec.submission.is_none() {
             self.continue_chat(&rec.owner, rec.thread.clone()).await;
-        }
-        let st = self.state.lock().unwrap();
-        if let Some(t) = st.tasks.get(id) {
-            t.done.send_replace(true);
         }
     }
 

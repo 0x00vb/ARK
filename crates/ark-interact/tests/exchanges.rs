@@ -184,8 +184,13 @@ async fn a_chats_turns_read_back_as_lines_and_a_talk() {
         ("cso", vec![answer("buyers found")]),
     ])
     .await;
-    let first = t.o.run("ceo", said("brief the board")).await.unwrap();
-    let second = t.o.run("ceo", said("go on")).await.unwrap();
+    // Turns the app sends, not the person's own: the colleagues they start do not continue the
+    // chat (ADR 0126), so the scripted replies stay in order.
+    let first =
+        t.o.run("ceo", TaskSpec::new("brief the board"))
+            .await
+            .unwrap();
+    let second = t.o.run("ceo", TaskSpec::new("go on")).await.unwrap();
     settled(&t.o, "cmo").await;
     settled(&t.o, "cso").await;
     let chat_b = t.o.start_thread("ceo").unwrap();

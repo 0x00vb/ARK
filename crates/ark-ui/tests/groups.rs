@@ -24,6 +24,29 @@ struct Script {
     seen: Mutex<Vec<(String, String)>>,
     /// How long an agent's answer takes, in milliseconds.
     slow_ms: std::sync::atomic::AtomicU64,
+    /// Agents that call `notes.save` before they answer, and how many saves ran.
+    mutators: Mutex<Vec<String>>,
+    saves: AtomicUsize,
+}
+
+struct Notes(Arc<Script>);
+
+#[async_trait::async_trait]
+impl Adapter for Notes {
+    fn name(&self) -> &str {
+        "notes"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "notes.save",
+            "save",
+            RiskTier::Mutate,
+        )]
+    }
+    async fn run(&self, _: &str, _: Value, _: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+        self.0.saves.fetch_add(1, Ordering::SeqCst);
+        Ok(ActionOutput::json(json!({ "saved": true })))
+    }
 }
 
 struct Model(Arc<Script>);
@@ -70,6 +93,18 @@ impl Provider for Model {
         if slow > 0 {
             tokio::time::sleep(Duration::from_millis(slow)).await;
         }
+        let saving = s.mutators.lock().unwrap().iter().any(|n| n == who);
+        if saving && !messages.iter().any(|m| m.tool_name.is_some()) {
+            return Ok(Completion {
+                content: String::new(),
+                tool_calls: vec![ark_model::ToolCall {
+                    id: "c0".into(),
+                    name: "notes.save".into(),
+                    arguments: json!({}),
+                }],
+                usage: Usage::default(),
+            });
+        }
         let reply = s.replies.lock().unwrap().get(who).cloned();
         Ok(text(reply.unwrap_or_else(|| format!("{who} here"))))
     }
@@ -80,9 +115,10 @@ impl Provider for Model {
 }
 
 async fn open(dir: &std::path::Path, script: Arc<Script>) -> (Arc<Host>, Arc<Store>) {
-    let provider: Arc<dyn Provider> = Arc::new(Model(script));
+    let provider: Arc<dyn Provider> = Arc::new(Model(script.clone()));
     let ark = Ark::builder()
         .store_root(dir)
+        .tool(Arc::new(Notes(script)))
         .provider(provider)
         .planner(false)
         .critic(false)
@@ -234,6 +270,51 @@ async fn a_reply_that_names_another_member_hands_on() {
     let list = t.settle(3).await;
     assert_eq!(Setup::agents_of(&list), ["person", "scout", "ana"]);
     assert_eq!(t.router_calls(), 0);
+}
+
+/// A member's turn in a group chat asks before it changes anything, in a chat left in Auto:
+/// the person's own message names it, or another member's reply hands on to it.
+#[tokio::test]
+async fn a_group_member_asks_before_it_changes_anything_whether_named_or_handed_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path()).await;
+    t.script.mutators.lock().unwrap().push("Ana".into());
+    t.script
+        .replies
+        .lock()
+        .unwrap()
+        .insert("Scout".into(), "Found it. @Ana can you write it up?".into());
+    let mut rx = t.host.subscribe();
+    let mut asked = Vec::new();
+    for text in ["@scout find the bug", "@ana save it too"] {
+        t.send(text).await;
+        let ask = loop {
+            let event = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+                .await
+                .expect("a question")
+                .unwrap();
+            if event["kind"] == "approval" {
+                break event;
+            }
+        };
+        asked.push((
+            ask["request"]["agent"].clone(),
+            ask["request"]["action"].clone(),
+        ));
+        t.host
+            .call("approve", json!({ "id": ask["id"], "decision": "deny" }))
+            .await
+            .unwrap();
+        t.settle(1).await;
+    }
+    assert_eq!(
+        asked,
+        vec![
+            (json!("ana"), json!("notes.save")),
+            (json!("ana"), json!("notes.save"))
+        ]
+    );
+    assert_eq!(t.script.saves.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

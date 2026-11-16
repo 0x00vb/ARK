@@ -262,6 +262,9 @@ async fn a_failed_and_killed_task_continues_with_its_goal_and_finishes() {
             "process.start",
             json!({ "command": "grep -c highlightLayer web/js/file.js && echo tests passed", "wait": 30 }),
         )),
+        // The one-line answer after narrated calls is asked once to continue (ADR 0125), then
+        // the check nudge asks once more.
+        Step::Ok(say("Syntax highlighting is in place and its test passes.")),
         Step::Ok(say("Syntax highlighting is in place and its test passes.")),
         Step::Ok(say("Syntax highlighting is in place and its test passes.")),
     ]);

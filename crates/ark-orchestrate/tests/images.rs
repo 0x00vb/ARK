@@ -279,7 +279,7 @@ async fn pictures_are_refused_for_everyone_but_the_person() {
 }
 
 #[tokio::test]
-async fn a_picture_that_changed_or_was_removed_fails_the_task_and_names_it() {
+async fn a_picture_that_changed_fails_the_task_and_one_that_is_gone_says_it_is_not_in_the_folder() {
     let w = world(true, 0).await;
     w.hold.store(true, Ordering::SeqCst);
     // The first task holds the agent, so the others wait in the queue with their pictures.
@@ -446,4 +446,25 @@ async fn a_new_agent_chat_admits_its_pictures_from_the_agents_folder() {
     assert!(!receipt.id.is_empty());
     let error = admit("shot.png", "r2").await.unwrap_err().to_string();
     assert!(error.contains("shot.png"), "{error}");
+}
+
+#[tokio::test]
+async fn an_unknown_agent_is_refused_before_its_pictures_are_read() {
+    let w = world(true, 0).await;
+    let target = || WorkTarget::Agent {
+        name: "nobody".into(),
+    };
+    for picture in ["shot.png", "missing.png"] {
+        let error =
+            w.o.admit_work(target(), person("look", &[picture]), "window", picture)
+                .await
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("nobody"), "{picture}: {error}");
+        assert!(!error.contains("missing.png"), "{error}");
+    }
+    let error =
+        w.o.submit("nobody", person("look", &["missing.png"]))
+            .unwrap_err();
+    assert!(error.to_string().contains("nobody"), "{error}");
 }

@@ -956,7 +956,10 @@ async fn work_through_the_group_with_a_gate_is_told_it_asks_and_does_ask() {
         "work through the group asks, so its prompt says so"
     );
     let last = ops.last().unwrap();
-    assert!(last.contains(free) && !last.contains(asks));
+    assert!(
+        last.contains(asks) && !last.contains(free),
+        "with a gate even an agent that acts alone says some changes ask"
+    );
 }
 
 /// The system prompts of `ops` (an agent that may act alone) when `cmo` hands it work through a

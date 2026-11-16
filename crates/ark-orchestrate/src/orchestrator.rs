@@ -4026,10 +4026,10 @@ impl Inner {
         // Work a group member sent asks before it changes anything, whatever the owner may do
         // on its own: the person agreed to a group, not to one member acting through another.
         let allow_mutate = spec.allow_mutate && !self.sent_through_group(&task.origin, owner);
-        let changes = if allow_mutate {
-            Some(CHANGES_FREE)
-        } else if task.run.is_some() || self.approvals.is_some() {
+        let changes = if task.run.is_some() || self.approvals.is_some() {
             Some(CHANGES_ASK)
+        } else if allow_mutate {
+            Some(CHANGES_FREE)
         } else {
             None
         };

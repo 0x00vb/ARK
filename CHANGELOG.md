@@ -11,7 +11,7 @@ A named agent's chat turn follows the chat's mode (ADR 0123).
 
 ### Changed
 
-- An agent's prompt line for changes that ask is one line in every mode: "Some changes ask for approval first: call the action, it runs or the person decides. You are not read-only."
+- An agent's prompt line for changes that ask is one line in every mode: "Some changes ask for approval first: call the action, it runs or the person decides. You are not read-only." An agent with `allow_mutate` and an approval gate gets the same line; "You make changes without asking." is left for `allow_mutate` with no gate.
 - `TaskSpec.later` and `TaskRecord.later` (set only by `work.later`, never read from a sent task) mark the work a turn handed off.
 
 ### Breaking

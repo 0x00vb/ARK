@@ -2914,7 +2914,11 @@ async fn an_agents_prompt_says_whether_its_changes_ask_the_person_first() {
                 .unwrap()
         };
         let (asks, acts) = (system("asks"), system("acts"));
-        assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+        if gate {
+            assert!(acts.contains(asked) && !acts.contains(free), "{acts}");
+        } else {
+            assert!(acts.contains(free) && !acts.contains(asked), "{acts}");
+        }
         if gate {
             assert!(asks.contains(asked) && !asks.contains(free), "{asks}");
         } else {

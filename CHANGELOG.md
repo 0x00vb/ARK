@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-15
+
 Pictures go with a message in a named agent's chat (ADR 0121). A delegated task that ends on a note is asked once for its result, recent answers are carried whole, and an agent knows its changes ask (ADR 0122).
 
 ### Added

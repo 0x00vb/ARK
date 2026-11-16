@@ -1,3 +1,16 @@
+# Core 0.49.0 release: pictures in agent chats, fixes from the owner's traces (2026-11-15)
+
+| Release state | Value |
+| --- | --- |
+| Latest tag | v0.49.0 (2026-11-15), over v0.48.1 (bee8398). ADR 0121 (pictures go with an agent chat message), ADR 0122 (a note after narrated calls is nudged once, recent answers carried whole) |
+| Change | `submit_task` and `work_admit` take `task.images` (person only; sha256 and size checked when the turn starts; refused for delegation, `agents.start`, schedules, automations, group turns); `hello` answers `images: true` and a chat asks its own runtime; `chatView` passes pictures. A brief task's one-line note after narrated calls gets one nudge; recent answers carried up to 4000 and 2000 characters with their lines; the authority line in an agent's prompt when it has someone to ask. Breaking: `TaskSpec.images` |
+| Found from | The owner on 2026-11-15: a picture dropped in an agent chat only said "Screenshot..."; the trace review `../board/evidence/trace-review-20261115/REPORT.md` |
+| Gates | qa (haiku): plan gates for both (images: 3 blockers; traces: 1 blocker, 4 majors), implementation gates (images: 3 blockers, then a recheck pass with should-fix items; traces: 1 blocker, then a recheck pass). Live Haiku: a picture of a red circle with "42" described correctly; an agent with changes asking called `files.write` and was approved, no "read-only" claim. The live rerun of the nudge rule on the final code was refused by the permission classifier for a subagent and waits for the owner |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests (one run before the release commit failed `conversations` `search_finds_a_fact...` on a score tie, 15 of 15 alone, card `recall-search-tie-20261115`), node 22 of 22, WebKit 178 of 178 plus `chat-view-images` 11 of 11 (now in `ci.sh`), page suite 67 of 69 (the 2 known), notification 3 of 3, release build, simulated benchmark no delta against the regenerated baseline (23 workloads) |
+| Consumer | Desktop 0.17.0 pins this tag |
+| Not verified | A picture dropped in the real Desktop window with a live model; the phone (card `phone-agent-images-20261115`) |
+| Evidence | `../board/evidence/agent-chat-images-20261115/`, `../board/evidence/trace-fixes-20261115/` |
+
 # Pictures in agent chats: ADR 0121 on branch agent-images, not released (2026-11-15)
 
 | State | Value |

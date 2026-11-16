@@ -836,7 +836,10 @@ async function agents(page) {
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
   await page.evaluate(async () => {
     await window.ark.call("spawn_agent", { spec: { name: "scribe", tools: ["notes.*"] } });
-    await window.ark.call("submit_task", { agent: "scribe", task: { objective: "save the notes" } });
+    // A chat set to ask before every change (a new chat is Auto, ADR 0107 and 0123).
+    const { conversation } = await window.ark.call("agent_conversation_start", { agent: "scribe" });
+    await window.ark.call("chat_execution_mode", { session: conversation, mode: "manual", revision: 0 });
+    await window.ark.call("submit_task", { agent: "scribe", task: { objective: "save the notes", thread: conversation } });
   });
   const card = page.locator(".asks .approval");
   await card.waitFor();
@@ -906,7 +909,7 @@ async function agentChat(page) {
     ark.on("ark:approval_closed", (m) => { approvals.delete(m.id); paint(); });
     ark.panel({ id: "agent-chat", title: "Scribe", fill: true, render(el) {
       view = ark.chatView(el, {
-        submit: (text) => ark.call("submit_task", { agent: "scribe", task: { objective: text } }),
+        submit: (text) => ark.call("submit_task", { agent: "scribe", task: { objective: text, thread: probe.chat } }),
         stop: () => {
           probe.stops++;
           const t = turns.find((x) => x.live);
@@ -918,6 +921,9 @@ async function agentChat(page) {
     } });
     ark.openPanel("agent-chat");
     await ark.call("spawn_agent", { spec: { name: "scribe", tools: ["notes.*"] } });
+    // A chat set to ask before every change (a new chat is Auto, ADR 0107 and 0123).
+    probe.chat = (await ark.call("agent_conversation_start", { agent: "scribe" })).conversation;
+    await ark.call("chat_execution_mode", { session: probe.chat, mode: "manual", revision: 0 });
   });
   const pane = page.locator(".chat-view");
   await pane.locator("textarea").fill("Save the notes");

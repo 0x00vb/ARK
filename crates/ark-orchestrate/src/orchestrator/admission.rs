@@ -463,7 +463,6 @@ impl Inner {
                 "a schedule cannot carry pictures".into(),
             ));
         }
-        let images = self.admit_images(&spec, &Origin::External)?;
         let agent = match &target {
             WorkTarget::General { .. } => None,
             WorkTarget::Agent { name } => {
@@ -484,6 +483,10 @@ impl Inner {
                 Some(agent)
             }
         };
+        let scope = agent
+            .as_ref()
+            .map_or_else(|| self.project.id.clone(), |a| ProjectId(a.scope.clone()));
+        let images = self.admit_images(&spec, &Origin::External, &scope)?;
         if matches!(target, WorkTarget::General { .. })
             && (!spec.after.is_empty()
                 || !spec.rules.is_empty()

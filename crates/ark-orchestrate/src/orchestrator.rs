@@ -76,7 +76,9 @@ mod results;
 pub use resolution::{WorkFailure, WorkRunRef};
 mod threads;
 pub use exchange::{known, said, Known, Said};
-pub use threads::{agent_threads, latest_thread_title, person_tasks, AgentThread};
+pub use threads::{
+    agent_chat_scope, agent_threads, latest_thread_title, person_tasks, AgentThread,
+};
 mod work;
 mod work_snapshot;
 pub use work_snapshot::{WorkEntry, WorkPage, WorkTemplate};
@@ -2819,15 +2821,15 @@ impl Inner {
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
-        let images = self.admit_images(&spec, &origin)?;
+        let dest = self
+            .scope_of(owner)
+            .ok_or_else(|| OrchError::UnknownAgent(owner.into()))?;
+        let images = self.admit_images(&spec, &origin, &dest)?;
         let id = format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
             Origin::External => self.project.id.clone(),
         };
-        let dest = self
-            .scope_of(owner)
-            .ok_or_else(|| OrchError::UnknownAgent(owner.into()))?;
         let inputs = self.share_artifacts(&source, &dest, &spec.artifacts)?;
         let book = RuleBook::new(&self.engine.store);
         for b in &spec.rules {
@@ -4177,7 +4179,14 @@ impl Inner {
                 })))
             })
         };
-        let pictures = match self.start_pictures(&task.images).await {
+        let pictures = match self
+            .start_pictures(
+                &task.images,
+                &ProjectId(agent.scope.clone()),
+                &format!("{owner}'s folder"),
+            )
+            .await
+        {
             Ok(pictures) => pictures,
             Err(why) => return Attempt::Fatal(why),
         };

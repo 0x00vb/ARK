@@ -314,7 +314,7 @@ async fn a_picture_that_changed_or_was_removed_fails_the_task_and_names_it() {
     assert_eq!(removed.state, TaskState::Failed);
     assert_eq!(
         removed.error.as_deref(),
-        Some("The picture gone.png changed or was removed after it was sent.")
+        Some("The picture gone.png is not in w's folder.")
     );
     assert_eq!(ended(unchanged).await.state, TaskState::Done);
 }
@@ -360,4 +360,90 @@ fn records_from_before_images_load_and_write_without_them() {
     let with: TaskSpec =
         serde_json::from_value(json!({"objective": "x", "images": ["a.png"]})).unwrap();
     assert_eq!(with.images, ["a.png"]);
+}
+
+/// Gives `w`'s agent a folder of its own and writes `shot.png` there only.
+fn own_folder(w: &World, agent: &str) -> std::path::PathBuf {
+    let scope = ProjectId(w.o.agent(agent).unwrap().scope);
+    let own = tempfile::tempdir().unwrap().keep();
+    let own = std::fs::canonicalize(own).unwrap();
+    w.ark.engine().set_workspace(&scope, &own).unwrap();
+    own
+}
+
+#[tokio::test]
+async fn pictures_are_read_from_the_agents_own_folder() {
+    let w = world(true, 0).await;
+    let own = own_folder(&w, "w");
+    std::fs::write(own.join("mine.png"), PIXEL).unwrap();
+    let id =
+        w.o.submit("w", person("what is this", &["mine.png"]))
+            .unwrap();
+    let done = w.o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(done.images[0].path, "mine.png");
+    let seen: usize = pictures_per_request(&w.model).iter().sum();
+    assert!(
+        seen > 0,
+        "the model was shown the picture from the agent's folder"
+    );
+
+    refused(
+        w.o.submit("w", person("old place", &["shot.png"])),
+        "shot.png",
+    );
+    assert_eq!(
+        w.o.tasks().len(),
+        1,
+        "the picture only in the project folder starts no task"
+    );
+
+    let other =
+        w.o.submit("lead", person("lead has none", &["shot.png"]))
+            .unwrap();
+    let ended = w.o.wait(&other).await.unwrap();
+    assert_eq!(
+        ended.state,
+        TaskState::Done,
+        "an agent without a folder reads the project folder"
+    );
+}
+
+#[tokio::test]
+async fn a_picture_admitted_from_the_old_folder_fails_naming_the_agents_folder() {
+    let w = world(true, 0).await;
+    w.hold.store(true, Ordering::SeqCst);
+    let first = w.o.submit("w", person("first", &[])).unwrap();
+    let queued = w.o.submit("w", person("queued", &["shot.png"])).unwrap();
+    own_folder(&w, "w");
+    w.hold.store(false, Ordering::SeqCst);
+    w.o.wait(&first).await.unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), w.o.wait(&queued))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ended.state, TaskState::Failed);
+    assert_eq!(
+        ended.error.as_deref(),
+        Some("The picture shot.png is not in w's folder.")
+    );
+}
+
+#[tokio::test]
+async fn a_new_agent_chat_admits_its_pictures_from_the_agents_folder() {
+    let w = world(true, 0).await;
+    let own = own_folder(&w, "w");
+    std::fs::write(own.join("mine.png"), PIXEL).unwrap();
+    let admit = |picture: &'static str, request: &'static str| {
+        w.o.admit_work(
+            WorkTarget::Agent { name: "w".into() },
+            person("look", &[picture]),
+            "window",
+            request,
+        )
+    };
+    let receipt = admit("mine.png", "r1").await.unwrap();
+    assert!(!receipt.id.is_empty());
+    let error = admit("shot.png", "r2").await.unwrap_err().to_string();
+    assert!(error.contains("shot.png"), "{error}");
 }

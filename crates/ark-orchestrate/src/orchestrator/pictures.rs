@@ -12,6 +12,7 @@ impl Inner {
         &self,
         spec: &TaskSpec,
         origin: &Origin,
+        scope: &ProjectId,
     ) -> Result<Vec<TaskImage>, OrchError> {
         if spec.images.is_empty() {
             return Ok(Vec::new());
@@ -27,7 +28,7 @@ impl Inner {
                 "pictures go only with a message the person sends".into(),
             ));
         }
-        let root = self.engine.workspace_dir(&self.project.id)?;
+        let root = self.engine.workspace_dir(scope)?;
         let paths = spec.images.clone();
         let read = off_the_runtime(|| ark_files::images(&root, &paths))
             .map_err(|error| OrchError::NotAllowed(error.to_string()))?;
@@ -41,21 +42,25 @@ impl Inner {
             .collect())
     }
 
-    /// The admitted pictures as the model is shown them. A file that is gone or is another file
-    /// since admission fails the turn, naming it.
+    /// The admitted pictures as the model is shown them. A file that is not in the folder of
+    /// `scope` (`whose`: how the failure names it) or is another file since admission fails
+    /// the turn, naming it.
     pub(super) async fn start_pictures(
         &self,
         admitted: &[TaskImage],
+        scope: &ProjectId,
+        whose: &str,
     ) -> Result<Vec<ark_model::Picture>, String> {
         if admitted.is_empty() {
             return Ok(Vec::new());
         }
         let root = self
             .engine
-            .workspace_dir(&self.project.id)
+            .workspace_dir(scope)
             .map_err(|error| error.to_string())?;
         let admitted = admitted.to_vec();
-        tokio::task::spawn_blocking(move || read_admitted(&root, &admitted))
+        let whose = whose.to_string();
+        tokio::task::spawn_blocking(move || read_admitted(&root, &admitted, &whose))
             .await
             .map_err(|error| error.to_string())?
     }
@@ -75,10 +80,15 @@ fn off_the_runtime<T>(read: impl FnOnce() -> T) -> T {
 fn read_admitted(
     root: &std::path::Path,
     admitted: &[TaskImage],
+    whose: &str,
 ) -> Result<Vec<ark_model::Picture>, String> {
     admitted
         .iter()
         .map(|was| {
+            let there = ark_files::inside(root, &was.path).is_ok_and(|path| path.is_file());
+            if !there {
+                return Err(format!("The picture {} is not in {whose}.", was.path));
+            }
             let changed = || {
                 format!(
                     "The picture {} changed or was removed after it was sent.",
@@ -119,7 +129,7 @@ impl Orchestrator {
         )?;
         let pictures = self
             .inner
-            .start_pictures(&admitted)
+            .start_pictures(&admitted, &self.project().id, "the project folder")
             .await
             .map_err(OrchError::NotAllowed)?;
         Ok((admitted.into_iter().map(|i| i.path).collect(), pictures))

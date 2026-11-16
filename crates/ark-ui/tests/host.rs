@@ -726,7 +726,7 @@ async fn a_picture_removed_before_a_new_chat_starts_stops_it_and_names_the_file(
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "The picture shot.png changed or was removed after it was sent."
+        "The picture shot.png is not in the project folder."
     );
     assert!(model.recorded().is_empty());
 }

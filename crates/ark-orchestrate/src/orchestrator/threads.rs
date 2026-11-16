@@ -55,6 +55,39 @@ fn is_conversation(record: &SessionRecord, scope: &str) -> bool {
         && record.execution_scope.is_none()
 }
 
+/// The scope of the agent whose conversation `session` is, when that agent belongs to
+/// `project`. Read from the store alone: the session's project must be the scope of a live
+/// agent of `project`, whose own project is a child of `project`, and the session must be a
+/// conversation of it (not Work's or an automation's). Anything else is `None`.
+pub fn agent_chat_scope(
+    engine: &Engine,
+    project: &str,
+    session: &str,
+) -> Result<Option<ProjectId>, OrchError> {
+    let Some(value) = engine.store.get_session(session)? else {
+        return Ok(None);
+    };
+    let record: SessionRecord = serde_json::from_value(value)?;
+    for value in engine.store.list_records(AGENT, Some(project))? {
+        let Ok(agent) = serde_json::from_value::<AgentRecord>(value) else {
+            continue;
+        };
+        if agent.project != project
+            || agent.scope != record.project.as_str()
+            || agent.state == AgentState::Terminated
+            || !is_conversation(&record, &agent.scope)
+        {
+            continue;
+        }
+        let child = engine
+            .store
+            .get_project(&record.project)?
+            .is_some_and(|scope| scope.parent.as_ref().map(ProjectId::as_str) == Some(project));
+        return Ok(child.then_some(record.project));
+    }
+    Ok(None)
+}
+
 /// The agent's state from the tasks it runs: a pause and an end stick; otherwise it works
 /// while any task works, waits while all wait on others, and is idle without any.
 pub(super) fn derived_state(current: AgentState, running: &[TaskState]) -> AgentState {

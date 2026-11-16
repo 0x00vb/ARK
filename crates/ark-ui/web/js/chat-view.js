@@ -30,6 +30,13 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     if (!next || next.runtime !== origin?.runtime || next.project !== origin?.project) throw Error("The conversation belongs to another project or computer");
     return {...next};
   }});
+  // The chat's own file location (an agent's chat names its folder): its files are read, listed,
+  // uploaded and opened there, not at the window's location.
+  const fileCall = (method) => method === "files" || method.startsWith("file_") || method.startsWith("upload_");
+  if (location) {
+    api.call = (method, params) => (fileCall(method) ? base.at(api.location) : base).call(method, params);
+    api.openFile = (path, params) => base.at(api.location).openFile(path, params);
+  }
   let submitDisabled = false;
   let unavailable = false;
   // `/new` and `/history [words]` mean the same in every conversation: the window acts on them.

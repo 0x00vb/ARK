@@ -54,9 +54,25 @@ pub(crate) fn list(root: &Path, rel: &str) -> anyhow::Result<(Vec<Entry>, usize)
     Ok((v, more))
 }
 
+/// `rel` is a file of the folder, or the error a person reads when it is not: the file's name
+/// and the folder it is not in. A path that leaves the folder is refused as everywhere.
+pub(crate) fn present(root: &Path, rel: &str) -> anyhow::Result<()> {
+    let path = ark_files::inside(root, rel)?;
+    if path.exists() {
+        return Ok(());
+    }
+    let name = rel.trim().rsplit('/').next().unwrap_or(rel);
+    let folder = root.file_name().map_or_else(
+        || root.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    anyhow::bail!("{name} is not in {folder}")
+}
+
 /// A file as the window draws it: `kind`, `version`, and its `text`, `sheets` or `blocks`. A
 /// file that cannot be shown comes back without them, with `why`.
 pub(crate) fn read(root: &Path, rel: &str) -> anyhow::Result<Value> {
+    present(root, rel)?;
     let path = ark_files::inside(root, rel)?;
     let meta = std::fs::metadata(&path)?;
     if meta.is_dir() {
@@ -131,6 +147,7 @@ pub(crate) fn edit(
 /// version. Through `call` like everything else, so the desktop and a browser get it the same way.
 pub(crate) fn media(root: &Path, rel: &str) -> anyhow::Result<Value> {
     use base64::Engine as _;
+    present(root, rel)?;
     let (bytes, media_type, version) = ark_files::media(root, rel)?;
     Ok(json!({
         "media_type": media_type,
@@ -143,6 +160,7 @@ pub(crate) fn media(root: &Path, rel: &str) -> anyhow::Result<Value> {
 /// Open a spreadsheet or document in the app the computer opens it with. Only those kinds: a
 /// click never runs a script or a program from the folder.
 pub(crate) fn open_in_app(root: &Path, rel: &str) -> anyhow::Result<()> {
+    present(root, rel)?;
     let path = ark_files::inside(root, rel)?;
     if ark_files::kind_of(rel) == ark_files::Kind::Text
         || (ark_files::format_for(rel).is_none() && ark_files::view_only(rel).is_none())
@@ -157,6 +175,7 @@ pub(crate) fn open_in_app(root: &Path, rel: &str) -> anyhow::Result<()> {
 }
 
 pub(crate) fn version(root: &Path, rel: &str) -> anyhow::Result<Value> {
+    present(root, rel)?;
     Ok(json!({ "version": ark_files::version(root, rel)? }))
 }
 

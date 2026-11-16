@@ -2599,13 +2599,37 @@ impl Host {
                 .ok_or_else(|| anyhow::anyhow!("there is no chat `{}` here", r.location.session))?
         };
         anyhow::ensure!(
-            project == r.location.project,
+            project == r.location.project || self.agent_chat_scope(r)?.is_some(),
             "the resource's project does not match its chat"
         );
         self.engine
             .store
-            .get_project(&ProjectId(project.clone()))?
-            .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))
+            .get_project(&ProjectId(r.location.project.clone()))?
+            .ok_or_else(|| anyhow::anyhow!("there is no project `{}` here", r.location.project))
+    }
+
+    /// The scope of the agent whose chat `r` is opened from (ADR 0124), when the location
+    /// names a chat of an agent of its own project. The page sends a chat, never a path.
+    fn agent_chat_scope(&self, r: &ResourceRef) -> anyhow::Result<Option<ProjectId>> {
+        if r.location.session.is_empty() {
+            return Ok(None);
+        }
+        Ok(ark_interact::ark_orchestrate::agent_chat_scope(
+            &self.engine,
+            &r.location.project,
+            &r.location.session,
+        )?)
+    }
+
+    /// The project whose folder, files and file watchers `r` is about: the agent's own scope
+    /// for a file resource opened from an agent's chat, else `project`.
+    fn resource_scope(&self, r: &ResourceRef, project: &Project) -> anyhow::Result<ProjectId> {
+        if r.kind != ResourceKind::File {
+            return Ok(project.id.clone());
+        }
+        Ok(self
+            .agent_chat_scope(r)?
+            .unwrap_or_else(|| project.id.clone()))
     }
 
     fn resource_execution_project(&self, r: &ResourceRef) -> anyhow::Result<ProjectId> {
@@ -2863,7 +2887,8 @@ impl Host {
             r.kind
         );
         let project = self.resource_project(&r)?;
-        let workspace = self.engine.workspace_dir(&project.id)?;
+        let scope = self.resource_scope(&r, &project)?;
+        let workspace = self.engine.workspace_dir(&scope)?;
         let input = operation.input;
         let s = |k: &str| input[k].as_str().unwrap_or("").to_string();
         let n = |k: &str| input[k].as_u64();
@@ -2876,7 +2901,7 @@ impl Host {
                     r.id.clone()
                 };
                 self.resource_subscribers
-                    .subscribe(r.kind, project.id.as_str(), &id, r);
+                    .subscribe(r.kind, scope.as_str(), &id, r);
                 Ok(json!({}))
             }
             O::Unsubscribe => {
@@ -3030,7 +3055,7 @@ impl Host {
             O::Files => {
                 self.resource_subscribers.subscribe(
                     ResourceKind::File,
-                    project.id.as_str(),
+                    scope.as_str(),
                     "*",
                     r.clone(),
                 );
@@ -3041,11 +3066,12 @@ impl Host {
             O::FileRead => {
                 self.resource_subscribers.subscribe(
                     ResourceKind::File,
-                    project.id.as_str(),
+                    scope.as_str(),
                     &r.id,
                     r.clone(),
                 );
                 let path = self.resource_path(&r, &input).to_string();
+                crate::files::present(&workspace, &path)?;
                 let source = input["source"].as_bool().unwrap_or(false);
                 tokio::task::spawn_blocking(move || {
                     if source {
@@ -3068,7 +3094,7 @@ impl Host {
                     &s("text"),
                     base.as_deref(),
                 )?;
-                self.files_changed(&project.id, std::slice::from_ref(&r.id));
+                self.files_changed(&scope, std::slice::from_ref(&r.id));
                 Ok(value)
             }
             O::FileEdit => {
@@ -3079,7 +3105,7 @@ impl Host {
                     input.get("edits").unwrap_or(&Value::Null),
                     base.as_deref(),
                 )?;
-                self.files_changed(&project.id, std::slice::from_ref(&r.id));
+                self.files_changed(&scope, std::slice::from_ref(&r.id));
                 Ok(value)
             }
             O::FileMedia => crate::files::media(&workspace, self.resource_path(&r, &input)),
@@ -3107,6 +3133,7 @@ impl Host {
             O::FileProbe => {
                 let path = r.id;
                 tokio::task::spawn_blocking(move || {
+                    crate::files::present(&workspace, &path)?;
                     let (size, change) = ark_files::snapshot::probe(&workspace, &path)?;
                     Ok(json!({ "size": size, "change": change }))
                 })
@@ -3116,8 +3143,8 @@ impl Host {
             O::FileRestore => {
                 let restored = self
                     .engine
-                    .restore_file(&project.id, &ArtifactId(s("artifact")))?;
-                self.files_changed(&project.id, std::slice::from_ref(&restored.path));
+                    .restore_file(&scope, &ArtifactId(s("artifact")))?;
+                self.files_changed(&scope, std::slice::from_ref(&restored.path));
                 Ok(serde_json::to_value(restored)?)
             }
             O::UploadParts => {
@@ -3134,7 +3161,7 @@ impl Host {
                     tokio::task::spawn_blocking(move || crate::upload::add(&store, &id, &dir))
                         .await??;
                 let added: Vec<String> = serde_json::from_value(answer["added"].clone())?;
-                self.files_changed(&project.id, &added);
+                self.files_changed(&scope, &added);
                 Ok(answer)
             }
             O::UploadCancel => {
@@ -4674,6 +4701,9 @@ impl Host {
                     // `submit_task` and `work_admit` take `task.images` (ADR 0121). A runtime
                     // without this key drops them without saying so.
                     "images": true,
+                    // A file location may name an agent's chat, and the files are then in
+                    // that agent's folder (ADR 0124). A runtime without this key refuses it.
+                    "agent_chat_files": true,
                     // This runtime's store id: another runtime knows it by this (ADR 0052).
                     "runtime": ark_interact::held::runtime_id(&self.engine),
                 }))

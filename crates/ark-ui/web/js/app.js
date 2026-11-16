@@ -71,6 +71,10 @@ const api = {
   // hello says so). A runtime without the flag drops them without saying so. A chat asks for its
   // own runtime: `ark.at(location).taskImages()`, false for another computer.
   taskImages: () => !!state.taskImages,
+  // Whether this page's own runtime resolves an agent chat's files in the agent's folder (its
+  // hello says so). A chat asks `ark.at(location).agentChatFiles()`: false for another
+  // computer, whose runtime the page does not read.
+  agentChatFiles: () => !!state.agentChatFiles,
   on: onExt,
   call: (method, params = {}) => resourceMethod(method, params)
     ? scopedApi(currentLocation()).call(method, params)
@@ -400,6 +404,7 @@ function scopedApi(location) {
   };
   scoped.remoteResource = location.runtime !== state.runtime;
   scoped.taskImages = () => !scoped.remoteResource && !!state.taskImages;
+  scoped.agentChatFiles = () => !scoped.remoteResource && !!state.agentChatFiles;
   scoped.destinationBrowser = scoped.remoteResource || transport.kind === "browser";
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
   if (scoped.destinationBrowser) scoped.browserView = undefined;
@@ -2791,6 +2796,7 @@ async function bootOnce(again) {
   state.runtime = hello.runtime;
   state.fileSnapshots = !!hello.file_snapshots;
   state.taskImages = !!hello.images;
+  state.agentChatFiles = !!hello.agent_chat_files;
   setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;

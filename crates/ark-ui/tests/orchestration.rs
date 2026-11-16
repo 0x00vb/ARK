@@ -163,6 +163,23 @@ async fn wait_for(
     }
 }
 
+/// A conversation of `agent` the person set to ask before every change (a chat starts in Auto,
+/// ADR 0107, and the person's own turn follows it, ADR 0123).
+async fn asking_chat(host: &Client, agent: &str) -> String {
+    let started = host
+        .call("agent_conversation_start", json!({ "agent": agent }))
+        .await
+        .unwrap();
+    let chat = started["conversation"].as_str().unwrap().to_string();
+    host.call(
+        "chat_execution_mode",
+        json!({ "session": chat, "mode": "manual", "revision": 0 }),
+    )
+    .await
+    .unwrap();
+    chat
+}
+
 fn orch_type(v: &Value, ty: &str) -> bool {
     v["kind"] == "orch" && v["event"]["type"] == ty
 }
@@ -204,10 +221,11 @@ async fn a_window_creates_agents_and_tasks_and_answers_their_questions() {
         .await
         .is_err());
 
+    let chat = asking_chat(&host, "scribe").await;
     let r = host
         .call(
             "submit_task",
-            json!({ "agent": "scribe", "task": { "objective": "save the notes" } }),
+            json!({ "agent": "scribe", "task": { "objective": "save the notes", "thread": chat } }),
         )
         .await
         .unwrap();
@@ -347,10 +365,11 @@ async fn an_agents_task_reads_as_a_chat() {
     )
     .await
     .unwrap();
+    let chat = asking_chat(&host, "scribe").await;
     let r = host
         .call(
             "submit_task",
-            json!({ "agent": "scribe", "task": { "objective": "save the notes" } }),
+            json!({ "agent": "scribe", "task": { "objective": "save the notes", "thread": chat } }),
         )
         .await
         .unwrap();
@@ -660,6 +679,16 @@ async fn a_scheduled_run_posts_its_result_in_the_chat_and_the_window_shows_it() 
     )
     .await
     .unwrap();
+    let ask = wait_for(&mut rx, "the schedule's question", |v| {
+        v["kind"] == "approval"
+    })
+    .await;
+    host.call(
+        "approve",
+        json!({ "id": ask["id"], "decision": "allow_once" }),
+    )
+    .await
+    .unwrap();
     wait_for(&mut rx, "the turn's end", |v| v["kind"] == "turn_finished").await;
     let session = host.call("summary", json!({})).await.unwrap()["session"]["id"]
         .as_str()
@@ -702,10 +731,11 @@ fn an_agents_question_survives_a_restart_and_any_client_answers_it() {
             host.call("spawn_agent", json!({ "spec": spec }))
                 .await
                 .unwrap();
+            let chat = asking_chat(&host, "scribe").await;
             let r = host
                 .call(
                     "submit_task",
-                    json!({ "agent": "scribe", "task": { "objective": "save the notes" } }),
+                    json!({ "agent": "scribe", "task": { "objective": "save the notes", "thread": chat } }),
                 )
                 .await
                 .unwrap();

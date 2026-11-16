@@ -270,6 +270,50 @@ impl Inner {
             .then_some(offer)
     }
 
+    /// The mode `task`'s harness runs in (ADR 0123). `session` is the conversation it runs in.
+    /// The person's own turn follows its chat. The work a turn handed off with `work.later`
+    /// follows the asking chat as it is when the work starts, but only when that turn is the
+    /// person's own, is this agent's, and is in that chat. Everything else asks (Manual).
+    pub(super) fn task_mode(
+        &self,
+        task: &TaskRecord,
+        agent: &AgentRecord,
+        session: &Session,
+    ) -> ark_core::ExecutionMode {
+        use ark_core::ExecutionMode::Manual;
+        if agent.on_program() {
+            return Manual;
+        }
+        if task.own_chat_turn() {
+            return session.execution_mode();
+        }
+        if !task.later || task.origin != Origin::External {
+            return Manual;
+        }
+        let (Some(turn), Some(chat)) = (task.work.as_deref(), task.report_to.as_deref()) else {
+            return Manual;
+        };
+        let from_turn = {
+            let st = self.state.lock().unwrap();
+            st.tasks.get(turn).is_some_and(|t| {
+                t.record.owner == task.owner
+                    && t.record.own_chat_turn()
+                    && turn_chat(&t.record, agent).as_deref() == Some(chat)
+            })
+        };
+        if !from_turn {
+            return Manual;
+        }
+        match Session::open(&self.engine, chat) {
+            Ok(Some(asking)) => asking.execution_mode(),
+            Ok(None) => Manual,
+            Err(error) => {
+                tracing::warn!(%chat, %error, "could not read the chat's mode; its work asks");
+                Manual
+            }
+        }
+    }
+
     /// Refuse a schedule's result chat that is gone or is not in this project or one of its agents.
     pub(super) fn check_result_chat(&self, chat: &str) -> Result<(), OrchError> {
         let record = self
@@ -380,6 +424,7 @@ impl Inner {
             .report_to(&chat)
             .thread(lane.id().as_str());
         spec.reply = true;
+        spec.later = true;
         let id = self.create_run(agent, spec, origin, None, Some(&key))?;
         // A Stop on the turn that came before the hand-off was made means no work: the task
         // ends unstarted. A Stop after it does not reach the work; the person stops that from

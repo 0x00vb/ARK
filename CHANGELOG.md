@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+A named agent's chat turn follows the chat's mode (ADR 0123).
+
+### Fixed
+
+- A named agent's chat in Auto no longer asks before every change. The orchestrated harness ran as Manual whatever the chat's mode was; the person's own turn in an agent's chat, and the `work.later` work of such a turn, now take the chat's mode (Auto runs what does not ask every time, Manual asks, Plan offers no changes). Group turns, delegated and started work, schedules and automations keep asking.
+- An agent allowed to act alone (`allow_mutate`) still asks for actions that ask every time (`ask_each_time`, `person_only`) when there is someone to ask. It ran them without a question before. This holds for every host of the harness (the plain chat and the SDK too): with `allow_mutate` and an approval gate they ask, with no gate they act alone as before. It includes `agents.schedule` in ask mode and `computer.*` steps.
+
+### Changed
+
+- An agent's prompt line for changes that ask is one line in every mode: "Some changes ask for approval first: call the action, it runs or the person decides. You are not read-only."
+- `TaskSpec.later` and `TaskRecord.later` (set only by `work.later`, never read from a sent task) mark the work a turn handed off.
+
+### Breaking
+
+- `TaskSpec` and `TaskRecord` have a new public field, `later: bool`. Build a `TaskSpec` with `TaskSpec::new` (or `..Default::default()`), or add `later: false`. Stored tasks load as before.
+
 ## [0.49.0] - 2026-11-15
 
 Pictures go with a message in a named agent's chat (ADR 0121). A delegated task that ends on a note is asked once for its result, recent answers are carried whole, and an agent knows its changes ask (ADR 0122).

@@ -338,6 +338,10 @@ pub struct TaskSpec {
     /// ([`ark_runtime::PostKind::Message`]). Set by `work.later` (ADR 0118).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reply: bool,
+    /// Made by `work.later` (ADR 0123). Never read from a client's task: it decides whether the
+    /// work follows its chat's mode.
+    #[serde(skip)]
+    pub later: bool,
     /// A group chat's driver submitted this as a member's turn (ADR 0113). With `person`, it is
     /// what makes a task a chat turn that may hand work off (`work.later`, ADR 0118).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

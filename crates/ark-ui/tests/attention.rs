@@ -105,6 +105,22 @@ async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow
     .await
 }
 
+/// A conversation of `agent` the person set to ask before every change (a chat starts in Auto,
+/// ADR 0107, and the person's own turn follows it, ADR 0123).
+async fn asking_chat(host: &Arc<Host>, agent: &str) -> String {
+    let started = project_call(host, "agent_conversation_start", json!({ "agent": agent }))
+        .await
+        .unwrap();
+    let chat = started["conversation"].as_str().unwrap().to_string();
+    host.call(
+        "chat_execution_mode",
+        json!({ "session": chat, "mode": "manual", "revision": 0 }),
+    )
+    .await
+    .unwrap();
+    chat
+}
+
 async fn wait_for(
     rx: &mut tokio::sync::broadcast::Receiver<Value>,
     what: &str,
@@ -266,10 +282,11 @@ async fn one_list_across_projects_in_both_front_ends() {
     )
     .await
     .unwrap();
+    let chat = asking_chat(&host, "scribe").await;
     project_call(
         &host,
         "submit_task",
-        json!({ "agent": "scribe", "task": { "objective": "file the notes" } }),
+        json!({ "agent": "scribe", "task": { "objective": "file the notes", "thread": chat } }),
     )
     .await
     .unwrap();
@@ -313,10 +330,11 @@ async fn the_terminal_answers_a_question_in_another_project() {
     )
     .await
     .unwrap();
+    let chat = asking_chat(&host, "scribe").await;
     project_call(
         &host,
         "submit_task",
-        json!({ "agent": "scribe", "task": { "objective": "file the notes" } }),
+        json!({ "agent": "scribe", "task": { "objective": "file the notes", "thread": chat } }),
     )
     .await
     .unwrap();

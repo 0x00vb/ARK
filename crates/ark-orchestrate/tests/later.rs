@@ -439,8 +439,16 @@ async fn the_work_asks_where_the_turn_asked_and_acts_where_it_acted() {
             mate.groups = vec!["g1".into()];
             w.o.spawn(mate).await.unwrap();
         }
-        // The turn's own save is the baseline: the work must do what the turn does.
-        let turn = w.o.run("ceo", said("zzsave a")).await.unwrap();
+        // The chat is in ask mode (a chat nobody chose a mode for is Auto and asks nothing,
+        // ADR 0123). The turn's own save is the baseline: the work must do what the turn does.
+        let chat = w.o.start_thread("ceo").unwrap();
+        let mut s = Session::open(w.ark.engine(), &chat).unwrap().unwrap();
+        s.set_execution_mode(w.ark.engine(), 0, ExecutionMode::Manual)
+            .unwrap();
+        let turn =
+            w.o.run("ceo", said("zzsave a").thread(&chat))
+                .await
+                .unwrap();
         let in_turn = w.saves.load(Ordering::SeqCst);
         assert_eq!(in_turn, saved, "baseline alone={alone} group={in_group}");
         let _ = turn;
@@ -450,7 +458,7 @@ async fn the_work_asks_where_the_turn_asked_and_acts_where_it_acted() {
             !alone,
             "the turn asks unless it acts alone"
         );
-        w.o.run("ceo", said("zzdig the filings and zzsave"))
+        w.o.run("ceo", said("zzdig the filings and zzsave").thread(&chat))
             .await
             .unwrap();
         until("work ends", || {

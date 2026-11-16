@@ -236,6 +236,7 @@ mod tests {
             item: None,
             report_to: None,
             reply: false,
+            later: false,
             group_turn: false,
             work: None,
             reported: false,

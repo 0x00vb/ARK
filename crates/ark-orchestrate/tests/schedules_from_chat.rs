@@ -511,13 +511,17 @@ async fn three_failed_runs_pause_it_and_the_chat_is_told() {
 }
 
 #[tokio::test]
-async fn an_agent_that_acts_alone_does_not_ask_in_ask_mode() {
+async fn an_agent_that_acts_alone_still_asks_for_a_schedule_in_ask_mode() {
     let w = world(false);
     agent(&w, "ceo", |s| s.allow_mutate(true)).await;
     let chat = chat_in(&w, "ceo", ExecutionMode::Manual);
     w.o.run("ceo", said("zzmake").thread(&chat)).await.unwrap();
-    assert_eq!(w.asked.load(Ordering::SeqCst), 0);
-    assert_eq!(w.o.schedules().len(), 1);
+    assert_eq!(
+        w.asked.load(Ordering::SeqCst),
+        1,
+        "a schedule asks every time in ask mode, whatever the agent may do alone (ADR 0123)"
+    );
+    assert!(w.o.schedules().is_empty(), "this person refused");
 }
 
 #[tokio::test]

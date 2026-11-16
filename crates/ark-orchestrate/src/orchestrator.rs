@@ -1453,7 +1453,7 @@ fn reports(t: &TaskRecord) -> Option<(bool, String)> {
 }
 
 /// What an agent is told about its changes, from the authority its task runs with.
-const CHANGES_ASK: &str = "Your changes ask for approval first: call the action and it is approved or refused. You are not read-only.";
+const CHANGES_ASK: &str = "Some changes ask for approval first: call the action, it runs or the person decides. You are not read-only.";
 const CHANGES_FREE: &str = "You make changes without asking.";
 
 enum Attempt {
@@ -4168,17 +4168,14 @@ impl Inner {
                 Err(error) => return Attempt::Fatal(error.to_string()),
             }
         } else {
-            match &self.approvals {
-                Some(gate) if !allow_mutate => {
-                    Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
-                        orch: self.clone(),
-                        agent: owner.to_string(),
-                        task: id.to_string(),
-                        gate: gate.clone(),
-                    }))))
-                }
-                _ => None,
-            }
+            self.approvals.as_ref().map(|gate| {
+                Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
+                    orch: self.clone(),
+                    agent: owner.to_string(),
+                    task: id.to_string(),
+                    gate: gate.clone(),
+                })))
+            })
         };
         let pictures = match self.start_pictures(&task.images).await {
             Ok(pictures) => pictures,
@@ -4191,6 +4188,7 @@ impl Inner {
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(allow_mutate)
+            .execution_mode(self.task_mode(&task, &agent, &session))
             .brief_task(!task.is_chat_turn())
             .approvals(approvals.clone())
             .cancel(Some(attempt_cancel.clone()))

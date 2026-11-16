@@ -930,7 +930,7 @@ impl Approver for Refuse {
 async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_act_alone() {
     let ops = through_the_group(false).await;
     let (asks, free) = (
-        "Your changes ask for approval first",
+        "Some changes ask for approval first",
         "You make changes without asking.",
     );
     assert!(
@@ -948,7 +948,7 @@ async fn work_a_member_starts_through_the_group_asks_even_on_an_agent_that_may_a
 async fn work_through_the_group_with_a_gate_is_told_it_asks_and_does_ask() {
     let ops = through_the_group(true).await;
     let (asks, free) = (
-        "Your changes ask for approval first",
+        "Some changes ask for approval first",
         "You make changes without asking.",
     );
     assert!(

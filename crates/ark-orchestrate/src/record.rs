@@ -421,6 +421,9 @@ pub struct TaskRecord {
     /// Its result is posted as the agent's own message ([`crate::TaskSpec::reply`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reply: bool,
+    /// Made by `work.later` ([`crate::TaskSpec::later`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub later: bool,
     /// The work that handed it off ([`crate::TaskSpec::work`]); a turn that continues that
     /// work and takes it up writes its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -459,6 +462,12 @@ impl TaskRecord {
             && self.submission.is_none()
             && self.item.is_none()
             && !self.reply
+    }
+
+    /// The person's own turn in a chat with the agent: a chat turn the person typed, not a group
+    /// chat's member turn (ADR 0123).
+    pub(crate) fn own_chat_turn(&self) -> bool {
+        self.is_chat_turn() && self.person && !self.group_turn
     }
 
     pub(crate) fn queued(
@@ -523,6 +532,7 @@ impl TaskRecord {
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
             reply: spec.reply,
+            later: spec.later,
             work: spec.work.clone(),
             reported: false,
             question: None,
@@ -570,6 +580,63 @@ mod tests {
         let back: TaskRecord =
             serde_json::from_value(serde_json::to_value(&with).unwrap()).unwrap();
         assert_eq!(back.images, with.images);
+    }
+
+    fn person_turn() -> TaskRecord {
+        let mut spec = TaskSpec::new("x");
+        spec.person = true;
+        TaskRecord::queued(
+            "t-1".into(),
+            "p".into(),
+            "w".into(),
+            &spec,
+            Origin::External,
+            Budget::default(),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn only_the_persons_own_chat_turn_follows_the_chats_mode() {
+        let own = person_turn();
+        assert!(own.own_chat_turn());
+        type Change = fn(&mut TaskRecord);
+        let cases: [(&str, Change); 9] = [
+            ("group turn", |t| t.group_turn = true),
+            ("not the person", |t| t.person = false),
+            ("automation run", |t| t.run = Some("r".into())),
+            ("schedule", |t| t.schedule = Some("s".into())),
+            ("work conversation", |t| t.conversation = Some("c".into())),
+            ("submission", |t| t.submission = Some("s".into())),
+            ("board item", |t| t.item = Some("w-1".into())),
+            ("work handed off", |t| t.reply = true),
+            ("delegated or started", |t| {
+                t.origin = Origin::Agent {
+                    agent: "a".into(),
+                    task: "t-0".into(),
+                }
+            }),
+        ];
+        for (what, change) in cases {
+            let mut t = own.clone();
+            change(&mut t);
+            assert!(!t.own_chat_turn(), "{what}");
+        }
+    }
+
+    #[test]
+    fn a_task_stored_before_the_later_mark_loads_without_it() {
+        let mut t = person_turn();
+        assert!(!t.later);
+        assert!(serde_json::to_value(&t).unwrap().get("later").is_none());
+        t.later = true;
+        let back: TaskRecord = serde_json::from_value(serde_json::to_value(&t).unwrap()).unwrap();
+        assert!(back.later);
+        let spec: TaskSpec = serde_json::from_value(serde_json::json!({
+            "objective": "x", "later": true
+        }))
+        .unwrap();
+        assert!(!spec.later, "a sent task never carries the mark");
     }
 
     #[test]

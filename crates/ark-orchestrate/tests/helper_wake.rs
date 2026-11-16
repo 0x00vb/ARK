@@ -93,6 +93,20 @@ impl Provider for Model {
         if text.contains("zzping") {
             return Ok(answer("pong"));
         }
+        if text.contains("zzbreak") {
+            if started {
+                return Err(ProviderError::Api {
+                    provider: "m".into(),
+                    detail: "the turn broke".into(),
+                });
+            }
+            return Ok(start(&[("h2", "part slow".into())]));
+        }
+        if text.contains("zznarrate") && !started {
+            let mut c = start(&[("h1", "part one".into())]);
+            c.content = "Starting the translator on part one.".into();
+            return Ok(c);
+        }
         if started {
             return Ok(answer("When they report back, I will combine them."));
         }
@@ -290,4 +304,53 @@ async fn a_colleague_an_agent_creates_works_in_that_agents_folder() {
         engine.workspace_dir(&scope).unwrap(),
         "an agent the person made keeps the project's folder"
     );
+}
+
+#[tokio::test]
+async fn a_turn_that_narrates_its_start_and_ends_on_one_line_is_not_asked_again() {
+    let w = world("one").await;
+    let turn = w.o.run("ceo", said("zznarrate translate")).await.unwrap();
+    assert_eq!(
+        turn.result.as_deref(),
+        Some("When they report back, I will combine them.")
+    );
+    settled(&w.o).await;
+    let asked =
+        w.m.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| {
+                r.contains("zznarrate") && !r.contains(CONTINUED) && !r.contains("delegated by ceo")
+            })
+            .count();
+    assert_eq!(asked, 2, "the start, then the one-line reply: no nudge");
+    assert_eq!(continued(&w.o).len(), 1);
+}
+
+#[tokio::test]
+async fn helpers_of_a_turn_that_failed_do_not_continue_the_chat() {
+    let w = world("one").await;
+    let turn = w.o.run("ceo", said("zzbreak translate")).await.unwrap();
+    assert_eq!(turn.state, TaskState::Failed);
+    w.m.gate.notify_one();
+    settled(&w.o).await;
+    assert!(continued(&w.o).is_empty());
+}
+
+#[tokio::test]
+async fn the_stored_continuation_has_no_persons_message() {
+    let w = world("one").await;
+    w.o.run("ceo", said("zzfan translate")).await.unwrap();
+    settled(&w.o).await;
+    let chat = w.o.agent("ceo").unwrap().session.expect("a chat");
+    let turns = ark_runtime::session::Session::open(w.ark.engine(), &chat)
+        .unwrap()
+        .expect("the chat")
+        .transcript(w.ark.engine(), None)
+        .unwrap();
+    assert_eq!(turns.len(), 2);
+    assert!(turns[0].input.contains("zzfan"));
+    assert_eq!(turns[1].input, "", "nobody wrote the continuation");
+    assert_eq!(turns[1].answer, "Combined.");
 }

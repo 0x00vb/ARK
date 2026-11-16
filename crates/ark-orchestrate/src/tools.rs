@@ -423,7 +423,7 @@ impl Adapter for AgentTools {
             })));
         }
         if self.can_create || !self.contacts.is_empty() {
-            v.push(ActionDescriptor::new(
+            let start = ActionDescriptor::new(
             START,
             "start an independent conversation with a colleague",
             RiskTier::Observe,
@@ -434,7 +434,14 @@ impl Adapter for AgentTools {
                 "objective": { "type": "string", "maxLength": 8000, "description": if self.comes_back { "self-contained brief; returns immediately; when every colleague you started has finished, their results come back to this chat and you continue" } else { "self-contained brief; returns immediately, no waiting or automatic reply" } },
                 "context": { "type": "string", "maxLength": 16000, "description": "necessary information only; the recipient does not see your transcript" }
             }
-        })));
+        }));
+            // Results come back to the chat: a one-line "when they report back" closes the turn
+            // (ADR 0126).
+            v.push(if self.comes_back {
+                start.ends_with_short_reply()
+            } else {
+                start
+            });
         }
         if !self.delegates.is_empty() {
             let names: Vec<&str> = self.delegates.iter().map(|(n, _)| n.as_str()).collect();

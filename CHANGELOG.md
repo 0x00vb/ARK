@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+Colleagues started from a person's chat with a named agent continue that chat when they finish (ADR 0126).
+
+### Changed
+- When every colleague a person's chat turn started with `agents.start` has ended, the agent continues that chat once with their results (as data), in the chat's mode. At most 3 continuations per person message; nothing continues when the person stopped them all.
+- `agents.create` from an agent with its own folder gives the new agent that folder.
+- The phone shows a continuation as the agent's message only; `chatView` draws no person line for a turn with no input.
+
+### Breaking
+- New public fields `Mail.result`, `TaskRecord.continues`, `TaskNode.continues`. Struct literals add `result: false` and `continues: None`.
+
 ## [0.50.0] - 2026-11-16
 
 A named agent's chat turn follows the chat's mode (ADR 0123). Files in a named agent's chat are in the agent's folder (ADR 0124).

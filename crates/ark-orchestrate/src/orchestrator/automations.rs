@@ -846,6 +846,7 @@ impl Inner {
             contacts: vec![],
             can_create: false,
             schedule: None,
+            comes_back: false,
         };
         let descriptors: Vec<_> = agent_tools
             .actions()

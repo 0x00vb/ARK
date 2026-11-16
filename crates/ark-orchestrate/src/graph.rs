@@ -93,6 +93,10 @@ pub struct TaskNode {
     /// The pictures the person attached to it (project paths).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
+    /// The person's turn it continues after the colleagues that turn started finished: the
+    /// agent goes on, the person wrote nothing (ADR 0126).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continues: Option<String>,
     pub origin: Origin,
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,6 +244,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 objective: r.objective.clone(),
                 thread: r.thread.clone(),
                 images: r.images.iter().map(|i| i.path.clone()).collect(),
+                continues: r.continues.clone(),
                 origin: r.origin.clone(),
                 schedule: r.schedule.clone(),
                 parent: r.parent.clone(),

@@ -562,6 +562,7 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
         contacts: vec!["lead".into()],
         can_create: false,
         schedule: None,
+        comes_back: false,
     }));
     let weather = ark_runtime::catalog::matching_actions(
         &registry,

@@ -167,8 +167,11 @@ async fn agent_conversation(
     let mut messages = Vec::new();
     for task in tasks.iter().skip(tasks.len().saturating_sub(50)) {
         let at = rfc3339(task.created_ms);
-        messages.push(json!({ "id": format!("{}-input", task.id), "role": "person", "author": task_sender(task),
-            "body": task.objective, "createdAt": at, "delivery": "sent" }));
+        // A continuation is the agent going on: nobody wrote it (ADR 0126).
+        if task.continues.is_none() {
+            messages.push(json!({ "id": format!("{}-input", task.id), "role": "person", "author": task_sender(task),
+                "body": task.objective, "createdAt": at, "delivery": "sent" }));
+        }
         if task.state.is_final() || task.state == TaskState::Suspended {
             messages.push(json!({ "id": format!("{}-answer", task.id), "role": "teammate", "author": entry.agent.name,
                 "body": task_display(task), "createdAt": rfc3339(task.finished_ms.unwrap_or(task.created_ms)) }));

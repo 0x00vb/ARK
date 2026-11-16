@@ -71,6 +71,10 @@ impl Provider for Model {
             Some((name, args)) => call(name, args.clone()),
             None => answer("finished"),
         };
+        // A continuation after started work (ADR 0126) quotes the helper's brief: it answers.
+        if said.contains("colleagues you started from this chat have finished") {
+            return Ok(answer("combined"));
+        }
         if said.contains("zzhand") {
             let brief = json!({ "brief": format!("{BRIEF} zzrun") });
             if results == 1 && self.hold_turn {

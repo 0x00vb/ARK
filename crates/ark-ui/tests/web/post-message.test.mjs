@@ -142,3 +142,17 @@ test("an answer that arrives does not take focus from the composer", async () =>
   assert.equal(await p.evaluate(() => document.activeElement?.id), "c");
   await p.close();
 });
+
+test("a turn the agent continued on its own has no person's line, only the agent's answer (ADR 0126)", async () => {
+  const p = await page();
+  await p.evaluate(() => window.thread.renderStored([
+    { input: "Translate the add-ons", index: 0, answer: "Started three translators.", posts: [] },
+    { input: null, index: 1, answer: "All three are done: **combined**.", posts: [] },
+  ]));
+  const turns = p.locator("article.turn");
+  assert.equal(await turns.count(), 2);
+  assert.equal(await turns.nth(0).locator(".user .bubble").count(), 1);
+  assert.equal(await turns.nth(1).locator(".user").count(), 0, "nobody wrote it");
+  assert.match(await turns.nth(1).locator(".agent .prose.answer").innerText(), /All three are done: combined\./);
+  await p.close();
+});

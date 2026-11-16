@@ -1057,7 +1057,15 @@ impl Harness {
                             && reads_as_note(&completion.content)))
                 {
                     corrected_announce = true;
-                    show_held!();
+                    if announced {
+                        show_held!();
+                    } else if held.take().is_none() && !completion.content.is_empty() {
+                        // The note may be the answer: if the model gives it again, the person
+                        // sees it once, not the note followed by the answer (ADR 0125).
+                        on_event(HarnessEvent::TextWithdrawn {
+                            text: completion.content.clone(),
+                        });
+                    }
                     tracing::info!("the answer announces work it has not done; asking again");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),

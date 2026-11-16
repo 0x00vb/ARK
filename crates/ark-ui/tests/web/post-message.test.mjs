@@ -149,10 +149,11 @@ test("a turn the agent continued on its own has no person's line, only the agent
     { input: "Translate the add-ons", index: 0, answer: "Started three translators.", posts: [] },
     { input: null, index: 1, answer: "All three are done: **combined**.", posts: [] },
   ]));
+  // The page starts with one stored turn of its own; the two rendered here follow it.
   const turns = p.locator("article.turn");
-  assert.equal(await turns.count(), 2);
-  assert.equal(await turns.nth(0).locator(".user .bubble").count(), 1);
-  assert.equal(await turns.nth(1).locator(".user").count(), 0, "nobody wrote it");
-  assert.match(await turns.nth(1).locator(".agent .prose.answer").innerText(), /All three are done: combined\./);
+  assert.equal(await turns.count(), 3);
+  assert.equal(await turns.nth(1).locator(".user .bubble").count(), 1);
+  assert.equal(await turns.nth(2).locator(".user").count(), 0, "nobody wrote it");
+  assert.match(await turns.nth(2).locator(".agent .prose.answer").innerText(), /All three are done: combined\./);
   await p.close();
 });

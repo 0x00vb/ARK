@@ -524,6 +524,8 @@ async fn an_apps_conversation_draws_exactly_as_the_chat() {
 async fn streamed_text_keeps_its_last_chunk_and_answers_once() {
     let script = vec![
         say("Reading the notes now.", true),
+        // A one-line answer after narrated calls is asked once to continue (ADR 0125).
+        say("The notes mention a locket.", false),
         say("The notes mention a locket.", false),
     ];
     drive("stream", script, Duration::from_millis(40)).await;
@@ -593,6 +595,8 @@ impl ark_model::Provider for CutOff {
 async fn text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once() {
     let script = vec![
         say("Reading the notes now.", true),
+        // A one-line answer after narrated calls is asked once to continue (ADR 0125).
+        say("The notes mention a locket.", false),
         say("The notes mention a locket.", false),
     ];
     drive("withdrawn", script, Duration::from_millis(40)).await;
@@ -1257,6 +1261,7 @@ async fn steering_lands_where_it_was_read_and_replays_the_same() {
             true,
         ),
         say("The notes mention a locket, and a key by the door.", false),
+        say("The notes mention a locket, and a key by the door.", false),
     ];
     drive("steer", script, Duration::from_millis(120)).await;
 }
@@ -1268,6 +1273,7 @@ async fn a_window_that_reloads_mid_turn_rebuilds_it_once() {
             .repeat(3);
     let script = vec![
         say(narration.trim(), true),
+        say("The notes mention a locket.", false),
         say("The notes mention a locket.", false),
     ];
     drive("rejoin", script, Duration::from_millis(120)).await;

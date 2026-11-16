@@ -4,6 +4,8 @@
 |---|---|
 | Latest tag | v0.51.0 (2026-11-16), over v0.50.0 (5ab2070). ADR 0125 (a chat turn is nudged on a note and has 40 steps), ADR 0126 (started colleagues continue the chat that started them) |
 | Why | The owner's CEO chat (2026-11-15 to 16): 3 turns ended on a one-line note, 3 hit the 16-step cap and asked "Shall I...?", the CEO never resumed after its helpers finished, and a helper could not see the CEO's folder |
+| Gates | qa: keep-going plan (1 blocker: tools that close with a short reply), merged implementation (3 should-fix in the continuation: nudge after a narrated start, a stopped turn still woke, a double wake), all fixed with tests. Full CI found three behavior changes in old tests (exchanges, lost_task, 4 page scripts) and one real defect: a nudged note that was the answer showed twice in one bubble; the note is now withdrawn |
+| Release commit | fmt, protocol, version, macOS 11 check, clippy, workspace tests (all, no-fail-fast), node 22 of 22, WebKit 195 of 195 (`agent-sidebar` 28 of 28 alone after one ⌘N flake under load), page suite 67 of 69 (the 2 known), notification 3 of 3, release build, simulated benchmark: `runaway` +23 uncached tokens from the new step-limit text, baseline regenerated |
 | Next | Desktop: pin v0.51.0 and draw a continuation without a person line (`ui/agent-conversation.js`). Live Opus check that the agent stops typing "Shall I" is not done |
 
 # Core 0.50.0 release: an agent chat in Auto stops asking, its files are in the agent's folder (2026-11-16)

@@ -11,6 +11,7 @@ A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125). Colle
 - A turn that ends on one line of at most 240 characters after narrated calls is asked once to continue, in the person's chat turn and group chat turns as in brief tasks. Not when the line ends in `?`, a call was refused or denied, or the turn called an action with `ends_with_short_reply`.
 - Default step limit 16 to 40 (`Harness`, `Ark`). Scheduled runs and automation steps use at most 16. A brief's own `max_steps` still wins.
 - The forced answer at the step limit says what was done and what is left, and does not ask to continue.
+- A one-line note that gets this nudge is taken back from the page (`TextWithdrawn`) when it was streamed, so an answer the model gives again shows once.
 - `Harness::brief_task` is deprecated and does nothing.
 - When every colleague a person's chat turn started with `agents.start` has ended, the agent continues that chat once with their results (as data), in the chat's mode. At most 3 continuations per person message; nothing continues when the person stopped them all, or when the turn that started them was stopped or failed. The continuation's stored turn has no person message. `agents.start` from such a turn is `ends_with_short_reply`.
 - `agents.create` from an agent with its own folder gives the new agent that folder.

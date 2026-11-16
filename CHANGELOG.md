@@ -2,12 +2,17 @@
 
 ## [Unreleased]
 
-A named agent's chat turn follows the chat's mode (ADR 0123).
+A named agent's chat turn follows the chat's mode (ADR 0123). Files in a named agent's chat are in the agent's folder (ADR 0124).
 
 ### Fixed
 
 - A named agent's chat in Auto no longer asks before every change. The orchestrated harness ran as Manual whatever the chat's mode was; the person's own turn in an agent's chat, and the `work.later` work of such a turn, now take the chat's mode (Auto runs what does not ask every time, Manual asks, Plan offers no changes). Group turns, delegated and started work, schedules and automations keep asking.
 - An agent allowed to act alone (`allow_mutate`) still asks for actions that ask every time (`ask_each_time`, `person_only`) when there is someone to ask. It ran them without a question before. This holds for every host of the harness (the plain chat and the SDK too): with `allow_mutate` and an approval gate they ask, with no gate they act alone as before. It includes `agents.schedule` in ask mode and `computer.*` steps. A scheduled run, delegated work or group work of such an agent now waits for the person at those steps: the task stays `Waiting` on "your answer" with its question listed, with no timeout, until it is answered, stopped or cancelled. Automation steps are unchanged.
+- Files in a named agent's chat open, list, upload and show their thumbnails in the agent's own folder (ADR 0124). A chat's file location may name the agent's chat (`{ runtime, project, session }`); the host answers for a session that is a conversation of an agent of that project and refuses any other. They were read in the project's top folder, so after the agent's folder changed a link, card or thumbnail failed with "No such file or directory (os error 2)". `hello` answers `"agent_chat_files": true`; `ark.at(location).agentChatFiles()` is true only for the page's own runtime with the flag; `chatView` with a `location` option sends file calls and `openFile` there.
+- A file that is not in the folder says "<name> is not in <folder>" instead of the operating system's error.
+- Pictures are admitted and checked at the turn start in the agent's own folder. One that is not there fails the task with "The picture <path> is not in <agent>'s folder."
+- `ark_orchestrate::agent_chat_scope` answers the scope of an agent's chat from the store.
+- Residuals: files an agent wrote in a folder it had before a change stay there, and a link to one says it is not in the new folder (no fallback). A chat of an agent on another computer, and a runtime without the flag, keep today's behavior.
 
 ### Changed
 

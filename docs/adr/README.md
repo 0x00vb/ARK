@@ -169,3 +169,4 @@ Local integration decisions:
 - [0121-pictures-go-with-an-agent-chat-message](0121-pictures-go-with-an-agent-chat-message.md)
 - [0122-a-note-after-narrated-calls-is-nudged-once-and-recent-answers-are-carried-whole](0122-a-note-after-narrated-calls-is-nudged-once-and-recent-answers-are-carried-whole.md)
 - [0123-a-named-agents-chat-turn-follows-the-chats-mode](0123-a-named-agents-chat-turn-follows-the-chats-mode.md)
+- [0124-an-agent-chats-files-are-in-the-agents-folder](0124-an-agent-chats-files-are-in-the-agents-folder.md)

@@ -37,3 +37,7 @@ The owner chose a one-row composer: + on the left, the text, then the microphone
 text grows the row and the buttons stay on its last line. The text area moved inside
 `.composer-bar`; the chips keep their order after the microphone. `ark.hiddenFolders()` lets an
 app leave the agents of folders removed from the sidebar out of its own lists.
+
+## Amendment (2026-11-16): the agent's chats read and write files in its folder
+
+"The agent's chats stay where they are" meant its past files. The window's file calls (open, list, upload, thumbnails) now resolve a chat of the agent in the agent's own folder, not the project's. [0124](0124-an-agent-chats-files-are-in-the-agents-folder.md).

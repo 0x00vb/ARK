@@ -747,3 +747,37 @@ async fn auto_asks_only_for_what_asks_at_every_call() {
         );
     }
 }
+
+#[tokio::test]
+async fn an_agent_allowed_to_act_alone_still_asks_for_what_asks_at_every_call() {
+    // With a gate it asks; with nobody to ask it keeps acting alone, as before.
+    for (gate, asks, runs) in [(true, 1, 0), (false, 0, 1)] {
+        let saves = Arc::new(AtomicUsize::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let adapter: Arc<dyn Adapter> = Arc::new(AlwaysAskNotes(Notes {
+            saves: saves.clone(),
+        }));
+        let engine = Engine::open_with(dir.path(), Registry::new().with(adapter)).unwrap();
+        let project = engine.create_project("t", "").unwrap();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(
+            "m",
+            tools_then(vec![call("c1", "notes.save")], "Declined."),
+        ));
+        Harness::new(ModelRouter::single(provider))
+            .planner(false)
+            .critic(false)
+            .allow_mutate(true)
+            .approvals(gate.then(|| {
+                Arc::new(ApprovalGate::new(Arc::new(Always(
+                    ApprovalDecision::Deny,
+                    asked.clone(),
+                ))))
+            }))
+            .ask(&engine, &profile(), &project.id, "save the notes", |_| {})
+            .await
+            .unwrap();
+        assert_eq!(asked.load(Ordering::SeqCst), asks, "gate={gate}");
+        assert_eq!(saves.load(Ordering::SeqCst), runs, "gate={gate}");
+    }
+}

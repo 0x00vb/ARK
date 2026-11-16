@@ -1309,7 +1309,11 @@ impl Harness {
                     Some(verdict) => {
                         *verdict == crate::guard::Verdict::Allow && !again && !desc.person_only
                     }
-                    None => (self.allow_mutate || auto) && !again && !desc.person_only,
+                    None => {
+                        let alone =
+                            self.allow_mutate && !(desc.ask_each_time && self.approvals.is_some());
+                        (alone || auto) && !again && !desc.person_only
+                    }
                 };
                 if desc.risk == RiskTier::Mutate && !approved {
                     match self

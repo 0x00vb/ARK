@@ -1236,11 +1236,20 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
     let (approver, mut rx) = ChannelApprover::channel();
     // Title, summary, answers offered, whether it asks each time, and its line.
     type Asked = (String, String, Vec<String>, bool, String);
+    const ACQUISITION: &str = "ARK needs this to finish:";
+    let turn_ons = |asked: &std::sync::Mutex<Vec<Asked>>| {
+        asked
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|a| a.0 == ACQUISITION)
+            .count()
+    };
     let asked: Arc<std::sync::Mutex<Vec<Asked>>> = Arc::default();
     let seen = asked.clone();
     tokio::spawn(async move {
         while let Some(p) = rx.recv().await {
-            let n = {
+            let (n, acquisition) = {
                 let mut s = seen.lock().unwrap();
                 s.push((
                     ark_interact::approval_title(&p.request),
@@ -1252,10 +1261,16 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
                     p.request.ask_each_time,
                     p.request.preview.clone(),
                 ));
-                s.len()
+                (
+                    s.iter().filter(|a| a.0 == ACQUISITION).count(),
+                    p.request.action.starts_with("computer."),
+                )
             };
-            // First "Always" (no grant may cover a later ask), then Not now.
-            p.answer(if n == 1 {
+            // Each app step is allowed once. The first turn-on gets "Always" (no grant may
+            // cover a later ask), then Not now.
+            p.answer(if acquisition {
+                ApprovalDecision::AllowOnce
+            } else if n == 1 {
                 ApprovalDecision::AllowAlways
             } else {
                 ApprovalDecision::Deny
@@ -1285,12 +1300,17 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
     assert!(end.result.unwrap().answer.contains("open"));
     {
         let asked = asked.lock().unwrap();
-        assert_eq!(asked.len(), 1, "{asked:?}");
-        assert_eq!(asked[0].0, "ARK needs this to finish:");
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert_eq!(asked[0].0, ACQUISITION);
         assert_eq!(asked[0].1, "It still asks before each step.");
         assert_eq!(asked[0].4, "Allow ARK to use the apps on this computer");
         assert_eq!(asked[0].2, ["Allow", "Not now"]);
         assert!(asked[0].3, "no grant covers a later request");
+        assert_eq!(asked[1].4, "computer.open(app=\"Lumen\")");
+        assert!(
+            asked[1].3,
+            "the app's own step asks each time, as an agent that acts alone"
+        );
     }
     assert!(svc.is_on());
     assert!(
@@ -1327,11 +1347,7 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
     let t2 = &requests[4];
     assert!(t2.tools.iter().any(|t| t.name == "computer.open"));
     assert!(!t2.messages[0].content.contains("- computer:"));
-    assert_eq!(
-        asked.lock().unwrap().len(),
-        1,
-        "nothing asked to turn it on again"
-    );
+    assert_eq!(turn_ons(&asked), 1, "nothing asked to turn it on again");
 
     // Off: asks again although the first answer was "Always".
     let list = ix.execute("/disconnect computer").await.report.plain_text();
@@ -1341,7 +1357,7 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
         .await
         .result
         .unwrap();
-    assert_eq!(asked.lock().unwrap().len(), 2, "asked again after Turn off");
+    assert_eq!(turn_ons(&asked), 2, "asked again after Turn off");
     assert!(!svc.is_on(), "Not now leaves it off");
 }
 

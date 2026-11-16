@@ -390,3 +390,70 @@ async fn a_file_that_is_not_in_the_agents_folder_says_so() {
         assert_eq!(e, format!("{name} is not in ec"), "{operation}: {e}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_file_resources_may_name_an_agent_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(&dir.path().join("store")).await;
+    let chat = agent_chat(&host, "scout", Some(&folder(dir.path(), "own"))).await;
+    for (kind, operation) in [
+        ("project", "agents"),
+        ("project", "agent_conversations"),
+        ("terminal", "terminal_open"),
+        ("artifact", "artifacts"),
+    ] {
+        let e = host
+            .call(
+                "resource",
+                json!({
+                    "ref": { "location": chat, "kind": kind, "id": "" },
+                    "operation": { "kind": operation, "input": { "agent": "scout" } },
+                }),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("does not match"), "{kind} {operation}: {e}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deleted_agents_chat_and_a_chat_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let own = folder(dir.path(), "own");
+    let store = dir.path().join("store");
+    let host = open(&store).await;
+    std::fs::write(own.join("notes.md"), "kept\n").unwrap();
+    let chat = agent_chat(&host, "scout", Some(&own)).await;
+    project_call(
+        &host,
+        "submit_task",
+        json!({ "agent": "scout", "task": { "objective": "hello", "thread": chat["session"] } }),
+    )
+    .await
+    .unwrap();
+    let id = chat["session"].as_str().unwrap();
+    let turns = ark_store::Store::open(&store).unwrap();
+    until("the chat to hold a turn", async || {
+        turns.get_session(id).unwrap().unwrap()["turn_count"] == 1
+    })
+    .await;
+
+    // A chat that already ran a turn, read by a runtime started again on the same store.
+    let again = open(&store).await;
+    let read = file_op(&again, &chat, "file_read", "notes.md", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(read["text"], "kept\n");
+
+    // The agent's record is gone: its chat names no folder.
+    let project = chat["project"].as_str().unwrap();
+    assert!(turns
+        .delete_record("orch_agent", &format!("{project}/scout"))
+        .unwrap());
+    let e = file_op(&again, &chat, "file_read", "notes.md", json!({}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("does not match"), "{e}");
+}

@@ -2599,7 +2599,8 @@ impl Host {
                 .ok_or_else(|| anyhow::anyhow!("there is no chat `{}` here", r.location.session))?
         };
         anyhow::ensure!(
-            project == r.location.project || self.agent_chat_scope(r)?.is_some(),
+            project == r.location.project
+                || (r.kind == ResourceKind::File && self.agent_chat_scope(r)?.is_some()),
             "the resource's project does not match its chat"
         );
         self.engine

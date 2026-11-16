@@ -74,11 +74,12 @@ import { setAgentIdentity } from "./dom.js";
 //                      the chat's own location.
 //                      `uploads` is this view's upload container.
 //                      Optional `location()` returns the chat's own resource location
-//                      (`{ runtime, project, session }`, same runtime and project as the window). The
-//                      view opens files, reads their thumbnails and lists folders there. An agent's
-//                      chat names its own session, and its files are in the agent's folder (ADR 0124):
-//                      ask `ark.at(location).agentChatFiles()` before naming it, since a runtime
-//                      without that flag refuses it.
+//                      (`{ runtime, project, session }`, same runtime and project as the window).
+//                      Optional `fileLocation()` returns where the chat's files are: an agent's chat
+//                      names its own session, and its files are in the agent's folder (ADR 0124). The
+//                      view opens files, reads their thumbnails and lists folders there; every other
+//                      call keeps the window's location. Ask `ark.at(location).agentChatFiles()`
+//                      before naming the session: a runtime without that flag refuses it.
 //                      Optional `exchanges` (ADR 0119): `{ project, agent, session?, name?, look? }`, or
 //                      a function returning it or null, read at each use. Turns keyed `task:<id>`
 //                      get a quiet line when that task reached other agents; it opens their messages

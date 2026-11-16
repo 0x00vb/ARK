@@ -105,7 +105,8 @@ async function fixture(run, { chatFiles = true } = {}) {
       window.chatLocation = () => (window.ark.at(own).agentChatFiles() ? agentChat : own);
       window.view = window.ark.chatView(mount, {
         submit: async () => {},
-        location: () => window.chatLocation(),
+        location: () => own,
+        fileLocation: () => window.chatLocation(),
       });
       window.view.render([]);
     });

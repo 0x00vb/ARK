@@ -22,20 +22,22 @@ import { exchangeLine, exchangeView } from "./exchange.js";
 
 const NEAR_END = 80;
 
-export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null, location = null, exchanges = null } = {}) {
+export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null, location = null, fileLocation = null, exchanges = null } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
-  if (location) Object.defineProperty(api, "location", {get: () => {
-    const next = location(), origin = base.location || base.summary?.()?.location;
+  // A location of this chat's own: same computer and project as the window, its own session.
+  const own = (get) => {
+    const next = get(), origin = base.location || base.summary?.()?.location;
     if (!next || next.runtime !== origin?.runtime || next.project !== origin?.project) throw Error("The conversation belongs to another project or computer");
     return {...next};
-  }});
-  // The chat's own file location (an agent's chat names its folder): its files are read, listed,
-  // uploaded and opened there, not at the window's location.
+  };
+  if (location) Object.defineProperty(api, "location", {get: () => own(location)});
+  // Where this chat's files are (an agent's chat names its folder): they are read, listed,
+  // uploaded and opened there, not at the window's location. Other calls keep the window's.
   const fileCall = (method) => method === "files" || method.startsWith("file_") || method.startsWith("upload_");
-  if (location) {
-    api.call = (method, params) => (fileCall(method) ? base.at(api.location) : base).call(method, params);
-    api.openFile = (path, params) => base.at(api.location).openFile(path, params);
+  if (fileLocation) {
+    api.call = (method, params) => (fileCall(method) ? base.at(own(fileLocation)) : base).call(method, params);
+    api.openFile = (path, params) => base.at(own(fileLocation)).openFile(path, params);
   }
   let submitDisabled = false;
   let unavailable = false;

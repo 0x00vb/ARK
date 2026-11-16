@@ -1,3 +1,11 @@
+# Core 0.51.0 release: an agent keeps going until the work is done (2026-11-16)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.51.0 (2026-11-16), over v0.50.0 (5ab2070). ADR 0125 (a chat turn is nudged on a note and has 40 steps), ADR 0126 (started colleagues continue the chat that started them) |
+| Why | The owner's CEO chat (2026-11-15 to 16): 3 turns ended on a one-line note, 3 hit the 16-step cap and asked "Shall I...?", the CEO never resumed after its helpers finished, and a helper could not see the CEO's folder |
+| Next | Desktop: pin v0.51.0 and draw a continuation without a person line (`ui/agent-conversation.js`). Live Opus check that the agent stops typing "Shall I" is not done |
+
 # Core 0.50.0 release: an agent chat in Auto stops asking, its files are in the agent's folder (2026-11-16)
 
 | Release state | Value |

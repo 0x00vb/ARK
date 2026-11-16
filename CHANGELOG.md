@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-16
+
 A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125). Colleagues started from a person's chat with a named agent continue that chat when they finish (ADR 0126).
 
 ### Changed

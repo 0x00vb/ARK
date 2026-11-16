@@ -32,7 +32,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.50.0"
+version = "0.51.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
@@ -74,30 +74,30 @@ png = "0.18"
 tar = "0.4"
 
 # internal: the ARK crates
-ark-core = { path = "crates/ark-core", version = "0.50.0" }
-ark-os = { path = "crates/ark-os", version = "0.50.0" }
-ark-reach = { path = "crates/ark-reach", version = "0.50.0" }
-ark-model = { path = "crates/ark-model", version = "0.50.0" }
-ark-store = { path = "crates/ark-store", version = "0.50.0" }
-ark-tools = { path = "crates/ark-tools", version = "0.50.0" }
-ark-files = { path = "crates/ark-files", version = "0.50.0" }
-ark-connect = { path = "crates/ark-connect", version = "0.50.0" }
-ark-account = { path = "crates/ark-account", version = "0.50.0" }
-ark-browser = { path = "crates/ark-browser", version = "0.50.0" }
-ark-computer = { path = "crates/ark-computer", version = "0.50.0" }
-ark-exec = { path = "crates/ark-exec", version = "0.50.0" }
-ark-proc = { path = "crates/ark-proc", version = "0.50.0" }
-ark-acp = { path = "crates/ark-acp", version = "0.50.0" }
-ark-runtime = { path = "crates/ark-runtime", version = "0.50.0" }
-ark-sdk = { path = "crates/ark-sdk", version = "0.50.0" }
-ark-orchestrate = { path = "crates/ark-orchestrate", version = "0.50.0" }
-ark-interact = { path = "crates/ark-interact", version = "0.50.0" }
-ark-protocol = { path = "crates/ark-protocol", version = "0.50.0" }
-ark-client = { path = "crates/ark-client", version = "0.50.0" }
-ark-cli = { path = "crates/ark-cli", version = "0.50.0" }
-ark-ui = { path = "crates/ark-ui", version = "0.50.0", default-features = false }
-ark-bench = { path = "crates/ark-bench", version = "0.50.0" }
-ark-transcribe = { path = "crates/ark-transcribe", version = "0.50.0" }
+ark-core = { path = "crates/ark-core", version = "0.51.0" }
+ark-os = { path = "crates/ark-os", version = "0.51.0" }
+ark-reach = { path = "crates/ark-reach", version = "0.51.0" }
+ark-model = { path = "crates/ark-model", version = "0.51.0" }
+ark-store = { path = "crates/ark-store", version = "0.51.0" }
+ark-tools = { path = "crates/ark-tools", version = "0.51.0" }
+ark-files = { path = "crates/ark-files", version = "0.51.0" }
+ark-connect = { path = "crates/ark-connect", version = "0.51.0" }
+ark-account = { path = "crates/ark-account", version = "0.51.0" }
+ark-browser = { path = "crates/ark-browser", version = "0.51.0" }
+ark-computer = { path = "crates/ark-computer", version = "0.51.0" }
+ark-exec = { path = "crates/ark-exec", version = "0.51.0" }
+ark-proc = { path = "crates/ark-proc", version = "0.51.0" }
+ark-acp = { path = "crates/ark-acp", version = "0.51.0" }
+ark-runtime = { path = "crates/ark-runtime", version = "0.51.0" }
+ark-sdk = { path = "crates/ark-sdk", version = "0.51.0" }
+ark-orchestrate = { path = "crates/ark-orchestrate", version = "0.51.0" }
+ark-interact = { path = "crates/ark-interact", version = "0.51.0" }
+ark-protocol = { path = "crates/ark-protocol", version = "0.51.0" }
+ark-client = { path = "crates/ark-client", version = "0.51.0" }
+ark-cli = { path = "crates/ark-cli", version = "0.51.0" }
+ark-ui = { path = "crates/ark-ui", version = "0.51.0", default-features = false }
+ark-bench = { path = "crates/ark-bench", version = "0.51.0" }
+ark-transcribe = { path = "crates/ark-transcribe", version = "0.51.0" }
 
 [profile.dev]
 opt-level = 1

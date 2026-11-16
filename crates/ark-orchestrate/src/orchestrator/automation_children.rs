@@ -54,6 +54,7 @@ impl Adapter for RunTools {
             contacts: vec![],
             can_create: false,
             schedule: None,
+            comes_back: false,
         }
         .actions()
         .into_iter()

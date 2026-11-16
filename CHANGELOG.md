@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125).
+A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125). Colleagues started from a person's chat with a named agent continue that chat when they finish (ADR 0126).
 
 ### Changed
 
@@ -10,10 +10,16 @@ A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125).
 - Default step limit 16 to 40 (`Harness`, `Ark`). Scheduled runs and automation steps use at most 16. A brief's own `max_steps` still wins.
 - The forced answer at the step limit says what was done and what is left, and does not ask to continue.
 - `Harness::brief_task` is deprecated and does nothing.
+- When every colleague a person's chat turn started with `agents.start` has ended, the agent continues that chat once with their results (as data), in the chat's mode. At most 3 continuations per person message; nothing continues when the person stopped them all.
+- `agents.create` from an agent with its own folder gives the new agent that folder.
+- The phone shows a continuation as the agent's message only; `chatView` draws no person line for a turn with no input.
 
 ### Added
 
 - `ActionDescriptor::ends_with_short_reply` (set on `role.set`, `groups.set`, `work.later`, `agents.schedule`, `agents.unschedule`, `mode.set`), `DEFAULT_STEPS`, `UNATTENDED_STEPS`.
+
+### Breaking
+- New public fields `Mail.result`, `TaskRecord.continues`, `TaskNode.continues`. Struct literals add `result: false` and `continues: None`.
 
 ## [0.50.0] - 2026-11-16
 

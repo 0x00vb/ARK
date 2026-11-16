@@ -296,6 +296,10 @@ pub struct Mail {
     /// The conversation it is for ([`TaskRecord::thread`]); `None`: the default one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// The result of a colleague a person's chat turn started (ADR 0126): it continues that
+    /// chat when no turn of it reads it first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub result: bool,
 }
 
 /// A picture as it was when the task was admitted. The run reads the file again and fails when
@@ -424,6 +428,10 @@ pub struct TaskRecord {
     /// Made by `work.later` ([`crate::TaskSpec::later`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub later: bool,
+    /// The person's own chat turn it continues after the colleagues started from that chat
+    /// finished (ADR 0126). Set by the orchestrator only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continues: Option<String>,
     /// The work that handed it off ([`crate::TaskSpec::work`]); a turn that continues that
     /// work and takes it up writes its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -533,6 +541,7 @@ impl TaskRecord {
             report_to: spec.report_to.clone(),
             reply: spec.reply,
             later: spec.later,
+            continues: None,
             work: spec.work.clone(),
             reported: false,
             question: None,

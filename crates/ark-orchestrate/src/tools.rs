@@ -367,6 +367,8 @@ pub(crate) struct AgentTools {
     /// On a chat turn: the schedule tools it may have, and whether the chat is in Auto
     /// (ADR 0120).
     pub schedule: Option<ScheduleOffer>,
+    /// Colleagues it starts continue its chat when they finish (ADR 0126).
+    pub comes_back: bool,
 }
 
 /// The schedule tools a chat turn of a named agent has.
@@ -429,7 +431,7 @@ impl Adapter for AgentTools {
             "type": "object", "required": ["to", "objective"],
             "properties": {
                 "to": { "type": "string", "description": format!("permitted contacts: {}; also agents you created", self.contacts.join(", ")) },
-                "objective": { "type": "string", "maxLength": 8000, "description": "self-contained brief; returns immediately, no waiting or automatic reply" },
+                "objective": { "type": "string", "maxLength": 8000, "description": if self.comes_back { "self-contained brief; returns immediately; when every colleague you started has finished, their results come back to this chat and you continue" } else { "self-contained brief; returns immediately, no waiting or automatic reply" } },
                 "context": { "type": "string", "maxLength": 16000, "description": "necessary information only; the recipient does not see your transcript" }
             }
         })));
@@ -574,7 +576,7 @@ impl Adapter for AgentTools {
                     .await
                     .map_err(|e| AdapterError::Tool(e.to_string()))?;
                 Ok(ActionOutput::json(
-                    json!({ "task": id, "agent": s("to"), "independent": true }),
+                    json!({ "task": id, "agent": s("to"), "independent": true, "comes_back": self.comes_back }),
                 ))
             }
             DELEGATE => {
@@ -1820,9 +1822,14 @@ pub(crate) fn distiller() -> Distiller {
             DELEGATE => Some(one(out, "result")),
             START => Some((
                 format!(
-                    "started independent turn {} for {}; do not wait",
+                    "started independent turn {} for {}; {}",
                     out.get("task").and_then(Value::as_str).unwrap_or(""),
-                    out.get("agent").and_then(Value::as_str).unwrap_or("")
+                    out.get("agent").and_then(Value::as_str).unwrap_or(""),
+                    if out.get("comes_back").and_then(Value::as_bool) == Some(true) {
+                        "its result comes back to this chat when it finishes, do not wait"
+                    } else {
+                        "do not wait"
+                    }
                 ),
                 Vec::new(),
             )),

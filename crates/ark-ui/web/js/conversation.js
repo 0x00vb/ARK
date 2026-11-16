@@ -328,8 +328,10 @@ class TurnView {
     this.started = performance.now();
     // A picture sent alone has its file name for text: the pictures say it already.
     const said = input === images.map((i) => baseName(i.path)).join(", ") ? null : input;
+    // A turn nobody wrote (the agent going on, ADR 0126) has no person's line.
+    const silent = !said && !note && !images.length;
     this.el = h("article.turn",
-      h(`div.user${note || images.length ? ".noted" : ""}`,
+      silent ? null : h(`div.user${note || images.length ? ".noted" : ""}`,
         images.length ? h("div.user-images", images.map((image) => {
           const open = h("button.user-image", { type: "button", title: baseName(image.path), "aria-label": `Open ${baseName(image.path)}`, onclick: () => this.api.openFile?.(image.path) }, thumb(this.api, image));
           return open;

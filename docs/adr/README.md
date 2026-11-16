@@ -171,3 +171,4 @@ Local integration decisions:
 - [0123-a-named-agents-chat-turn-follows-the-chats-mode](0123-a-named-agents-chat-turn-follows-the-chats-mode.md)
 - [0124-an-agent-chats-files-are-in-the-agents-folder](0124-an-agent-chats-files-are-in-the-agents-folder.md)
 - [0125-a-chat-turn-is-nudged-on-a-note-and-has-40-steps](0125-a-chat-turn-is-nudged-on-a-note-and-has-40-steps.md)
+- [0126-started-colleagues-continue-the-chat-that-started-them](0126-started-colleagues-continue-the-chat-that-started-them.md)

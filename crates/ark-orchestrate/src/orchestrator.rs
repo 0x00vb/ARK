@@ -3873,6 +3873,7 @@ impl Inner {
                 contacts,
                 can_create: spec.tools.iter().any(|p| action_matches(p, tools::CREATE)),
                 schedule,
+                comes_back: threads::continues_chat(&task) && !agent.on_program(),
             }));
         }
         if let Some(run_id) = &task.run {
@@ -4435,6 +4436,7 @@ impl Inner {
                     task: None,
                     at_ms: now_ms(),
                     thread: thread.clone(),
+                    result: false,
                 });
             }
         }
@@ -4700,15 +4702,50 @@ impl Inner {
         // Nobody is waiting for a task delegated without `wait` whose parent has ended: tell
         // the parent's agent in its next brief.
         if let Origin::Agent { agent, task } = &rec.origin {
-            let (parent_open, parent_thread) = {
+            let (parent_open, parent_thread, from_chat) = {
                 let st = self.state.lock().unwrap();
                 let parent = st.tasks.get(task);
                 (
                     parent.is_some_and(|t| !t.record.state.is_final()),
                     parent.and_then(|t| t.record.thread.clone()),
+                    rec.handoff_key.is_some()
+                        && parent.is_some_and(|t| threads::continues_chat(&t.record)),
                 )
             };
-            if !parent_open {
+            // A colleague a person's chat turn started: its result goes to that chat whole, as
+            // data, and continues it (ADR 0126).
+            if from_chat {
+                let (text, context) = match rec.state {
+                    TaskState::Done => (
+                        format!("finished: {}", clip(&rec.objective, 160)),
+                        rec.result.clone().unwrap_or_default(),
+                    ),
+                    TaskState::Failed => (
+                        format!("could not finish: {}", clip(&rec.objective, 160)),
+                        rec.error.clone().unwrap_or_default(),
+                    ),
+                    _ => (
+                        format!(
+                            "was stopped before it finished: {}",
+                            clip(&rec.objective, 160)
+                        ),
+                        String::new(),
+                    ),
+                };
+                let context = ark_store::scrub_text(&clip(&context, threads::RESULT_CHARS));
+                self.update_agent(agent, |a| {
+                    a.inbox.push(Mail {
+                        context,
+                        from: rec.owner.clone(),
+                        text,
+                        task: Some(rec.id.clone()),
+                        at_ms: now_ms(),
+                        thread: parent_thread.clone(),
+                        result: true,
+                    })
+                });
+                self.continue_chat(agent, parent_thread.clone()).await;
+            } else if !parent_open {
                 let text = format!(
                     "Task {} ({}) is {}: {}",
                     rec.id,
@@ -4727,6 +4764,7 @@ impl Inner {
                         task: Some(rec.id.clone()),
                         at_ms: now_ms(),
                         thread: parent_thread,
+                        result: false,
                     })
                 });
             }
@@ -4750,6 +4788,9 @@ impl Inner {
         self.report_back(&rec);
         if rec.schedule.is_some() {
             self.run_ended(&rec);
+        }
+        if rec.conversation.is_none() && rec.run.is_none() && rec.submission.is_none() {
+            self.continue_chat(&rec.owner, rec.thread.clone()).await;
         }
         let st = self.state.lock().unwrap();
         if let Some(t) = st.tasks.get(id) {
@@ -4886,9 +4927,11 @@ impl Inner {
                 .tasks
                 .get(id)
                 .ok_or_else(|| OrchError::UnknownTask(id.into()))?;
-            match &t.record.origin {
-                Origin::External => return Ok(id.to_string()),
-                Origin::Agent { task, .. } => id = task,
+            match (&t.record.origin, &t.record.continues) {
+                // A continuation counts with the person's turn it continues (ADR 0126).
+                (Origin::External, Some(turn)) if turn != id => id = turn,
+                (Origin::External, _) => return Ok(id.to_string()),
+                (Origin::Agent { task, .. }, _) => id = task,
             }
         }
         Err(OrchError::NotAllowed("cyclic conversation origin".into()))
@@ -5093,8 +5136,36 @@ impl Inner {
                 self.models.validate_selection(model).await?;
             }
         }
-        self.spawn_record(spec, Some((task, &root)), Some(&request), None, None)
-            .await
+        let created = self
+            .spawn_record(spec, Some((task, &root)), Some(&request), None, None)
+            .await?;
+        self.share_folder(from, &created)?;
+        Ok(created)
+    }
+
+    /// A colleague an agent with a folder of its own creates works in that folder, not the
+    /// project's (ADR 0126). One that has its own already keeps it.
+    fn share_folder(&self, from: &str, created: &AgentRecord) -> Result<(), OrchError> {
+        let Some(creator) = self.scope_of(from) else {
+            return Ok(());
+        };
+        let Some(folder) = self
+            .engine
+            .store
+            .get_project(&creator)?
+            .filter(|p| p.parent.is_some())
+            .and_then(|p| p.workspace)
+        else {
+            return Ok(());
+        };
+        let scope = ProjectId(created.scope.clone());
+        if let Some(mut project) = self.engine.store.get_project(&scope)? {
+            if project.workspace.is_none() {
+                project.workspace = Some(folder);
+                self.engine.store.put_project(&project)?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn start_conversation(
@@ -5434,6 +5505,7 @@ impl Inner {
                         task: task.map(str::to_string),
                         at_ms: now_ms(),
                         thread: lane.map(str::to_string),
+                        result: false,
                     });
                     (false, lane.map(str::to_string))
                 }

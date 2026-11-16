@@ -237,6 +237,7 @@ mod tests {
             report_to: None,
             reply: false,
             later: false,
+            continues: None,
             group_turn: false,
             work: None,
             reported: false,

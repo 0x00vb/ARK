@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125).
+
+### Changed
+
+- A turn that ends on one line of at most 240 characters after narrated calls is asked once to continue, in the person's chat turn and group chat turns as in brief tasks. Not when the line ends in `?`, a call was refused or denied, or the turn called an action with `ends_with_short_reply`.
+- Default step limit 16 to 40 (`Harness`, `Ark`). Scheduled runs and automation steps use at most 16. A brief's own `max_steps` still wins.
+- The forced answer at the step limit says what was done and what is left, and does not ask to continue.
+- `Harness::brief_task` is deprecated and does nothing.
+
+### Added
+
+- `ActionDescriptor::ends_with_short_reply` (set on `role.set`, `groups.set`, `work.later`, `agents.schedule`, `agents.unschedule`, `mode.set`), `DEFAULT_STEPS`, `UNATTENDED_STEPS`.
+
 ## [0.50.0] - 2026-11-16
 
 A named agent's chat turn follows the chat's mode (ADR 0123). Files in a named agent's chat are in the agent's folder (ADR 0124).

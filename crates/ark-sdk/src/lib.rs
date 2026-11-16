@@ -1088,7 +1088,7 @@ impl Default for ArkBuilder {
             profile: AgentProfile::default(),
             router: None,
             provider: None,
-            max_steps: 16,
+            max_steps: ark_runtime::DEFAULT_STEPS,
             budget: ark_runtime::budget::budget_from_env(),
             planner: false,
             critic: true,

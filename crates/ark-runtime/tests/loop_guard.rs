@@ -67,6 +67,7 @@ fn looping(
 struct Run {
     steps: usize,
     answered: bool,
+    ran_out: bool,
     nudges: usize,
     stops: usize,
 }
@@ -103,6 +104,7 @@ async fn run(model: Arc<MockProvider>) -> Run {
     Run {
         steps: out.steps,
         answered: !out.answer.is_empty(),
+        ran_out: out.ran_out,
         nudges,
         stops,
     }
@@ -164,7 +166,17 @@ async fn varied_real_work_is_not_cut_off() {
     .await;
     assert_eq!(r.nudges, 0, "no nudge while every step is new");
     assert_eq!(r.stops, 0);
-    assert_eq!(r.steps, 16, "ran to the step limit");
+    assert_eq!(r.steps, 40, "ran to the step limit");
+    assert!(r.ran_out);
+
+    let m = looping(|i| ("svc.read".into(), json!({ "key": format!("k{i}") })));
+    run(m.clone()).await;
+    let last = m.recorded().pop().unwrap();
+    assert!(last.tools.is_empty());
+    let ask = &last.messages.last().unwrap().content;
+    assert!(ask.contains("what is left"), "{ask}");
+    assert!(ask.contains("Do not ask whether to continue"), "{ask}");
+    assert!(!ask.contains("next step"), "{ask}");
 }
 
 fn say(text: &str) -> Completion {

@@ -286,10 +286,13 @@ async fn text_beside_a_call_after_an_unchecked_change_is_still_shown() {
     let r = run(vec![
         step("notes.write", "w1"),
         step_with("notes.look", "r1", "a", "Reading it back."),
-        say("Saved and read."),
+        say("Saved and read.\n\nNote a is saved."),
     ])
     .await;
-    assert_eq!(r.shown, "Reading it back.Saved and read.");
+    assert_eq!(
+        r.shown,
+        "Reading it back.Saved and read.\n\nNote a is saved."
+    );
     assert!(r.withdrawn.is_empty());
 }
 

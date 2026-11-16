@@ -113,6 +113,11 @@ pub struct ActionDescriptor {
     /// Plan can still leave it. It must also be `person_only`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stays_in_plan: bool,
+    /// The action's own text tells the model to close the turn with one short line ("then say
+    /// in one line who is in it"). A turn that called it is not asked to continue when it ends
+    /// on a one-line reply.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ends_with_short_reply: bool,
 }
 
 /// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
@@ -174,7 +179,14 @@ impl ActionDescriptor {
             grant: None,
             auto_eligible: false,
             stays_in_plan: false,
+            ends_with_short_reply: false,
         }
+    }
+
+    /// See [`ActionDescriptor::ends_with_short_reply`].
+    pub fn ends_with_short_reply(mut self) -> Self {
+        self.ends_with_short_reply = true;
+        self
     }
 
     /// See [`ActionDescriptor::stays_in_plan`]. Implies [`person_only`](Self::person_only).

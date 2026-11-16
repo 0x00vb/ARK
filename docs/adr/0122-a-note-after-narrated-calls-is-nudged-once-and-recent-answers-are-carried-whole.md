@@ -1,6 +1,6 @@
 # 0122. A note after narrated calls is asked about once, recent answers are carried whole, an agent knows its changes ask
 
-Status: Accepted. Date: 2026-11-15. Builds on 0051 (step notes), 0108 (the check nudge), 0113 and 0117 (group-reached work asks). Found in the owner's traces of 2026-11-08 to 2026-11-15 (workspace `board/evidence/trace-review-20261115/REPORT.md`).
+Status: Accepted. Date: 2026-11-15. Builds on 0051 (step notes), 0108 (the check nudge), 0113 and 0117 (group-reached work asks). Amended by 0125 (the note rule covers every turn). Found in the owner's traces of 2026-11-08 to 2026-11-15 (workspace `board/evidence/trace-review-20261115/REPORT.md`).
 
 ## Context
 

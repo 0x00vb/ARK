@@ -2683,7 +2683,7 @@ async fn automation_admission_is_atomic_deduplicated_and_approval_resumes_only_e
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_automation_step_that_ends_on_a_note_after_narrated_calls_is_asked_once() {
+async fn an_automation_step_that_ends_on_a_note_after_a_refused_call_keeps_it() {
     use crate::automation::*;
     use ark_model::{Completion, ToolCall};
     use ark_tools::{ActionOutput, Adapter, RunCtx};
@@ -2763,8 +2763,11 @@ async fn an_automation_step_that_ends_on_a_note_after_narrated_calls_is_asked_on
         .unwrap();
     o.execute_automation_run(&run.id).unwrap();
     let completed = wait_automation(&o, &run.id, RunPhase::Completed).await;
-    assert_eq!(completed.output.text, "Lead list: Acme, Birch, Cora.");
-    assert_eq!(provider.calls.lock().unwrap().len(), 3);
+    assert_eq!(
+        completed.output.text,
+        "Checking the project files and verifying the seed."
+    );
+    assert_eq!(provider.calls.lock().unwrap().len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]

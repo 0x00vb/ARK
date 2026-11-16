@@ -1579,12 +1579,11 @@ impl Inner {
             .resume_automation_actions(&engine, &scope, &key, &gate, &guard, &cancel)
             .await?;
         let harness = Harness::new(models.router.clone_view())
-            .max_steps(self.max_steps)
+            .max_steps(self.max_steps.min(ark_runtime::UNATTENDED_STEPS))
             .budget_or_auto(self.context_budget)
             .planner(self.planner)
             .critic(self.critic)
             .guard(guard.clone())
-            .brief_task(true)
             .done_before(done)
             .chat(run.id.as_str())
             .approvals(Some(gate))

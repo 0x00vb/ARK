@@ -50,7 +50,8 @@ impl Adapter for ModeTool {
             "Set this chat's mode for its next message: plan (no changes), manual (ask before changes) or auto. Only when the person asks.",
             RiskTier::Mutate,
         )
-        .stays_in_plan();
+        .stays_in_plan()
+        .ends_with_short_reply();
         action.input_schema = json!({
             "type": "object",
             "properties": { "mode": { "type": "string", "enum": ["plan", "manual", "auto"] } },

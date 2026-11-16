@@ -80,6 +80,7 @@ impl Adapter for RoleTools {
             RiskTier::Observe,
         )
         .volatile()
+        .ends_with_short_reply()
         .with_input_schema(json!({
             "type": "object",
             "required": ["instructions"],
@@ -235,6 +236,7 @@ impl Adapter for GroupTools {
             RiskTier::Observe,
         )
         .volatile()
+        .ends_with_short_reply()
         .with_input_schema(json!({
             "type": "object",
             "required": ["name", "members"],
@@ -310,6 +312,7 @@ impl Adapter for LaterTools {
             RiskTier::Observe,
         )
         .volatile()
+        .ends_with_short_reply()
         .with_input_schema(json!({
             "type": "object",
             "required": ["brief"],
@@ -869,6 +872,7 @@ impl Scheduling<'_> {
                 },
             )
             .volatile()
+            .ends_with_short_reply()
             .with_input_schema(json!({
                 "type": "object",
                 "properties": {
@@ -899,6 +903,7 @@ impl Scheduling<'_> {
                     RiskTier::Observe,
                 )
                 .volatile()
+                .ends_with_short_reply()
                 .with_input_schema(json!({
                     "type": "object",
                     "required": ["schedule"],

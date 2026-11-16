@@ -210,6 +210,7 @@ cite evidence for factual claims, and where evidence is missing say so and label
 hypothesis or unknown. Output only the revised answer.";
 
 pub const DEFAULT_FORCE_ANSWER: &str =
-    "Stop calling tools. Give your best final answer from the evidence gathered, clearly \
-separating established facts (with [inv:…] citations) from hypotheses, and end with the \
-single most useful next step.";
+    "Stop calling tools. Say what you did and what is left to do, from the evidence gathered, \
+separating established facts (with [inv:…] citations) from hypotheses. Do not ask whether to \
+continue and do not offer options. If one decision only the person can make blocks the rest, \
+name that decision.";

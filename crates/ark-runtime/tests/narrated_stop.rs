@@ -1,6 +1,8 @@
-//! A brief task that narrates its steps and ends on a one-line note has no result. The harness
-//! sends such a reply back once; whatever the model answers after that is the answer. A chat
-//! turn, a one-line answer after silent calls and a one-line answer with no calls are left alone.
+//! A turn that narrates its steps and ends on a one-line note has no result. The harness sends
+//! such a reply back once, in a chat turn as in a brief task (ADR 0125); whatever the model
+//! answers after that is the answer. A one-line answer after silent calls, with no calls, ending
+//! in a question, after a refused call or after a call that asks for a short closing reply is
+//! left alone.
 
 use std::sync::Arc;
 
@@ -21,6 +23,8 @@ impl Adapter for Look {
         vec![
             ActionDescriptor::new("look.read", "read a file", RiskTier::Read),
             ActionDescriptor::new("look.write", "write a file", RiskTier::Mutate),
+            ActionDescriptor::new("look.later", "hand work off", RiskTier::Observe)
+                .ends_with_short_reply(),
         ]
     }
     async fn run(
@@ -58,6 +62,14 @@ fn write(path: &str) -> ToolCall {
     }
 }
 
+fn later() -> ToolCall {
+    ToolCall {
+        id: "later".into(),
+        name: "look.later".into(),
+        arguments: json!({}),
+    }
+}
+
 fn reply(text: &str, calls: Vec<ToolCall>) -> Completion {
     Completion {
         content: text.into(),
@@ -70,14 +82,19 @@ const NOTE: &str = "Checking the project files and verifying the seed leads.";
 const NOTE_AGAIN: &str = "Reading the price lines now.";
 const RESULT: &str =
     "Lead list\n\n- Acme: 3 seats, warm\n- Birch: 10 seats, cold\n- Cora: 1 seat, warm";
-const NUDGE: &str = "Your reply says what you will do next";
+const NUDGE: &str = "Your last reply was one short line";
+const ANNOUNCED: &str = "Your reply says what you will do next";
 
 struct Run {
     answer: String,
     requests: Vec<ark_model::mock::Recorded>,
 }
 
-async fn run(brief: bool, script: Vec<Completion>) -> Run {
+async fn run(script: Vec<Completion>) -> Run {
+    run_as(true, script).await
+}
+
+async fn run_as(allow_mutate: bool, script: Vec<Completion>) -> Run {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open_with(dir.path(), Registry::new().with(Arc::new(Look))).unwrap();
     let project = engine.create_project("leads", "").unwrap();
@@ -85,13 +102,12 @@ async fn run(brief: bool, script: Vec<Completion>) -> Run {
         Arc::new(MockProvider::new("m", script).with_fallback(|_| reply("FALLBACK", vec![])));
     let provider: Arc<dyn Provider> = model.clone();
     let profile = AgentProfile::builder()
-        .core_actions(["look.read", "look.write"])
+        .core_actions(["look.read", "look.write", "look.later"])
         .build();
     let out = Harness::new(ModelRouter::single(provider))
         .planner(false)
         .critic(false)
-        .brief_task(brief)
-        .allow_mutate(true)
+        .allow_mutate(allow_mutate)
         .ask(
             &engine,
             &profile,
@@ -123,27 +139,41 @@ fn a_note_is_one_short_line() {
 }
 
 #[tokio::test]
-async fn narrated_calls_then_a_note_get_one_more_try_in_a_brief_task() {
-    let r = run(
-        true,
-        vec![
-            reply("Reading the seed file.", vec![read("seed.md")]),
-            reply(NOTE, vec![]),
-            reply(RESULT, vec![]),
-        ],
-    )
+async fn narrated_calls_then_a_note_get_one_more_try_in_a_chat_turn() {
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(NOTE, vec![]),
+        reply("", vec![read("other.md")]),
+        reply(RESULT, vec![]),
+    ])
     .await;
-    assert_eq!(r.requests.len(), 3, "the note was sent back");
-    assert!(nudged(&r), "the third request carries the nudge");
+    assert_eq!(r.requests.len(), 4, "the note was sent back once");
+    assert!(nudged(&r));
+    assert!(!r
+        .requests
+        .iter()
+        .any(|q| q.messages.iter().any(|m| m.content.contains(ANNOUNCED))));
     assert_eq!(r.answer, RESULT);
 }
 
 #[tokio::test]
-async fn the_same_note_in_a_chat_turn_is_the_answer() {
-    let r = run(
+async fn a_question_is_not_a_note() {
+    assert!(!reads_as_note("Shall I save the summary now?"));
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply("Shall I save the summary now?", vec![]),
+    ])
+    .await;
+    assert_eq!(r.requests.len(), 2);
+    assert_eq!(r.answer, "Shall I save the summary now?");
+}
+
+#[tokio::test]
+async fn a_refused_call_this_turn_means_the_note_is_the_answer() {
+    let r = run_as(
         false,
         vec![
-            reply("Reading the seed file.", vec![read("seed.md")]),
+            reply("Saving the file.", vec![write("out.md")]),
             reply(NOTE, vec![]),
         ],
     )
@@ -154,21 +184,60 @@ async fn the_same_note_in_a_chat_turn_is_the_answer() {
 }
 
 #[tokio::test]
+async fn a_call_that_asks_for_a_short_closing_reply_is_not_followed_by_a_nudge() {
+    let r = run(vec![
+        reply("Handing it off.", vec![later()]),
+        reply("I will look into it.", vec![]),
+    ])
+    .await;
+    assert_eq!(r.requests.len(), 2);
+    assert!(!nudged(&r));
+    assert_eq!(r.answer, "I will look into it.");
+}
+
+#[allow(deprecated)]
+#[tokio::test]
+async fn the_brief_task_flag_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open_with(dir.path(), Registry::new().with(Arc::new(Look))).unwrap();
+    let project = engine.create_project("leads", "").unwrap();
+    let model: Arc<dyn Provider> = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            reply("Reading.", vec![read("a.md")]),
+            reply(NOTE, vec![]),
+            reply(RESULT, vec![]),
+        ],
+    ));
+    let out = Harness::new(ModelRouter::single(model))
+        .planner(false)
+        .critic(false)
+        .brief_task(false)
+        .ask(
+            &engine,
+            &AgentProfile::builder().core_actions(["look.read"]).build(),
+            &project.id,
+            "go",
+            |_| {},
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.answer, RESULT);
+}
+
+#[tokio::test]
 async fn a_one_line_answer_with_no_calls_costs_nothing_extra() {
-    let r = run(true, vec![reply("There are 3 warm leads.", vec![])]).await;
+    let r = run(vec![reply("There are 3 warm leads.", vec![])]).await;
     assert_eq!(r.requests.len(), 1);
     assert_eq!(r.answer, "There are 3 warm leads.");
 }
 
 #[tokio::test]
 async fn a_one_line_answer_after_silent_calls_is_the_answer() {
-    let r = run(
-        true,
-        vec![
-            reply("", vec![read("seed.md")]),
-            reply("Renamed 3 leads.", vec![]),
-        ],
-    )
+    let r = run(vec![
+        reply("", vec![read("seed.md")]),
+        reply("Renamed 3 leads.", vec![]),
+    ])
     .await;
     assert_eq!(r.requests.len(), 2);
     assert!(!nudged(&r));
@@ -177,14 +246,11 @@ async fn a_one_line_answer_after_silent_calls_is_the_answer() {
 
 #[tokio::test]
 async fn a_note_again_after_the_nudge_is_the_answer() {
-    let r = run(
-        true,
-        vec![
-            reply("Reading the seed file.", vec![read("seed.md")]),
-            reply(NOTE, vec![]),
-            reply(NOTE_AGAIN, vec![]),
-        ],
-    )
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(NOTE, vec![]),
+        reply(NOTE_AGAIN, vec![]),
+    ])
     .await;
     assert_eq!(r.requests.len(), 3, "one nudge, not more");
     assert_eq!(r.answer, NOTE_AGAIN);
@@ -192,14 +258,11 @@ async fn a_note_again_after_the_nudge_is_the_answer() {
 
 #[tokio::test]
 async fn a_short_result_after_the_nudge_is_the_answer() {
-    let r = run(
-        true,
-        vec![
-            reply("Reading the seed file.", vec![read("seed.md")]),
-            reply(NOTE, vec![]),
-            reply("Renamed 3 leads.", vec![]),
-        ],
-    )
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(NOTE, vec![]),
+        reply("Renamed 3 leads.", vec![]),
+    ])
     .await;
     assert_eq!(r.requests.len(), 3);
     assert!(nudged(&r));
@@ -208,16 +271,13 @@ async fn a_short_result_after_the_nudge_is_the_answer() {
 
 #[tokio::test]
 async fn a_write_after_the_nudge_then_a_short_result_is_the_answer() {
-    let r = run(
-        true,
-        vec![
-            reply("Reading the seed file.", vec![read("seed.md")]),
-            reply(NOTE, vec![]),
-            reply("", vec![write("out/brand.md")]),
-            reply("", vec![read("out/brand.md")]),
-            reply("Wrote out/brand.md.", vec![]),
-        ],
-    )
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(NOTE, vec![]),
+        reply("", vec![write("out/brand.md")]),
+        reply("", vec![read("out/brand.md")]),
+        reply("Wrote out/brand.md.", vec![]),
+    ])
     .await;
     assert_eq!(r.requests.len(), 5);
     assert!(nudged(&r));

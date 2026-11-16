@@ -194,11 +194,17 @@ async fn long_notes_beside_reads_of_new_material_do_not_end_the_turn() {
             &answer("The new opening of chapter one is saved."),
             vec![read("notes/ferry.md")],
         ),
-        reply("Done: the opening is rewritten.", vec![]),
+        reply(
+            "Done: the opening is rewritten.\n\nIt is saved in ch1.md.",
+            vec![],
+        ),
     ])
     .await;
     assert_eq!(r.model_calls, 4);
-    assert_eq!(r.answer, "Done: the opening is rewritten.");
+    assert_eq!(
+        r.answer,
+        "Done: the opening is rewritten.\n\nIt is saved in ch1.md."
+    );
     assert_eq!(r.tool_calls.len(), 3);
 }
 
@@ -246,11 +252,11 @@ async fn a_different_answer_beside_a_check_does_not_end_the_turn() {
             vec![read("ch1.md")],
         ),
         reply(OTHER, vec![read("ch1.md")]),
-        reply("Done.", vec![]),
+        reply("Done.\n\nChapter one is saved.", vec![]),
     ])
     .await;
     assert_eq!(r.model_calls, 4);
-    assert_eq!(r.answer, "Done.");
+    assert_eq!(r.answer, "Done.\n\nChapter one is saved.");
 }
 
 #[tokio::test]

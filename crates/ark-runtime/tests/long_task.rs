@@ -71,7 +71,7 @@ fn profile() -> AgentProfile {
 fn step(n: usize) -> Completion {
     if n >= CALLS {
         return Completion {
-            content: "Highlighting is in place.".into(),
+            content: "Highlighting is in place.\n\nThe editor draws it from part3.js.".into(),
             tool_calls: vec![],
             usage: Usage::default(),
         };
@@ -135,7 +135,10 @@ async fn a_long_task_keeps_its_goal_what_the_person_said_and_what_it_did() {
         })
         .await
         .unwrap();
-    assert_eq!(out.answer, "Highlighting is in place.");
+    assert_eq!(
+        out.answer,
+        "Highlighting is in place.\n\nThe editor draws it from part3.js."
+    );
     assert_eq!(steered, [STEER]);
     assert!(dropped > 60, "most rounds were dropped: {dropped}");
 
@@ -276,7 +279,7 @@ async fn a_vendor_session_that_rotates_starts_from_the_goal() {
         .ask(&engine, &profile(), &project, REQUEST, |_| {})
         .await
         .unwrap();
-    assert_eq!(out.answer, "Highlighting is in place.");
+    assert!(out.answer.starts_with("Highlighting is in place."));
     let opened = vendor.opened.lock().unwrap();
     assert!(
         opened.len() > 3,
@@ -328,7 +331,7 @@ async fn a_small_window_is_never_overrun() {
         .ask(&engine, &profile(), &project, "continue", |_| {})
         .await
         .unwrap();
-    assert_eq!(out.answer, "Highlighting is in place.");
+    assert!(out.answer.starts_with("Highlighting is in place."));
     let peak = model.peak_prompt_tokens();
     assert!(peak < 8_192, "a request went over the window: {peak}");
     let head = &model.recorded()[0].messages[0].content;

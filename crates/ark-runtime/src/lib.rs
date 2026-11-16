@@ -61,7 +61,8 @@ pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::{Engine, Restored};
 pub use error::{AgentError, UNUSABLE_REPLY};
 pub use harness::{
-    reads_as_note, FileBefore, Harness, HarnessEvent, HarnessOutcome, STATE_DIGEST_ITEMS,
+    reads_as_note, FileBefore, Harness, HarnessEvent, HarnessOutcome, DEFAULT_STEPS,
+    STATE_DIGEST_ITEMS, UNATTENDED_STEPS,
 };
 pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use ledger::StoreLedger;

@@ -246,8 +246,6 @@ impl HarnessOutcome {
 pub struct Harness {
     router: ModelRouter,
     allow_mutate: bool,
-    /// The task is a result for whoever handed it over, not the person's chat turn.
-    brief_task: bool,
     max_steps: usize,
     /// What this turn works on when it continues an unfinished one (ADR 0050). `None`: the
     /// question is the goal.
@@ -353,8 +351,7 @@ impl Harness {
         Harness {
             router,
             allow_mutate: false,
-            brief_task: false,
-            max_steps: 16,
+            max_steps: DEFAULT_STEPS,
             goal: None,
             chat: String::new(),
             budget: crate::budget::budget_from_env(),
@@ -489,10 +486,10 @@ impl Harness {
         self.allow_mutate = yes;
         self
     }
-    /// The task is a brief handed over by another agent, a schedule or an automation: its
-    /// final reply is the result, so a one-line note on the steps is not one.
-    pub fn brief_task(mut self, yes: bool) -> Self {
-        self.brief_task = yes;
+    /// Does nothing: every turn, the person's chat turn included, is asked once to continue
+    /// when it ends on a one-line note (ADR 0125).
+    #[deprecated(note = "every turn is nudged on a note; the flag changes nothing")]
+    pub fn brief_task(self, _yes: bool) -> Self {
         self
     }
     pub fn execution_mode(mut self, mode: ExecutionMode) -> Self {
@@ -820,6 +817,10 @@ impl Harness {
         let mut corrected_announce = false;
         // Some reply of this turn wrote text beside its tool calls.
         let mut narrated_calls = false;
+        // A call this turn was refused or denied, or asks for a short closing reply: a one-line
+        // reply is then expected, not a note.
+        let mut refused_call = false;
+        let mut short_closing = false;
         // The answer the model last wrote beside a check of its own changes (see `rechecks`).
         let mut checked: Option<String> = None;
         // Calls run this turn in order: the last change, the last look, how many changes, and
@@ -1046,11 +1047,13 @@ impl Harness {
                 // An answer that ends by saying what it will do next ("I will now call
                 // files.edit") while it can still call tools stopped before the work: a small
                 // model does this after reading what it was asked to change. Say so once.
+                let announced = announces_work(&completion.content);
                 if !corrected_announce
                     && !tools.is_empty()
-                    && (announces_work(&completion.content)
-                        || (self.brief_task
-                            && narrated_calls
+                    && (announced
+                        || (narrated_calls
+                            && !refused_call
+                            && !short_closing
                             && reads_as_note(&completion.content)))
                 {
                     corrected_announce = true;
@@ -1058,7 +1061,11 @@ impl Harness {
                     tracing::info!("the answer announces work it has not done; asking again");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),
-                        Message::user(ANNOUNCED_NOTE),
+                        Message::user(if announced {
+                            ANNOUNCED_NOTE
+                        } else {
+                            NOTE_NUDGE
+                        }),
                     ]);
                     retrieved.push(0);
                     continue;
@@ -1082,6 +1089,12 @@ impl Harness {
             }
 
             narrated_calls |= !completion.content.trim().is_empty();
+            short_closing |= completion.tool_calls.iter().any(|c| {
+                engine
+                    .registry
+                    .descriptor(&c.name)
+                    .is_some_and(|d| d.ends_with_short_reply)
+            });
             show_held!();
             // The model's note with its calls stays in the round for the ledger (it is not sent
             // while the round is shown: `budget::sent`) and goes on each call's record, so work
@@ -1138,6 +1151,7 @@ impl Harness {
                         let meta = catalog::is_meta_tool(&call.name);
                         if meta && !crate::guard::safe_meta(&call.name) {
                             flush!();
+                            refused_call = true;
                             round.push(Message::tool_result(
                                 call,
                                 "refused: this operation has no guarded effect contract",
@@ -1157,6 +1171,7 @@ impl Harness {
                         match guard.check(&call.name, &input, descriptor.as_ref()) {
                             crate::guard::Verdict::Refuse(reason) => {
                                 flush!();
+                                refused_call = true;
                                 round.push(Message::tool_result(
                                     call,
                                     format!(
@@ -1172,6 +1187,7 @@ impl Harness {
                                     }) =>
                             {
                                 flush!();
+                                refused_call = true;
                                 round.push(Message::tool_result(
                                     call,
                                     "refused: this operation has no guarded approval route",
@@ -1339,6 +1355,7 @@ impl Harness {
                             decision: ApprovalDecision::Deny,
                             ..
                         } => {
+                            refused_call = true;
                             round.push(Message::tool_result(
                                 call,
                                 "denied: the user declined this action. Do not retry it; continue from read-only evidence or ask the user.",
@@ -1354,6 +1371,7 @@ impl Harness {
                             on_event(HarnessEvent::NeedsApproval {
                                 action: call.name.clone(),
                             });
+                            refused_call = true;
                             round.push(Message::tool_result(
                                 call,
                                 "denied: this action changes state and needs human approval, and no one can approve it in this run, so it did not run. Do not retry. Say in your answer what you would have changed and that it needs approval; work from what you can read.",
@@ -3271,16 +3289,25 @@ const REPEATED_FAILURE_NOTE: &str = "not run: this exact call already failed twi
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
 
-/// A brief task's final reply that is one short line: a note on what the agent is doing, as
-/// it writes beside its calls, and not a result. Language-neutral; a result of several lines
-/// or more than [`NOTE_CHARS`] characters is not a note.
+const NOTE_NUDGE: &str = "Your last reply was one short line and called no tool, so the turn would end here. If the work is finished, give the result to the person. If not, continue with the next call.";
+
+/// A final reply that is one short line: a note on what the agent is doing, as it writes beside
+/// its calls, and not a result. Language-neutral; a result of several lines, more than
+/// [`NOTE_CHARS`] characters, or a question to the person is not a note.
 pub fn reads_as_note(text: &str) -> bool {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
     match (lines.next(), lines.next()) {
-        (Some(line), None) => line.chars().count() <= NOTE_CHARS,
+        (Some(line), None) => {
+            line.chars().count() <= NOTE_CHARS && !line.ends_with(['?', '\u{ff1f}'])
+        }
         _ => false,
     }
 }
+
+/// The default step limit of a turn the person is present for, and of work started from a
+/// chat. Scheduled and automation runs use at most [`UNATTENDED_STEPS`].
+pub const DEFAULT_STEPS: usize = 40;
+pub const UNATTENDED_STEPS: usize = 16;
 
 /// The longest one-line reply that reads as a note on the steps (ADR 0051 measured them at 39
 /// to 205 characters).

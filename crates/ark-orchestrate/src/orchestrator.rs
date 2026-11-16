@@ -4192,13 +4192,18 @@ impl Inner {
         };
         let mut harness = Harness::new(models.router.clone_view())
             .pictures(pictures)
-            .max_steps(budget.max_steps.unwrap_or(self.max_steps))
+            .max_steps(budget.max_steps.unwrap_or_else(|| {
+                if task.schedule.is_some() || task.run.is_some() {
+                    self.max_steps.min(ark_runtime::UNATTENDED_STEPS)
+                } else {
+                    self.max_steps
+                }
+            }))
             .budget_or_auto(self.context_budget)
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(allow_mutate)
             .execution_mode(self.task_mode(&task, &agent, &session))
-            .brief_task(!task.is_chat_turn())
             .approvals(approvals.clone())
             .cancel(Some(attempt_cancel.clone()))
             .stopping(Some(self.engine.stopping()))

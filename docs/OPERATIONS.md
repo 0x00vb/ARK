@@ -165,7 +165,7 @@ The stall guard ends a turn that stops making progress. Progress is new informat
 result the turn has not seen, the first use of a retrieval or a state edit, a newly loaded
 action. Three steps in a row without it get a nudge to change course; five end the loop and
 force a final answer. Repeating a search, a hypothesis or a failing call does not count. The
-step limit (16 by default) still applies to work that keeps making progress.
+step limit (40 by default, 16 for scheduled and automation runs) still applies to work that keeps making progress.
 
 An identical failed read or observation runs once and gets one retry. A third attempt returns
 immediately and tells the model to change the input, use another tool or answer. A successful

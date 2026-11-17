@@ -193,17 +193,19 @@ async fn an_unchecked_change_gets_one_nudge_and_a_second_answer() {
 }
 
 #[tokio::test]
-async fn the_nudge_is_never_sent_twice_in_a_turn() {
+async fn each_new_change_gets_its_own_nudge_once() {
+    // ADR 0127: the check nudge is once per change, not once per turn.
     let r = run(vec![
         step("notes.write", "w1"),
         say("one"),
         step("notes.write", "w2"),
         say("two"),
+        say("two, unchecked"),
     ])
     .await;
-    assert_eq!(r.model_calls, 4);
-    assert_eq!(r.nudges, 1);
-    assert_eq!(r.answer, "two");
+    assert_eq!(r.model_calls, 5);
+    assert_eq!(r.nudges, 2);
+    assert_eq!(r.answer, "two, unchecked");
 }
 
 #[tokio::test]

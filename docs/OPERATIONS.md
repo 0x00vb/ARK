@@ -167,6 +167,10 @@ action. Three steps in a row without it get a nudge to change course; five end t
 force a final answer. Repeating a search, a hypothesis or a failing call does not count. The
 step limit (40 by default, 16 for scheduled and automation runs) still applies to work that keeps making progress.
 
+A text reply that is only a note on the next step (one line, or one that announces work it did
+not do) is sent back, and again after each step that runs a call, at most eight times a turn
+(ADR 0127). The reply after the nudge is the answer.
+
 An identical failed read or observation runs once and gets one retry. A third attempt returns
 immediately and tells the model to change the input, use another tool or answer. A successful
 call clears its own failure count. A successful state-changing call clears all read failure

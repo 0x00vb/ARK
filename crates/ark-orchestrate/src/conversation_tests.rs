@@ -2772,6 +2772,77 @@ async fn an_automation_step_that_ends_on_a_note_after_a_refused_call_keeps_it() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_automation_steps_one_line_answer_is_not_sent_back_as_a_note() {
+    // ADR 0127: only the person's own turn sends back a one-line first reply.
+    use crate::automation::*;
+    let dir = tempfile::tempdir().unwrap();
+    let reply = |text: &str| ark_model::Completion {
+        content: text.into(),
+        tool_calls: vec![],
+        usage: Default::default(),
+    };
+    let provider = Arc::new(ark_model::MockProvider::new(
+        "test",
+        vec![reply("SECRET_FIRST_OUTPUT"), reply("SECOND_OUTPUT")],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("project", "test").unwrap();
+    let models = Arc::new(
+        crate::Models::builder()
+            .default_model("test")
+            .provider("test", provider.clone())
+            .build(),
+    );
+    let o = Orchestrator::builder(&ark, &project)
+        .models(models)
+        .build()
+        .unwrap();
+    let mut draft = sequence_draft();
+    draft.steps.insert(
+        1,
+        Step {
+            id: "second".into(),
+            name: "Second".into(),
+            action: StepAction::Agent {
+                target: WorkTarget::General {
+                    model: Some("test".into()),
+                },
+                prompt: "Read the latest sales figures, compare them with last month, and write the change for the weekly team summary".into(),
+                inputs: vec![],
+            },
+        },
+    );
+    draft.steps[2].action = StepAction::Result {
+        inputs: vec![Binding::Step {
+            step: "second".into(),
+            port: Port::Text,
+        }],
+    };
+    let saved = o.save_automation("create", None, None, draft).unwrap();
+    let run = o
+        .admit_confirmed_test_run(
+            &saved.automation,
+            1,
+            RunOrigin::Manual {
+                request: "run".into(),
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    o.execute_automation_run(&run.id).unwrap();
+    let completed = wait_automation(&o, &run.id, RunPhase::Completed).await;
+    assert_eq!(completed.output.text, "SECOND_OUTPUT");
+    assert_eq!(provider.calls.lock().unwrap().len(), 2, "no note nudge");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn automation_step_context_only_contains_explicit_bindings_and_does_not_create_agents() {
     use crate::automation::*;
     let dir = tempfile::tempdir().unwrap();

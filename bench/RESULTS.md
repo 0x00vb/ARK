@@ -3,6 +3,34 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## An agent works until the task is done (2026-11-17, 0.52.0)
+
+Live `claude:sonnet`, 15 workloads x 3 (`finish-turn-2026-11-17/`). v0.51.0 rescored with the
+corrected `recall-answer` check from its traces (the old check counted the table's lines and
+looked for the simulated price, so it failed every live run; its report says 37 of 45):
+
+| | v0.51.0 | 0.52.0 |
+|---|---:|---:|
+| Success | 40 of 45 (89%) | 44 of 45 (98%) |
+| Cost per success | $0.0245 | $0.0201 |
+| Model calls per run | 3.44 | 3.22 |
+| Uncached input per run | 2,585 | 2,488 |
+| Median turn | 7.3 s | 6.1 s |
+
+`claimed-files` went from 0 of 3 to 2 of 3: the prompt now allows one more try of a call that
+failed or did only some of the work.
+
+Session rotation every 2 turns (`ARK_SESSION_MAX_TURNS=2`), `long-session` x 2:
+
+| | v0.51.0 | 0.52.0 |
+|---|---:|---:|
+| Cache writes per run | 22,332 | 19,164 |
+| Cached share of input | 77.8% | 80.4% |
+| Cost per run | $0.1142 | $0.1004 |
+
+Simulated suite: success and calls unchanged, input +3% (the longer prompt); `baseline.json`
+regenerated. Decision: ADR 0127.
+
 ## Codex catalog startup (2026-10-15)
 
 A read-only diagnosis of failed explicit-effort starts measured initialize, optional usage

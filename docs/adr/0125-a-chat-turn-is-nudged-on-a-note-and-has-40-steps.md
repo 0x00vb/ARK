@@ -1,6 +1,6 @@
 # 0125. A chat turn is nudged on a note and has 40 steps
 
-Status: Accepted. Date: 2026-11-16. Amends 0122 (the note rule was for brief tasks only). Found in the owner's traces of a CEO agent in Auto (workspace `board/evidence/chat-keep-going-20261116/PLAN.md`).
+Status: Accepted. Date: 2026-11-16. Amends 0122 (the note rule was for brief tasks only). Found in the owner's traces of a CEO agent in Auto (workspace `board/evidence/chat-keep-going-20261116/PLAN.md`). Amended by 0127 (nudges after each step, a first-reply note).
 
 ## Context
 

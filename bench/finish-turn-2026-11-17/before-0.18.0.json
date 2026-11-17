@@ -1,0 +1,50 @@
+{
+ "calls": 5,
+ "steps": 5,
+ "input": 123216,
+ "cache_read": 81348,
+ "cache_write": 41850,
+ "output": 17966,
+ "tools": 34,
+ "approvals": 0,
+ "withdrawn": 0,
+ "per_call": [
+  [
+   10629,
+   0,
+   10627
+  ],
+  [
+   11021,
+   10627,
+   390
+  ],
+  [
+   18380,
+   11017,
+   7359
+  ],
+  [
+   41332,
+   18376,
+   22952
+  ],
+  [
+   41854,
+   41328,
+   522
+  ]
+ ],
+ "answer": "The 10 English files in `product/` are cleaned up, and each now has a Spanish version in `product/es/`. A final search of both folders found no em dashes, en dashes or arrows left.\n\n**English cleanup.** I took out every em dash, en dash and arrow, in the titles, headings and body text. In each case I used normal punctuation instead (a colon, comma or semicolon) and kept the wording the same. For example:\n- Before: \"Start small \u2014 pick one client type\u2026 Keep it short \u2013 three lines at most \u2192 then follow up\u2026\"\n- After: \"Start small: pick one client type\u2026 Keep it short, three lines at most, then follow up\u2026\"\n\nI left the hyphen in \"30-Day Plan\" because it's a normal hyphen, not a dash.\n\n**Spanish versions.** Each file in `product/es/` has the same name as its English file and the same layout: a title and six \"Paso\" sections. Terms are translated the same way everywhere, for example:\n- \"First Paid Client\" became \"primer cliente pagado\"\n- \"Outreach Scripts\" became \"Guiones de contacto\"\n- \"Rate Card\" became \"Lista de tarifas\"\n- \"Client Tracker\" became \"Registro de clientes\"\n\nThe Spanish uses neutral \"t\u00fa\" forms and also has no dashes or arrows.\n\n**Something to check:** in every file, all six steps have exactly the same paragraph. The only change is the product name, and the paragraph is always about outreach, even in the rate card and the welcome emails. That looks like placeholder text, so you may want to write real content for each step before you sell this.\n\nIf your buyers are in Argentina, I can switch the Spanish to \"vos\" forms (empez\u00e1, eleg\u00ed, escribile).",
+ "ended": "ok",
+ "secs": 125.6,
+ "check": {
+  "slop_left": [],
+  "es_missing": [],
+  "headings_differ": [],
+  "ok": true
+ },
+ "label": "before-0.18.0",
+ "model": "claude:opus@medium",
+ "work": "/var/folders/bb/fmp0dyw1289g0tzbb2n6yhb40000gn/T/long-before-0.18.0-4he0twri"
+}

@@ -3680,6 +3680,12 @@ async fn native_work_followups_keep_the_assigned_agent_and_retry_one_durable_eff
                 tool_calls: vec![],
                 usage: Usage::default(),
             },
+            // The person's assigned work: a one-line first reply is sent back once (ADR 0127).
+            Completion {
+                content: "Initial result".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
             Completion {
                 content: "Followup result".into(),
                 tool_calls: vec![],
@@ -3780,7 +3786,7 @@ async fn native_work_followups_keep_the_assigned_agent_and_retry_one_durable_eff
         .iter()
         .all(|task| task["conversation"] == admitted["conversation"]));
     assert!(first.contains("completed"), "{first}");
-    assert_eq!(provider.calls.lock().unwrap().len(), 2);
+    assert_eq!(provider.calls.lock().unwrap().len(), 3);
     resource_call(
         &owner,
         "project",

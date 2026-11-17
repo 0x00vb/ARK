@@ -172,3 +172,4 @@ Local integration decisions:
 - [0124-an-agent-chats-files-are-in-the-agents-folder](0124-an-agent-chats-files-are-in-the-agents-folder.md)
 - [0125-a-chat-turn-is-nudged-on-a-note-and-has-40-steps](0125-a-chat-turn-is-nudged-on-a-note-and-has-40-steps.md)
 - [0126-started-colleagues-continue-the-chat-that-started-them](0126-started-colleagues-continue-the-chat-that-started-them.md)
+- [0127-a-note-is-sent-back-after-each-step-and-a-rotation-keeps-its-prompt](0127-a-note-is-sent-back-after-each-step-and-a-rotation-keeps-its-prompt.md)

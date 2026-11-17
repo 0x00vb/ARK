@@ -451,6 +451,46 @@ fn recall_table() -> String {
     rows.join("\n")
 }
 
+/// Rows of a Markdown table that hold a product code.
+fn table_rows(table: &str) -> usize {
+    table
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('|') && l.contains("P-10"))
+        .count()
+}
+
+/// The price a table gave `code`: the last cell of its row that is only a number, with an
+/// optional currency ("$71.50", "71.50 USD", "**11.00**"). None when no cell is.
+fn row_price(table: &str, code: &str) -> Option<String> {
+    let row = table
+        .lines()
+        .find(|l| l.trim().starts_with('|') && l.contains(code))?;
+    row.split('|')
+        .filter_map(|cell| {
+            let words: Vec<&str> = cell
+                .split_whitespace()
+                .map(|w| w.trim_matches(|c: char| "*$€£".contains(c)))
+                .filter(|w| !w.is_empty() && !matches!(*w, "USD" | "EUR" | "GBP"))
+                .collect();
+            match words.as_slice() {
+                [n] if n.replace(',', "").parse::<f64>().is_ok() => Some(n.to_string()),
+                _ => None,
+            }
+        })
+        .next_back()
+}
+
+/// Whether `text` says the number `n` as a whole number, not as part of a longer one.
+fn says_number(text: &str, n: &str) -> bool {
+    text.match_indices(n).any(|(i, _)| {
+        let before = text[..i].chars().next_back();
+        let after = text[i + n.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_digit() || c == '.')
+            && !after.is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
 /// An answer written in turn 1 is asked about in turn 3, after another answer: the carried
 /// conversation must still hold the row, with its line breaks.
 pub fn recall_answer() -> Spec {
@@ -483,17 +523,13 @@ pub fn recall_answer() -> Spec {
         }),
         prepare: None,
         check: Arc::new(|o| {
-            let rows = o
-                .turns
-                .first()
-                .map(|t| t.answer.lines().count())
-                .unwrap_or(0);
+            let table = o.turns.first().map(|t| t.answer.as_str()).unwrap_or("");
+            let rows = table_rows(table);
+            let said = o.turns.get(2).map(|t| t.answer.as_str()).unwrap_or("");
             Verdict::all(&[
-                (rows == 10, "the table was not written"),
+                (rows == 8, "the table was not written"),
                 (
-                    o.turns
-                        .get(2)
-                        .is_some_and(|t| t.answer.contains(RECALL_PRICE)),
+                    row_price(table, "P-107").is_some_and(|p| says_number(said, &p)),
                     "the answer to turn 3 does not have row 7",
                 ),
             ])
@@ -1026,4 +1062,24 @@ fn team_answer(r: &SimRequest) -> String {
         .map(|(_, t)| *t)
         .collect();
     format!("Combined: {}", parts.join(" | "))
+}
+
+#[cfg(test)]
+mod recall_check_tests {
+    use super::{row_price, says_number};
+
+    #[test]
+    fn the_price_is_the_rows_number_and_is_said_whole() {
+        let t = "| code | item | price |\n|---|---|---|\n| P-107 | Water bottle | $11.00 |";
+        assert_eq!(row_price(t, "P-107").as_deref(), Some("11.00"));
+        assert_eq!(
+            row_price("| P-107 | Lamp | 71.50 USD |", "P-107").as_deref(),
+            Some("71.50")
+        );
+        assert_eq!(row_price("| P-107 | Lamp | TBD |", "P-107"), None);
+        assert_eq!(row_price("| P-107 | Item number 7 | TBD |", "P-107"), None);
+        assert!(says_number("It was **$11.00** for P-107.", "11.00"));
+        assert!(!says_number("It was 211.00.", "11.00"));
+        assert!(!says_number("It was 11.005.", "11.00"));
+    }
 }

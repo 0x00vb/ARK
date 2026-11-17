@@ -1579,6 +1579,7 @@ impl Inner {
             .resume_automation_actions(&engine, &scope, &key, &gate, &guard, &cancel)
             .await?;
         let harness = Harness::new(models.router.clone_view())
+            .first_note(false)
             .max_steps(self.max_steps.min(ark_runtime::UNATTENDED_STEPS))
             .budget_or_auto(self.context_budget)
             .planner(self.planner)

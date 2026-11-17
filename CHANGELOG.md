@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-11-17
+
+A note is sent back after each step, the first reply included; a rotated Claude Code session keeps its cached system prompt (ADR 0127).
+
+### Changed
+
+- A one-line reply with no tool call is sent back as the first reply to a task that is not trivial on the person's own turn, not only after narrated calls. The reply after the nudge is the answer.
+- The note nudge and the reply that announces work are sent back again after any step that ran a call, at most 8 a turn (was once a turn).
+- The check nudge after an unchecked change is once per change (was once a turn).
+- The system prompt asks for all of the work asked, no optional extras and no asking whether to continue (it asked to end with the single most useful next step).
+- A one-line reply that cites a result (`inv:`) is not sent back as a note.
+- A reply sent back for naming a file no call wrote is withdrawn, so the person sees one answer; a sentence saying a file "has to" be made is not read as a claim.
+- The system prompt allows one more try of a call that failed or did only some of the work (it said not to re-run any tool), and has no em dash.
+- `ark-bench`: `recall-answer` checks turn 3 against the price the model's own table gave P-107, so it can pass live.
+- A vendor session that rotates opens with the lane's first system prompt; changed instructions and tools loaded later go as a `<host_update>` before the transcript, so Claude Code keeps reading the system prompt from its cache.
+
+### Added
+
+- `SessionBackend::open_from` (default: opens as before).
+- `Harness::first_note` (default on): whether a one-line first reply is sent back. The orchestrator turns it on only for the person's own turn.
+
 ## [0.51.0] - 2026-11-16
 
 A chat turn is nudged once on a one-line note and has 40 steps (ADR 0125). Colleagues started from a person's chat with a named agent continue that chat when they finish (ADR 0126).

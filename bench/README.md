@@ -6,6 +6,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 | File | What |
 |---|---|
 | `baseline.json` | the simulated report of `main` (18 workloads since `claimed-schedule`; the older ones did not move with it); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
+| `finish-turn-2026-11-17/` | live `claude:sonnet`, 15 workloads x 3, v0.51.0 and 0.52.0 (`sonnet-*.json`); the same with a session rotation every 2 turns on `long-session` and `recall-answer` (`rotate-*.json`); one long Opus job on ARK Desktop's runtime before (Desktop 0.18.0) and after (`before-*`, `after-*`, from `long.py` in the board evidence) |
 | `reliability/failed-call-guard-sim-2026-10-11.json`, `reliability/failed-call-guard-qwen3-4b-2026-10-11.json` | an identical failed read or observation stops after one retry: the 22-workload simulated suite and live `failure-recovery` plus `web`, 3 repetitions on qwen3:4b-instruct |
 | `live-codex-terra-medium-2026-10-09.json`, `live-claude-sonnet-medium-2026-10-09.json` | live release smoke test of explicit subscription model and medium effort selection: `simple`, `tool-lookup` and `multi-step`, one repetition each; request and event lines are in the matching `-traces/` folders |
 | `cli-live/haiku-v0.8.0.json`, `cli-live/haiku-live.json`, `cli-live/codex-v0.8.0.json`, `cli-live/codex-app-server.json` | live, the subscription CLIs before (v0.8.0, a process per call) and after (kept running per session) |

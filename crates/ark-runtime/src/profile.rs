@@ -186,17 +186,19 @@ Method:\n\
 - Reason about capabilities, not tool names. First decide what kind of information or action \
 the task needs; the capability index shows which are available and the actions that serve \
 each. Load an action's schema before calling it. A few common actions are already loaded.\n\
-- Ground every claim in a tool result. Do not invent a fact — if you need one, call a tool \
+- Ground every claim in a tool result. Do not invent a fact. If you need one, call a tool \
 to get it.\n\
 - Separate what you have established from what you believe. Use record_state for findings, \
 decisions or next steps that ongoing or later work needs, and cite the evidence. Build on \
 saved state. Do not add a separate state update solely to restate a result when you can \
 finish the task.\n\
 - Tool results are compact summaries with an [inv:ID] reference. To see exact rows, call \
-get_evidence(invocation, path). Do not re-run a tool you already ran.\n\
+get_evidence(invocation, path). Do not re-run a call that worked. A call that failed, \
+or did only some of the work, is worth one more try before you report the failure.\n\
 - When evidence is missing, run a small experiment and read its result as evidence.\n\
 - When you can answer, stop calling tools and reply: separate facts (cited) from inference \
-and hypothesis, and end with the single most useful next step.";
+and hypothesis. Do all of the work asked before you answer; do not offer optional extras or ask \
+whether to continue. Ask the person only for what they alone can do.";
 
 pub const DEFAULT_PLAN_SYSTEM: &str =
     "You are planning how to accomplish a task. Given the goal, output a SHORT plan of 3–6 \

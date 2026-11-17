@@ -1,0 +1,65 @@
+{
+ "calls": 8,
+ "steps": 8,
+ "input": 193617,
+ "cache_read": 164386,
+ "cache_write": 29201,
+ "output": 6606,
+ "tools": 11,
+ "approvals": 0,
+ "withdrawn": 0,
+ "per_call": [
+  [
+   10632,
+   8439,
+   2191
+  ],
+  [
+   11243,
+   10630,
+   609
+  ],
+  [
+   12413,
+   11239,
+   1170
+  ],
+  [
+   25714,
+   12409,
+   13301
+  ],
+  [
+   28314,
+   25710,
+   2600
+  ],
+  [
+   30571,
+   28310,
+   2257
+  ],
+  [
+   37086,
+   30567,
+   6515
+  ],
+  [
+   37644,
+   37082,
+   558
+  ]
+ ],
+ "answer": "I cleaned up all 24 product files and wrote a Spanish version of each one. A final search of `product/` and `product/es/` found no em dashes, en dashes or arrows left. There were about 1,500 to start with.\n\n**English files (`product/00-\u2026md` to `product/23-\u2026md`)**\n- Each dash or arrow became normal punctuation: a comma, a colon or a full stop. For example:\n  - \"Start small \u2014 pick one client type\u2026\" now reads \"Start small. Pick one client type\u2026\"\n  - \"Show one piece of past work \u2192 link it\u2026\" now reads \"Show one piece of past work. Link it\u2026\"\n- Headings now use a colon: \"# Outreach Scripts: First Paid Client\" and \"## Step 1: outreach scripts in practice\".\n- Normal hyphens like \"follow-up\" and \"30-Day\" stay as they are.\n- The English files now use only plain keyboard characters.\n\n**Spanish files (`product/es/`)**\n- There are 24 files with the same names, the same headings and the same steps. Each paragraph has the same sentences in the same order as the English.\n- The files are built from 16 sentences that repeat. I translated each sentence once and used that wording everywhere, so the Spanish matches across all files.\n- Document names are translated, for example \"Guiones de contacto\", \"Plan de 30 d\u00edas\" and \"Tarifario\". \"Step\" becomes \"Paso\".\n\n**What to check**\n- The Spanish uses neutral \"t\u00fa\" (haz, cierra, env\u00eda), not Argentine \"vos\" (hac\u00e9, cerr\u00e1, envi\u00e1).\n- I translated \"scope creep\" as \"trabajo fuera de alcance\" (work outside the agreed scope).\n\nIf you'd rather use \"vos\", I can switch all 24 Spanish files in one pass.",
+ "ended": "ok",
+ "secs": 69.3,
+ "check": {
+  "slop_left": [],
+  "es_missing": [],
+  "headings_differ": [],
+  "ok": true
+ },
+ "label": "before-0.18.0-xl",
+ "model": "claude:opus@medium",
+ "work": "/var/folders/bb/fmp0dyw1289g0tzbb2n6yhb40000gn/T/long-before-0.18.0-xl-622lok_x"
+}

@@ -1367,6 +1367,20 @@ impl SessionBackend for CliModel {
             .await
     }
 
+    async fn open_from(
+        &self,
+        base: Base<'_>,
+        update: &Delta,
+        messages: &[Message],
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<(String, Completion)> {
+        let sys = protocol(Some(self.cli), base.system, base.tools, true);
+        let mut text = render_host_update(Some(self.cli), update);
+        text.push_str(&render_transcript(messages));
+        self.start_session(&sys, Input::of(text, messages), &update.tools, on_text)
+            .await
+    }
+
     async fn discard(&self, vendor: &str) {
         let running = self.idle.live.lock().unwrap().remove(vendor);
         if let Some(p) = running {
@@ -1413,10 +1427,20 @@ impl CliModel {
         on_text: Option<TextSink<'_>>,
     ) -> Result<(String, Completion)> {
         let sys = protocol(Some(self.cli), system, tools, true);
-        let id = new_session_id();
         let input = Input::of(render_transcript(messages), messages);
+        self.start_session(&sys, input, tools, on_text).await
+    }
+
+    async fn start_session(
+        &self,
+        sys: &str,
+        input: Input,
+        tools: &[ToolDef],
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<(String, Completion)> {
+        let id = new_session_id();
         let first = self
-            .exec(Mode::Open(&id), &sys, input, tools, on_text)
+            .exec(Mode::Open(&id), sys, input, tools, on_text)
             .await?;
         let vendor = match self.cli {
             Cli::Claude => first.vendor.clone().unwrap_or(id),
@@ -1431,7 +1455,7 @@ impl CliModel {
         let second = self
             .exec(
                 Mode::Resume(&vendor),
-                &sys,
+                sys,
                 correction().into(),
                 tools,
                 on_text,
@@ -1968,6 +1992,17 @@ pub fn render_delta(delta: &Delta) -> String {
 }
 
 fn render_delta_for(cli: Option<Cli>, delta: &Delta) -> String {
+    let mut s = render_host_update(cli, delta);
+    s.push_str("<new_messages>\n");
+    for m in &delta.messages {
+        render_message(&mut s, m);
+    }
+    s.push_str("</new_messages>\nContinue as the assistant with one action.\n");
+    s
+}
+
+/// The `<host_update>` blocks of a delta: the tool list and the instructions that changed.
+fn render_host_update(cli: Option<Cli>, delta: &Delta) -> String {
     let mut s = String::new();
     if delta.tools_now.is_some() || !delta.new_tools.is_empty() {
         s.push_str("<host_update>\n");
@@ -1993,11 +2028,6 @@ fn render_delta_for(cli: Option<Cli>, delta: &Delta) -> String {
         s.push_str(sys.trim());
         s.push_str("\n</host_update>\n");
     }
-    s.push_str("<new_messages>\n");
-    for m in &delta.messages {
-        render_message(&mut s, m);
-    }
-    s.push_str("</new_messages>\nContinue as the assistant with one action.\n");
     s
 }
 
@@ -2459,6 +2489,69 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         let log = std::fs::read_to_string(log).unwrap();
         assert!(log.starts_with("--search\nexec\n"), "{log}");
         assert!(log.contains("--ephemeral"), "{log}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_claude_session_opened_from_a_base_keeps_the_system_prompt_and_gets_the_update() {
+        let (bin, log) = claude_stream(
+            "claude-open-from",
+            &[stream_reply(reply("ok"), usage("S2", 2, 10))],
+        );
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
+        let base_tools = tools();
+        let base = Base {
+            system: "Be terse.",
+            tools: &base_tools,
+        };
+        let list = ToolDef {
+            name: "fs.list".into(),
+            description: "List files".into(),
+            parameters: json!({"type":"object"}),
+        };
+        let update = Delta {
+            system: Some("Be verbose.".into()),
+            tools_now: Some(vec!["fs.read".into(), "fs.list".into()]),
+            new_tools: vec![list.clone()],
+            tools: vec![base_tools[0].clone(), list],
+            ..Default::default()
+        };
+        let (vendor, c) =
+            SessionBackend::open_from(&m, base, &update, &[Message::user("hi")], None)
+                .await
+                .unwrap();
+        assert_eq!(vendor, "S2");
+        assert_eq!(c.content, "ok");
+        let log = std::fs::read_to_string(log).unwrap();
+        let (args, input) = log.split_once("--line--").unwrap();
+        assert!(args.contains("--session-id"), "{args}");
+        assert!(args.contains("Be terse."), "the base instructions: {args}");
+        assert!(args.contains("`fs.read`"), "the base tools: {args}");
+        assert!(
+            !args.contains("fs.list"),
+            "a later tool is not in the prompt: {args}"
+        );
+        assert!(!args.contains("Be verbose."), "{args}");
+        assert!(
+            input.contains("Host tools available now: fs.read, fs.list."),
+            "{input}"
+        );
+        assert!(
+            input.contains("- `fs.list`: List files. Arguments:"),
+            "{input}"
+        );
+        assert!(
+            input.contains("The application's instructions changed"),
+            "{input}"
+        );
+        assert!(input.contains("Be verbose."), "{input}");
+        let (update_at, transcript_at) = (
+            input.find("<host_update>").unwrap(),
+            input.find("<transcript>").unwrap(),
+        );
+        assert!(update_at < transcript_at, "{input}");
+        assert!(input.contains(r"<user>\nhi\n</user>"), "{input}");
+        assert!(!input.contains("<new_messages>"), "{input}");
     }
 
     #[cfg(unix)]

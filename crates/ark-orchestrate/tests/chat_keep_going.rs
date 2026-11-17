@@ -181,8 +181,8 @@ async fn a_chat_turn_and_a_group_turn_that_end_on_a_note_are_nudged_and_store_on
         w.o.run("ceo", spec).await.unwrap();
         assert_eq!(
             w.m.seen.lock().unwrap().len(),
-            4,
-            "group={group}: note, nudge, call, answer"
+            5,
+            "group={group}: note, nudge, call, a one-line answer sent back too (ADR 0127), answer"
         );
         assert_eq!(stored(&w, &chat), vec![FINAL.to_string()], "group={group}");
     }

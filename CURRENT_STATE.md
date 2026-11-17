@@ -1,3 +1,16 @@
+# Core 0.52.0 release: an agent works until the task is done (2026-11-17)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.52.0 (2026-11-17), over v0.51.0 (dee7a47). ADR 0127 |
+| Why | The owner's CEO chat on 0.51.0 (2026-11-17): "Make sure product does not have any AI slop, like em dashes" got only "Finding every em dash and listing the product files first." (1 step, 0 calls); other turns stopped on a second note after one nudge, ended on optional offers, or answered with an unchecked change; 21 of 32 Claude Code session rotations wrote the system prompt again |
+| Change | A one-line first reply on the person's own turn is sent back (`Harness::first_note`, off for delegated, scheduled and automation work); a note is sent back again after each step that ran a call (at most 8 a turn); the check nudge is once per change; a cited one-line result is not a note; a reply sent back for an unwritten file is withdrawn; the prompt asks for all the work, no optional offers, one more try of a failed call, no em dash; a rotated vendor session opens from the lane's first system prompt (`SessionBackend::open_from`). `ark-bench` `recall-answer` checks the model's own table |
+| Measured | Live `claude:sonnet` 15 workloads x 3: 40 of 45 to 44 of 45, cost per success $0.0245 to $0.0201 (v0.51.0 rescored with the corrected check). Rotation every 2 turns: cache writes -14%, cost -12%. Long Opus job on Desktop's runtime: finished in one turn before and after. `bench/RESULTS.md` |
+| Rejected | A `finish` tool that alone ends a turn: 64% and 71% live (ADR 0127) |
+| Gates | qa (haiku) implementation review: 5 majors (automation runs not exempt, modal words hid true claims, recall check could pass on the code cell, headline numbers mixed two checks, rotation unmeasured), all fixed or measured, with tests that fail without them. Release commit: see below |
+| Release commit | fmt, protocol, version, macOS 11 check, clippy, workspace tests 1744 of 1745 then the one (`serve` native work follow-up: the person's assigned work now sends a one-line first reply back) updated and passing, node 22 of 22, WebKit 195 of 195, page suite 67 of 69 (the 2 known; `interrupted` and `board` scripts given the reply after the nudge), notification 3 of 3, release build, simulated benchmark against the regenerated baseline |
+| Next | Desktop: pin v0.52.0 |
+
 # Core 0.51.0 release: an agent keeps going until the work is done (2026-11-16)
 
 | Item | State |

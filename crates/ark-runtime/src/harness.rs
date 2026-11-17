@@ -277,6 +277,8 @@ pub struct Harness {
     steer: Option<Steering>,
     retry: ark_model::RetryPolicy,
     presentation: bool,
+    /// Whether a one-line first reply to a task that is not trivial is sent back as a note.
+    first_note: bool,
     rules: Option<RuleSelection>,
     skills: Option<String>,
     /// State-changing calls that already succeeded in an earlier run of the same work, which
@@ -375,6 +377,7 @@ impl Harness {
             steer: None,
             retry: ark_model::RetryPolicy::default(),
             presentation: false,
+            first_note: true,
             rules: None,
             skills: None,
             done_before: Vec::new(),
@@ -426,6 +429,14 @@ impl Harness {
     /// workspace window). Off by default; a terminal or a headless run cannot.
     pub fn presentation(mut self, yes: bool) -> Self {
         self.presentation = yes;
+        self
+    }
+
+    /// Send back a one-line first reply to a task that is not trivial as a note (default on).
+    /// Off for work a program hands an agent, where a short reply is often the whole result
+    /// (ADR 0127).
+    pub fn first_note(mut self, yes: bool) -> Self {
+        self.first_note = yes;
         self
     }
 
@@ -813,10 +824,13 @@ impl Harness {
         // once that its answer names a saved file none of them wrote.
         let mut written: Vec<String> = Vec::new();
         let mut corrected_claim = false;
-        // Whether the model was told once that its answer announced work it had not done.
-        let mut corrected_announce = false;
-        // Some reply of this turn wrote text beside its tool calls.
+        // A reply was sent back as a note and no call ran since (ADR 0127): the next text reply
+        // is the answer.
+        let mut noted = false;
+        let mut note_nudges: u32 = 0;
+        // Some reply of this turn wrote text beside its tool calls, and some reply called a tool.
         let mut narrated_calls = false;
+        let mut ran_calls = false;
         // A call this turn was refused or denied, or asks for a short closing reply: a one-line
         // reply is then expected, not a note.
         let mut refused_call = false;
@@ -830,7 +844,8 @@ impl Harness {
         let mut last_observation: Option<u32> = None;
         // The last call that looked at something and succeeded.
         let mut mutations: u32 = 0;
-        let mut verify_nudged = false;
+        // The change the model was last asked to check (ADR 0108, per change since ADR 0127).
+        let mut verify_nudged: Option<u32> = None;
         let mut steered: Vec<String> = Vec::new();
         // Tools an acquisition added this turn, and the turn's engine once it has them.
         let outer = engine;
@@ -903,9 +918,20 @@ impl Harness {
 
             // An answer after a change nobody checked is asked for again, so its text is held
             // back until the turn knows it stays.
-            let hold = !verify_nudged
-                && last_mutation.is_some_and(|m| last_observation.is_none_or(|o| o < m));
+            let hold = last_mutation.is_some_and(|m| {
+                verify_nudged != Some(m) && last_observation.is_none_or(|o| o < m)
+            });
             let mut unusable = String::new();
+            // The text this reply showed the person, so only that is ever taken back.
+            let mut shown = String::new();
+            let mut tee = |e: HarnessEvent| {
+                match &e {
+                    HarnessEvent::TextDelta { text } => shown.push_str(text),
+                    HarnessEvent::TextWithdrawn { .. } => shown.clear(),
+                    _ => {}
+                }
+                on_event(e)
+            };
             let called = self
                 .call_model(
                     Role::Reason,
@@ -914,7 +940,7 @@ impl Harness {
                     &tools,
                     !hold,
                     &mut metrics,
-                    &mut on_event,
+                    &mut tee,
                     Some(&mut unusable),
                     Some(&crate::memory::Snapshot {
                         store: &engine.store,
@@ -1034,7 +1060,13 @@ impl Harness {
                     );
                     if !missing.is_empty() {
                         corrected_claim = true;
-                        show_held!();
+                        // The corrected answer replaces this one, so the person sees one answer.
+                        held = None;
+                        if !shown.is_empty() {
+                            on_event(HarnessEvent::TextWithdrawn {
+                                text: std::mem::take(&mut shown),
+                            });
+                        }
                         tracing::info!(files = ?missing, "the answer names files no call wrote; asking again");
                         ws.push_round(vec![
                             Message::assistant(completion.content.clone()),
@@ -1044,29 +1076,36 @@ impl Harness {
                         continue;
                     }
                 }
-                // An answer that ends by saying what it will do next ("I will now call
-                // files.edit") while it can still call tools stopped before the work: a small
-                // model does this after reading what it was asked to change. Say so once.
+                // A reply that ends by announcing work it did not do ("I will now call
+                // files.edit") stopped before the work. So did one short line after narrated
+                // calls, or as the first reply to a task that is not a quick question. It is sent
+                // back, again after each step that ran a call (ADR 0127). A text reply right
+                // after it is the answer.
                 let announced = announces_work(&completion.content);
-                if !corrected_announce
+                if !noted
+                    && note_nudges < MAX_NOTE_NUDGES
                     && !tools.is_empty()
                     && (announced
-                        || (narrated_calls
-                            && !refused_call
+                        || (!refused_call
                             && !short_closing
+                            && (narrated_calls || (self.first_note && !ran_calls && !trivial))
                             && reads_as_note(&completion.content)))
                 {
-                    corrected_announce = true;
+                    note_nudges += 1;
+                    noted = true;
                     if announced {
                         show_held!();
-                    } else if held.take().is_none() && !completion.content.is_empty() {
-                        // The note may be the answer: if the model gives it again, the person
-                        // sees it once, not the note followed by the answer (ADR 0125).
-                        on_event(HarnessEvent::TextWithdrawn {
-                            text: completion.content.clone(),
-                        });
+                    } else {
+                        held = None;
+                        if !shown.is_empty() {
+                            // The note may be the answer: if the model gives it again, the
+                            // person sees it once (ADR 0125).
+                            on_event(HarnessEvent::TextWithdrawn {
+                                text: std::mem::take(&mut shown),
+                            });
+                        }
                     }
-                    tracing::info!("the answer announces work it has not done; asking again");
+                    tracing::info!("the reply is a note or announces work; asking again");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),
                         Message::user(if announced {
@@ -1080,9 +1119,9 @@ impl Harness {
                 }
                 let unchecked =
                     last_mutation.is_some_and(|m| last_observation.is_none_or(|o| o < m));
-                if unchecked && !verify_nudged {
-                    verify_nudged = true;
-                    tracing::info!("the answer follows a change nobody checked; asking once");
+                if unchecked && verify_nudged != last_mutation {
+                    verify_nudged = last_mutation;
+                    tracing::info!("the answer follows a change nobody checked; asking");
                     ws.push_round(vec![
                         Message::assistant(completion.content.clone()),
                         Message::user(VERIFY_NOTE),
@@ -1090,12 +1129,15 @@ impl Harness {
                     retrieved.push(0);
                     continue;
                 }
+                show_held!();
                 answer = completion.content.trim().to_string();
                 answered = true;
                 streamed = !answer.is_empty();
                 break;
             }
 
+            noted = false;
+            ran_calls = true;
             narrated_calls |= !completion.content.trim().is_empty();
             short_closing |= completion.tool_calls.iter().any(|c| {
                 engine
@@ -1603,7 +1645,7 @@ impl Harness {
         let verify = Verify {
             changed: mutations,
             checked_after: last_mutation.is_none_or(|m| last_observation.is_some_and(|o| o > m)),
-            nudged: verify_nudged,
+            nudged: verify_nudged.is_some(),
             ran_out,
         };
         let (passed, detail) = self.self_check(&answer, &cited, trivial, steps_taken, verify);
@@ -3171,7 +3213,10 @@ fn claimed_files(text: &str) -> Vec<String> {
             .collect();
         let lower: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
         let says = |set: &[&str]| lower.iter().any(|w| set.contains(&w.as_str()));
-        if !says(SAYS_SAVED) || says(SAYS_NOT) {
+        let still_to_do = lower
+            .windows(2)
+            .any(|w| matches!(w[0].as_str(), "has" | "have") && w[1] == "to");
+        if !says(SAYS_SAVED) || says(SAYS_NOT) || still_to_do {
             continue;
         }
         for (i, w) in words.iter().enumerate() {
@@ -3297,16 +3342,22 @@ const REPEATED_FAILURE_NOTE: &str = "not run: this exact call already failed twi
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
 
+/// Note nudges in a turn, each after a step that ran a call.
+const MAX_NOTE_NUDGES: u32 = 8;
+
 const NOTE_NUDGE: &str = "Your last reply was one short line and called no tool, so the turn would end here. If the work is finished, give the result to the person. If not, continue with the next call.";
 
 /// A final reply that is one short line: a note on what the agent is doing, as it writes beside
 /// its calls, and not a result. Language-neutral; a result of several lines, more than
-/// [`NOTE_CHARS`] characters, or a question to the person is not a note.
+/// [`NOTE_CHARS`] characters, a question to the person, or a line that cites a result
+/// (`inv:`) is not a note.
 pub fn reads_as_note(text: &str) -> bool {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
     match (lines.next(), lines.next()) {
         (Some(line), None) => {
-            line.chars().count() <= NOTE_CHARS && !line.ends_with(['?', '\u{ff1f}'])
+            line.chars().count() <= NOTE_CHARS
+                && !line.ends_with(['?', '\u{ff1f}'])
+                && !line.contains("inv:")
         }
         _ => false,
     }
@@ -3798,6 +3849,13 @@ mod tests {
             claims("I created summary.xlsx from sales.csv using clean.py."),
             vec!["summary.xlsx"],
             "inputs are not claims"
+        );
+        // Live, claude:sonnet: a file still to be made is not a claim.
+        assert!(claims("To finish, `report.md` has to be created another way.").is_empty());
+        assert_eq!(
+            claims("Saved the summary to summary.md and the chart will follow."),
+            vec!["summary.md"],
+            "a modal elsewhere in the sentence does not hide a claim"
         );
         assert!(
             claims("Read report.md: sales rose 25%.").is_empty(),

@@ -4196,6 +4196,7 @@ impl Inner {
         };
         let mut harness = Harness::new(models.router.clone_view())
             .pictures(pictures)
+            .first_note(person_turn)
             .max_steps(budget.max_steps.unwrap_or_else(|| {
                 if task.schedule.is_some() || task.run.is_some() {
                     self.max_steps.min(ark_runtime::UNATTENDED_STEPS)

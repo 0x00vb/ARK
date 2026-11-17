@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark_core::{ActionDescriptor, RiskTier};
 use ark_model::{Completion, MockProvider, Provider, ToolCall, Usage};
-use ark_runtime::{reads_as_note, AgentProfile, Engine, Harness, ModelRouter};
+use ark_runtime::{reads_as_note, AgentProfile, Engine, Harness, HarnessEvent, ModelRouter};
 use ark_tools::{ActionOutput, Adapter, ProducedArtifact, Registry, RunCtx};
 use serde_json::{json, Value};
 
@@ -88,6 +88,8 @@ const ANNOUNCED: &str = "Your reply says what you will do next";
 struct Run {
     answer: String,
     requests: Vec<ark_model::mock::Recorded>,
+    shown: String,
+    withdrawn: Vec<String>,
 }
 
 async fn run(script: Vec<Completion>) -> Run {
@@ -95,6 +97,22 @@ async fn run(script: Vec<Completion>) -> Run {
 }
 
 async fn run_as(allow_mutate: bool, script: Vec<Completion>) -> Run {
+    run_full(allow_mutate, "qualify the seed leads", script).await
+}
+
+/// The owner's message of 2026-11-17 that got one note and no work (t-42106d23).
+const LONG_ASK: &str = "Make sure the product does not have any AI slop, like em dashes, and that the Spanish and English files are consistent";
+
+async fn run_full(allow_mutate: bool, question: &str, script: Vec<Completion>) -> Run {
+    run_first_note(allow_mutate, true, question, script).await
+}
+
+async fn run_first_note(
+    allow_mutate: bool,
+    first_note: bool,
+    question: &str,
+    script: Vec<Completion>,
+) -> Run {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open_with(dir.path(), Registry::new().with(Arc::new(Look))).unwrap();
     let project = engine.create_project("leads", "").unwrap();
@@ -104,22 +122,27 @@ async fn run_as(allow_mutate: bool, script: Vec<Completion>) -> Run {
     let profile = AgentProfile::builder()
         .core_actions(["look.read", "look.write", "look.later"])
         .build();
+    let (mut shown, mut withdrawn) = (String::new(), Vec::new());
     let out = Harness::new(ModelRouter::single(provider))
         .planner(false)
         .critic(false)
         .allow_mutate(allow_mutate)
-        .ask(
-            &engine,
-            &profile,
-            &project.id,
-            "qualify the seed leads",
-            |_| {},
-        )
+        .first_note(first_note)
+        .ask(&engine, &profile, &project.id, question, |e| match e {
+            HarnessEvent::TextDelta { text } => shown.push_str(&text),
+            HarnessEvent::TextWithdrawn { text } => {
+                shown.truncate(shown.len() - text.len());
+                withdrawn.push(text)
+            }
+            _ => {}
+        })
         .await
         .unwrap();
     Run {
         answer: out.answer,
         requests: model.recorded(),
+        shown,
+        withdrawn,
     }
 }
 
@@ -277,9 +300,156 @@ async fn a_write_after_the_nudge_then_a_short_result_is_the_answer() {
         reply("", vec![write("out/brand.md")]),
         reply("", vec![read("out/brand.md")]),
         reply("Wrote out/brand.md.", vec![]),
+        reply("Wrote out/brand.md and read it back.", vec![]),
     ])
     .await;
-    assert_eq!(r.requests.len(), 5);
+    assert_eq!(
+        r.requests.len(),
+        6,
+        "a one-line reply after more work is sent back again (ADR 0127)"
+    );
     assert!(nudged(&r));
-    assert_eq!(r.answer, "Wrote out/brand.md.");
+    assert_eq!(r.answer, "Wrote out/brand.md and read it back.");
+}
+
+#[tokio::test]
+async fn a_first_reply_that_is_a_note_on_a_real_task_is_sent_back() {
+    // t-42106d23: one model call, no tool call, and the turn was over.
+    let r = run_full(
+        true,
+        LONG_ASK,
+        vec![
+            reply(
+                "Finding every em dash and listing the product files first.",
+                vec![],
+            ),
+            reply("", vec![read("product/a.md")]),
+            reply(RESULT, vec![]),
+        ],
+    )
+    .await;
+    assert!(nudged(&r));
+    assert_eq!(r.requests.len(), 3);
+    assert_eq!(r.answer, RESULT);
+}
+
+#[tokio::test]
+async fn a_one_line_answer_to_a_quick_question_is_not_sent_back() {
+    let r = run_full(true, "Gumroad or Shopify?", vec![reply("Gumroad.", vec![])]).await;
+    assert_eq!(r.requests.len(), 1);
+    assert_eq!(r.answer, "Gumroad.");
+}
+
+#[tokio::test]
+async fn a_note_after_more_work_is_sent_back_again() {
+    // t-dfe88f78: nudged at step 24, then stopped on another note at step 32.
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(NOTE, vec![]),
+        reply("Reading the next file.", vec![read("other.md")]),
+        reply(NOTE_AGAIN, vec![]),
+        reply("", vec![read("third.md")]),
+        reply(RESULT, vec![]),
+    ])
+    .await;
+    let nudges = r
+        .requests
+        .last()
+        .unwrap()
+        .messages
+        .iter()
+        .filter(|m| m.content.contains(NUDGE))
+        .count();
+    assert_eq!(nudges, 2);
+    assert_eq!(r.answer, RESULT);
+}
+
+#[tokio::test]
+async fn the_prompt_asks_for_all_the_work_and_no_offers() {
+    let r = run(vec![reply(RESULT, vec![])]).await;
+    let system = &r.requests[0].system;
+    assert!(system.contains("Do all of the work asked"), "{system}");
+    assert!(system.contains("do not offer optional extras"), "{system}");
+    assert!(!system.contains("single most useful next step"), "{system}");
+}
+
+#[test]
+fn a_line_that_cites_a_result_is_not_a_note() {
+    // Live, claude:sonnet: this answer was sent back and cost a call to say it again.
+    assert!(!reads_as_note(
+        "12 × 12 = **144** (calc.eval, inv:ba7d6f7a)."
+    ));
+}
+
+#[tokio::test]
+async fn a_cited_one_line_result_after_narrated_calls_is_the_answer() {
+    let cited = "The seed file lists 3 leads (look.read, inv:1a2b3c4d).";
+    let r = run(vec![
+        reply("Reading the seed file.", vec![read("seed.md")]),
+        reply(cited, vec![]),
+    ])
+    .await;
+    assert_eq!(r.requests.len(), 2);
+    assert_eq!(r.answer, cited);
+}
+
+#[tokio::test]
+async fn work_a_program_hands_over_keeps_a_one_line_first_reply() {
+    let r = run_first_note(true, false, LONG_ASK, vec![reply("Copy ready.", vec![])]).await;
+    assert_eq!(r.requests.len(), 1);
+    assert_eq!(r.answer, "Copy ready.");
+}
+
+#[tokio::test]
+async fn an_answer_sent_back_for_an_unwritten_file_is_shown_once() {
+    // Live, claude:sonnet: the person saw the first answer and then the corrected one.
+    let wrong = "Saved a.md and b.md.";
+    let right = "Saved a.md and read it back. b.md was not written.";
+    let r = run(vec![
+        reply("", vec![write("a.md")]),
+        reply("", vec![read("a.md")]),
+        reply(wrong, vec![]),
+        reply(right, vec![]),
+    ])
+    .await;
+    assert_eq!(r.requests.len(), 4);
+    assert_eq!(r.withdrawn, vec![wrong.to_string()]);
+    assert_eq!(r.shown, right);
+    assert_eq!(r.answer, right);
+}
+
+#[tokio::test]
+async fn the_prompt_allows_one_more_try_of_a_failed_call() {
+    let r = run(vec![reply(RESULT, vec![])]).await;
+    let system = &r.requests[0].system;
+    assert!(system.contains("is worth one more try"), "{system}");
+    assert!(
+        !system.contains("Do not re-run a tool you already ran"),
+        "{system}"
+    );
+    assert!(!system.contains('\u{2014}'), "no em dash: {system}");
+}
+
+#[tokio::test]
+async fn notes_are_sent_back_at_most_eight_times_a_turn() {
+    let mut script = Vec::new();
+    for i in 0..9 {
+        script.push(reply(
+            "Reading the next file.",
+            vec![read(&format!("{i}.md"))],
+        ));
+        script.push(reply(NOTE, vec![]));
+    }
+    let r = run(script).await;
+    let nudges = r
+        .requests
+        .last()
+        .unwrap()
+        .messages
+        .iter()
+        .filter(|m| m.content.contains(NUDGE))
+        .count();
+    assert_eq!(nudges, 8);
+    assert_eq!(r.requests.len(), 18);
+    assert_eq!(r.answer, NOTE);
 }

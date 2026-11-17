@@ -144,6 +144,27 @@ pub trait SessionBackend: Send + Sync {
         }
         Ok(c)
     }
+    /// Open a vendor session whose system prompt is `base`, with `update` (the instructions and
+    /// tools that differ from the base) delivered before `messages`. A vendor that caches the
+    /// system prompt only whole ([`caches_system_prompt_whole`](SessionBackend::caches_system_prompt_whole))
+    /// then reads the lane's first prompt from its cache after a rotation. The default opens
+    /// with the current system and tools, as [`open`](SessionBackend::open) does.
+    async fn open_from(
+        &self,
+        base: Base<'_>,
+        update: &Delta,
+        messages: &[Message],
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<(String, Completion)> {
+        let system = update.system.as_deref().unwrap_or(base.system);
+        match on_text {
+            Some(f) => {
+                self.open_streaming(system, &update.tools, messages, f)
+                    .await
+            }
+            None => self.open(system, &update.tools, messages).await,
+        }
+    }
     /// Forget a vendor session ARK let go: delete what the vendor stored for it. Best effort;
     /// the default does nothing.
     async fn discard(&self, _vendor: &str) {}
@@ -321,7 +342,9 @@ pub struct LaneRecord {
     #[serde(default)]
     pub account_revision: u64,
     pub vendor: Option<String>,
-    /// The instructions and tools the vendor session opened with.
+    /// The instructions and tools the lane's first vendor session opened with. Kept across
+    /// rotations, so a new vendor session opens with the same system prompt and the vendor's
+    /// whole-prompt cache holds ([`SessionBackend::open_from`]). Empty until the first open.
     #[serde(default)]
     pub base_system: String,
     #[serde(default)]
@@ -645,13 +668,25 @@ impl ManagedSession {
                 if let Some(v) = old_vendor.as_ref().filter(|_| !self.policy.keep_files) {
                     self.backend.discard(v).await;
                 }
-                match on_text {
-                    Some(f) => {
-                        self.backend
-                            .open_streaming(system, tools, messages, f)
-                            .await
+                let has_base = !(base_system.is_empty() && base_tools.is_empty());
+                if self.policy.reuse && has_base {
+                    let base = Base {
+                        system: &base_system,
+                        tools: &base_tools,
+                    };
+                    let update = open_update(base, system, tools);
+                    self.backend
+                        .open_from(base, &update, messages, on_text)
+                        .await
+                } else {
+                    match on_text {
+                        Some(f) => {
+                            self.backend
+                                .open_streaming(system, tools, messages, f)
+                                .await
+                        }
+                        None => self.backend.open(system, tools, messages).await,
                     }
-                    None => self.backend.open(system, tools, messages).await,
                 }
                 .map(|(v, c)| (Some(v), c))
             }
@@ -698,8 +733,10 @@ impl ManagedSession {
                         Plan::Open(reason) => {
                             r.vendor = vendor.clone();
                             r.reopen = None;
-                            r.base_system = system.to_string();
-                            r.base_tools = tools.to_vec();
+                            if base_system.is_empty() && base_tools.is_empty() {
+                                r.base_system = system.to_string();
+                                r.base_tools = tools.to_vec();
+                            }
                             r.tools_known = tools.iter().map(|t| t.name.clone()).collect();
                             r.seen.clear();
                             r.turns = 0;
@@ -822,6 +859,25 @@ impl Provider for ManagedSession {
 
     fn model_id(&self) -> String {
         self.backend.model()
+    }
+}
+
+/// What a new vendor session opened from `base` must be told: the instructions when they
+/// differ from the base, the tools the base does not hold, and the tool set now.
+fn open_update(base: Base<'_>, system: &str, tools: &[ToolDef]) -> Delta {
+    let in_base: HashSet<&str> = base.tools.iter().map(|t| t.name.as_str()).collect();
+    let now: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+    let was: Vec<&str> = base.tools.iter().map(|t| t.name.as_str()).collect();
+    Delta {
+        system: (digest(system) != digest(base.system)).then(|| system.to_string()),
+        tools_now: now.iter().map(String::as_str).ne(was).then(|| now.clone()),
+        new_tools: tools
+            .iter()
+            .filter(|t| !in_base.contains(t.name.as_str()))
+            .cloned()
+            .collect(),
+        messages: Vec::new(),
+        tools: tools.to_vec(),
     }
 }
 
@@ -1311,6 +1367,9 @@ pub mod mock {
             system: String,
             tools: Vec<String>,
             messages: Vec<Message>,
+            /// What [`SessionBackend::open_from`] was told on top of the base `system`;
+            /// `None` for a plain open.
+            update: Option<Delta>,
         },
         Resume {
             vendor: String,
@@ -1360,6 +1419,27 @@ pub mod mock {
         pub fn calls(&self) -> Vec<Call> {
             self.calls.lock().unwrap().clone()
         }
+        async fn record_open(
+            &self,
+            system: &str,
+            tools: &[ToolDef],
+            messages: &[Message],
+            update: Option<Delta>,
+        ) -> Result<(String, Completion)> {
+            let n = self
+                .opened
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let vendor = format!("{}-v{n}", self.model);
+            self.calls.lock().unwrap().push(Call::Open {
+                vendor: vendor.clone(),
+                system: system.into(),
+                tools: tools.iter().map(|t| t.name.clone()).collect(),
+                messages: messages.to_vec(),
+                update,
+            });
+            self.wait_if_hung().await;
+            self.next().map(|c| (vendor, c))
+        }
         fn next(&self) -> Result<Completion> {
             self.replies.lock().unwrap().pop_front().unwrap_or_else(|| {
                 Ok(Completion {
@@ -1390,18 +1470,22 @@ pub mod mock {
             tools: &[ToolDef],
             messages: &[Message],
         ) -> Result<(String, Completion)> {
-            let n = self
-                .opened
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let vendor = format!("{}-v{n}", self.model);
-            self.calls.lock().unwrap().push(Call::Open {
-                vendor: vendor.clone(),
-                system: system.into(),
-                tools: tools.iter().map(|t| t.name.clone()).collect(),
-                messages: messages.to_vec(),
-            });
-            self.wait_if_hung().await;
-            self.next().map(|c| (vendor, c))
+            self.record_open(system, tools, messages, None).await
+        }
+        async fn open_from(
+            &self,
+            base: Base<'_>,
+            update: &Delta,
+            messages: &[Message],
+            on_text: Option<TextSink<'_>>,
+        ) -> Result<(String, Completion)> {
+            let (vendor, c) = self
+                .record_open(base.system, base.tools, messages, Some(update.clone()))
+                .await?;
+            if let (Some(f), false) = (on_text, c.content.is_empty()) {
+                f(&c.content);
+            }
+            Ok((vendor, c))
         }
         async fn resume(&self, vendor: &str, _base: Base<'_>, delta: &Delta) -> Result<Completion> {
             self.calls.lock().unwrap().push(Call::Resume {
@@ -1607,6 +1691,145 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn names(tools: &[&str]) -> Vec<String> {
+        tools.iter().map(|t| t.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn a_rotation_opens_with_the_lanes_first_system_prompt_and_delivers_the_difference() {
+        let policy = SessionPolicy {
+            max_context_tokens: 1000,
+            ..Default::default()
+        };
+        let rt = runtime(policy);
+        let backend = Arc::new(MockSessions::new(
+            "m",
+            "acct",
+            vec![reply(990), reply(200), reply(300)],
+        ));
+        let s = rt.session_with("a", backend.clone()).await;
+        let first = vec![Message::user("one")];
+        s.complete("sys", &first, &[tool("a"), tool("b")])
+            .await
+            .unwrap();
+        let big = vec![Message::user("one"), Message::user("x".repeat(400))];
+        s.complete("sys", &big, &[tool("a"), tool("b"), tool("c")])
+            .await
+            .unwrap();
+        let mut next = big.clone();
+        next.push(Message::user("next"));
+        s.complete("sys", &next, &[tool("a"), tool("b"), tool("c"), tool("d")])
+            .await
+            .unwrap();
+        let calls = backend.calls();
+        assert!(
+            matches!(&calls[0], Call::Open { system, tools, update: None, .. }
+                if system == "sys" && *tools == names(&["a", "b"])),
+            "the first open of a lane is a plain open: {:?}",
+            calls[0]
+        );
+        match &calls[2] {
+            Call::Open {
+                system,
+                tools,
+                messages,
+                update: Some(u),
+                ..
+            } => {
+                assert_eq!(system, "sys", "the base prompt, so the vendor cache holds");
+                assert_eq!(*tools, names(&["a", "b"]), "the base tools, not c");
+                assert_eq!(messages.len(), 2, "rehydrated from the request");
+                assert!(u.system.is_none());
+                let new: Vec<&str> = u.new_tools.iter().map(|t| t.name.as_str()).collect();
+                assert_eq!(new, vec!["c"]);
+                assert_eq!(u.tools_now, Some(names(&["a", "b", "c"])));
+                assert_eq!(u.tools.len(), 3);
+                assert!(u.messages.is_empty());
+            }
+            c => panic!("expected a rotation open from the base, got {c:?}"),
+        }
+        match &calls[3] {
+            Call::Resume { delta, .. } => {
+                let new: Vec<&str> = delta.new_tools.iter().map(|t| t.name.as_str()).collect();
+                assert_eq!(new, vec!["d"], "c was delivered by the rotation");
+                assert_eq!(delta.tools_now, Some(names(&["a", "b", "c", "d"])));
+            }
+            c => panic!("expected a resume, got {c:?}"),
+        }
+        let snap = s.snapshot();
+        assert_eq!(snap.opens, 2);
+        assert_eq!(snap.rotations, 1);
+    }
+
+    #[tokio::test]
+    async fn a_rotation_sends_changed_instructions_as_an_update() {
+        let policy = SessionPolicy {
+            max_context_tokens: 1000,
+            ..Default::default()
+        };
+        let rt = runtime(policy);
+        let backend = Arc::new(MockSessions::new(
+            "m",
+            "acct",
+            vec![reply(990), reply(200), reply(210)],
+        ));
+        let s = rt.session_with("a", backend.clone()).await;
+        s.complete("sys one", &[Message::user("one")], &[tool("a")])
+            .await
+            .unwrap();
+        let big = vec![Message::user("one"), Message::user("x".repeat(400))];
+        s.complete("sys two", &big, &[tool("a")]).await.unwrap();
+        let mut next = big.clone();
+        next.push(Message::user("next"));
+        s.complete("sys two", &next, &[tool("a")]).await.unwrap();
+        let calls = backend.calls();
+        match &calls[2] {
+            Call::Open {
+                system,
+                update: Some(u),
+                ..
+            } => {
+                assert_eq!(system, "sys one");
+                assert_eq!(u.system.as_deref(), Some("sys two"));
+                assert!(u.new_tools.is_empty());
+                assert!(u.tools_now.is_none(), "the tool set did not change");
+            }
+            c => panic!("expected a rotation open from the base, got {c:?}"),
+        }
+        match &calls[3] {
+            Call::Resume { delta, .. } => {
+                assert!(
+                    delta.system.is_none(),
+                    "the vendor has the new instructions"
+                );
+            }
+            c => panic!("expected a resume, got {c:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn without_session_reuse_every_open_is_a_plain_open() {
+        let rt = runtime(SessionPolicy {
+            reuse: false,
+            ..Default::default()
+        });
+        let backend = Arc::new(MockSessions::new("m", "acct", vec![reply(10), reply(10)]));
+        let s = rt.session_with("a", backend.clone()).await;
+        s.complete("one", &[Message::user("1")], &[tool("a")])
+            .await
+            .unwrap();
+        s.complete("two", &[Message::user("1")], &[tool("a"), tool("b")])
+            .await
+            .unwrap();
+        let calls = backend.calls();
+        let last = calls.last().unwrap();
+        assert!(
+            matches!(last, Call::Open { system, tools, update: None, .. }
+                if system == "two" && tools.len() == 2),
+            "{last:?}"
+        );
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 # 0108. An agent checks what it changed, sees what it shows, and knows what it has
 
-Status: Accepted
+Status: Accepted. Amended by 0127 (nudges after each step, a first-reply note).
 Date: 2026-11-08
 
 ## Context

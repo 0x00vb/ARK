@@ -693,10 +693,17 @@ async fn a_stopped_turn_replays_as_it_was_shown() {
 async fn an_interrupted_turn_shows_what_it_did_and_continues_on_one_click() {
     drive(
         "interrupted",
-        vec![say(
-            "Picked up where it stopped: the notes mention a locket.",
-            false,
-        )],
+        // The one-line first reply is sent back once (ADR 0127); the next one is the answer.
+        vec![
+            say(
+                "Picked up where it stopped: the notes mention a locket.",
+                false,
+            ),
+            say(
+                "Picked up where it stopped: the notes mention a locket.",
+                false,
+            ),
+        ],
         Duration::ZERO,
     )
     .await;
@@ -1446,6 +1453,8 @@ async fn the_board_is_worked_by_the_person_and_the_agents() {
         vec![
             plan,
             say("Two items are on the board.", false),
+            // The person's message to the writer: its one-line first reply is sent back once.
+            say("Chapter 3 is drafted.", false),
             say("Chapter 3 is drafted.", false),
         ],
         Duration::ZERO,

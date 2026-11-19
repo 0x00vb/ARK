@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.53.1] - 2026-11-19
+
+### Fixed
+
+- `ark-reach` builds for Windows again (it used `tokio::net::UnixStream`, which tokio has only on Unix). On Windows, `Tunnel::open` refuses with "Linking a computer over SSH is not available on Windows yet", where before it failed on the path check.
+
 ## [0.53.0] - 2026-11-19
 
 The Computer asks once a turn, and an Auto chat does not ask (ADR 0128).

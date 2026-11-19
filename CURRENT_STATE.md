@@ -1,3 +1,15 @@
+# Core 0.53.1 release: ARK Desktop builds for Windows (2026-11-19)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.53.1 (2026-11-19), over v0.53.0 (500cb79) |
+| Why | The owner asked for ARK Desktop on Windows 10 and 11. Desktop cross-built from the Mac stopped at `ark-reach` (`tokio::net::UnixStream` exists only on Unix) |
+| Change | `ark-reach` tunnel: the probe connection is Unix-only; `Tunnel::open` refuses on Windows in plain words. No change on macOS or Linux |
+| Not done | A Windows lint in `scripts/ci.sh` (Desktop `docs/WINDOWS.md` A5): nothing caught this before Desktop's build. Windows-only dead-code warnings remain in `ark-store`, `ark-browser`, `ark-ui` (features off on Windows) |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests 1750 pass 0 fail, node fixtures pass, WebKit fixtures 22 of 22 (after `npm ci` in `crates/ark-ui/tests/web`; the first run lacked `playwright-core`), page suite 67 of 69 (the 2 known: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`), notification 3 of 3, release build, simulated benchmark no delta. Logs `../board/evidence/windows-beta-20261119/ark-0.53.1-ci.log`, `ark-0.53.1-ci-rest.log` |
+| Consumer | Desktop 0.19.0 pins this tag (Mac and the first Windows beta, Desktop ADR 0027) |
+| Evidence | `../board/evidence/windows-beta-20261119/` |
+
 # Core 0.53.0 release: the Computer asks once a turn, Auto asks nothing (2026-11-19)
 
 | Item | State |

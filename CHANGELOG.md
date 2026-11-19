@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-19
+
+The Computer asks once a turn, and an Auto chat does not ask (ADR 0128).
+
 ### Changed
 
 - The Computer asks once a turn, not at every action (ADR 0128). Every Computer action but `apps` shares the approval class `computer` and is no longer `ask_each_time`. An Auto chat uses the computer without a question: the person's message asked for the work. Otherwise the first action of a turn asks ("ARK wants to use your computer:", Allow or Deny) and the yes covers the rest of the turn, sends included; it is never remembered. An agent allowed to act alone still asks once a turn when someone can answer.

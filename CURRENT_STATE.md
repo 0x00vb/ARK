@@ -1,3 +1,17 @@
+# Core 0.53.0 release: the Computer asks once a turn, Auto asks nothing (2026-11-19)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.53.0 (2026-11-19), over v0.52.0 (13615b7). ADR 0128 |
+| Why | The owner on 2026-11-19: ARK "asks permissions for every single action" while using the computer, and should not ask when their message already said what to do. v0.52.0 asked 3 times for look, type, click in an Auto chat (`crates/ark-computer/tests/asks.rs`) |
+| Change | Every Computer action but `apps` shares the approval class `computer` and is no longer `ask_each_time`. New `ActionDescriptor::once_a_turn`: outside Auto the first call of the class in a turn asks ("ARK wants to use your computer:", Allow or Deny), the yes covers the rest of the turn and is never remembered; an agent with `allow_mutate` still asks when someone can answer. Auto runs them. The turn-on question lost "It still asks before each step." |
+| Gates | qa (haiku) implementation review: 2 blockers in the first design (the orchestrator's shared gate let a chat grant cover later scheduled runs; `allow_mutate` agents drove the screen unattended), fixed by `once_a_turn` with tests that fail without it; recheck (haiku): no blocker, 3 majors (no orchestrator-level test, the automation guard lost its backstop, the Auto-chat continuation unstated) fixed or written into ADR 0128. Release commit: see below |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests (all pass but the page suite's 2 known: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`; page suite 67 of 69), node 22 of 22, WebKit fixtures 195 passed 0 failed, notification 3 of 3, release build, simulated benchmark no delta. Logs `../board/evidence/computer-ask-20261119/ci-release.log`, `ci-tail.log` |
+| Owner decision taken from the request | `computer.send` is covered by the turn's yes, and runs unasked in Auto |
+| Not verified | The real macOS screen with a live model (no live call made) |
+| Evidence | `../board/evidence/computer-ask-20261119/` |
+| Next | Desktop: pin v0.53.0 (with the unpublished 0.18.1 on v0.52.0) |
+
 # Core 0.52.0 release: an agent works until the task is done (2026-11-17)
 
 | Item | State |

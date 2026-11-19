@@ -93,6 +93,16 @@ impl Provider for Model {
             let delegate = json!({ "to": "helper", "objective": "zzreplay delegated" });
             return Ok(step(&[("agents.delegate", delegate)]));
         }
+        if said.contains("zzkickscreen") {
+            let start = json!({ "to": "helper", "objective": "zzscreen started" });
+            return Ok(step(&[("agents.start", start)]));
+        }
+        if said.contains("zzscreen") {
+            return Ok(step(&[
+                ("screen.look", json!({})),
+                ("screen.click", json!({})),
+            ]));
+        }
         if said.contains("zzkick") {
             let start = json!({ "to": "helper", "objective": "zzreplay started" });
             return Ok(step(&[("agents.start", start)]));
@@ -183,6 +193,17 @@ fn world_with(hold: bool, wait: bool) -> World {
         ("process", vec![change("process.start")]),
         ("files", vec![change("files.write"), change("files.edit")]),
         ("computer", vec![change("computer.look").ask_each_time()]),
+        (
+            "screen",
+            vec![
+                change("screen.look")
+                    .grant_per("screen", &[])
+                    .ask_once_a_turn(),
+                change("screen.click")
+                    .grant_per("screen", &[])
+                    .ask_once_a_turn(),
+            ],
+        ),
         ("pay", vec![change("pay.send").person_only()]),
     ];
     let mut builder = Ark::builder()
@@ -593,4 +614,52 @@ async fn an_unanswered_question_keeps_the_run_waiting_until_it_is_stopped() {
     assert_eq!(w.ran(), strs(&["process.start"]));
     w.o.cancel_and_wait(&id).await.unwrap();
     assert_eq!(w.o.task(&id).unwrap().state, TaskState::Cancelled);
+}
+
+/// ADR 0128: what asks once a turn runs in the person's own Auto turn, and asks in a scheduled
+/// run (even of an agent that acts alone) and in work an agent starts. A no is never remembered,
+/// so each refused call asks.
+#[tokio::test]
+async fn the_screen_runs_in_the_persons_auto_turn_and_asks_in_work_nobody_watches() {
+    let w = world(false);
+    w.agent("ceo", |s| s.allow_mutate(true).delegates_to(["helper"]))
+        .await;
+    w.agent("helper", |s| s.allow_mutate(true)).await;
+    let chat = w.chat("ceo", ExecutionMode::Auto);
+    w.o.run("ceo", said("zzscreen").thread(&chat))
+        .await
+        .unwrap();
+    assert_eq!(w.ran(), strs(&["screen.look", "screen.click"]));
+    assert_eq!(w.asked(), Vec::<String>::new());
+
+    w.reset();
+    let s =
+        w.o.schedule(
+            "ceo",
+            TaskSpec::new("zzscreen").report_to(&chat),
+            When::daily_at("02:00").in_zone("UTC"),
+        )
+        .unwrap();
+    let id = w.o.run_schedule_now(&s.id).await.unwrap();
+    w.o.wait(&id).await.unwrap();
+    assert_eq!(w.ran(), Vec::<String>::new(), "scheduled");
+    assert_eq!(
+        w.asked(),
+        strs(&["screen.look", "screen.click"]),
+        "scheduled"
+    );
+
+    w.reset();
+    let chat = w.chat("ceo", ExecutionMode::Auto);
+    w.o.run("ceo", said("zzkickscreen").thread(&chat))
+        .await
+        .unwrap();
+    until("helper ran", || {
+        w.o.tasks()
+            .iter()
+            .any(|t| t.owner == "helper" && t.state.is_final())
+    })
+    .await;
+    assert_eq!(w.ran(), Vec::<String>::new(), "started");
+    assert_eq!(w.asked(), strs(&["screen.look", "screen.click"]), "started");
 }

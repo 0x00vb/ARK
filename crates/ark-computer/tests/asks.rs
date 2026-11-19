@@ -169,6 +169,6 @@ async fn a_no_stops_the_computer() {
         turns: 1,
     })
     .await;
-    assert!(asked >= 1);
+    assert_eq!(asked, 3, "a no is not remembered: each call asks");
     assert!(log.is_empty(), "nothing touched the screen: {log:?}");
 }

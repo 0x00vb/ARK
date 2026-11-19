@@ -880,7 +880,7 @@ impl Inner {
             }
             if allowed.unattended
                 && descriptor.risk == ark_core::RiskTier::Mutate
-                && (!descriptor.auto_eligible || descriptor.ask_each_time)
+                && (!descriptor.auto_eligible || descriptor.ask_each_time || descriptor.once_a_turn)
             {
                 return Err(OrchError::NotAllowed(format!(
                     "{} requires a live approval",

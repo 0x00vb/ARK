@@ -634,7 +634,8 @@ impl CallGuard for RunGuard {
                         if descriptor.risk == RiskTier::Mutate
                             && (run.activation.is_none()
                                 || !allowed.unattended
-                                || descriptor.ask_each_time)
+                                || descriptor.ask_each_time
+                                || descriptor.once_a_turn)
                         {
                             Verdict::Ask
                         } else {

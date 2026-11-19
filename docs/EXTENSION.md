@@ -253,9 +253,12 @@ that is off until the person allows it does the same through `PerAgent::acquisit
 | `computer.open {app}`, `computer.click {app, ref, name}`, `computer.type {app, ref, name, text}`, `computer.keys {app, keys}` | Start or bring forward an app; press a control; type into a field without submitting; press a key or shortcut (`cmd+s`). The name must be the control's at that number. Each answers with the window after |
 | `computer.draft`, `computer.send`, `computer.cancel` | Draft, verify, send or clear an exact message through a consumer's `MessageEvidence`. An uncertain submission is terminal and blocks Computer changes until the person checks the app (ADR 0056) |
 
-Every action but `apps` asks each time (`ActionDescriptor::ask_each_time`): Allow once or Deny,
-never remembered, so nothing on the screen runs unattended. Keys and text that go to the app in
-front are sent only once the approved app is there.
+Every action but `apps` shares the approval class `computer` and asks once a turn
+(`ActionDescriptor::once_a_turn`, [ADR 0128](adr/0128-the-computer-asks-once-and-not-in-auto.md)).
+A chat in Auto runs it: the person's message asked for the work. Otherwise the first action of
+a turn asks "ARK wants to use your computer:" (Allow or Deny), the yes covers the rest of the
+turn and is never remembered, so a scheduled or started run waits for a person. Keys and text
+that go to the app in front are sent only once the approved app is there.
 
 One agent (or chat) holds the screen at a time; another waits until its turn or task ends or
 it has been idle for 30 s. Every action waits until the person has left the keyboard and
@@ -305,8 +308,9 @@ project folder, contained ([ADR 0020](adr/0020-running-code-contained-in-the-pro
 
 ### Approvals that last
 
-Every approval offers Allow once, Allow for this session, Always in this project, and Deny
-(`ark_interact::approval_choices`). "Always" is a record in the store for the open project
+Most approvals offer Allow once, Allow for this session, Always in this project, and Deny
+(`ark_interact::approval_choices`); what asks each time or once a turn offers only a yes and
+Deny. "Always" is a record in the store for the open project
 (`ark_runtime::lasting_grants`, `remove_lasting_grant`); it covers every later call of that
 approval class in the project, in any session, until the person removes it with `/grants` or
 in Settings › Permissions. A connect question offers only Connect or Not now. Google's

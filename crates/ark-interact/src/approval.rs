@@ -21,11 +21,21 @@ pub fn approval_title(req: &ApprovalRequest) -> String {
             None => "ARK needs this to finish:".into(),
         };
     }
+    // One answer lets it use the computer for the rest of the chat: the question says so, and
+    // its first step follows.
+    let what = if req.class == COMPUTER {
+        " use your computer"
+    } else {
+        ""
+    };
     match &req.agent {
-        Some(a) => format!("{a} wants to:"),
-        None => "ARK wants to:".into(),
+        Some(a) => format!("{a} wants to{what}:"),
+        None => format!("ARK wants to{what}:"),
     }
 }
+
+/// The approval class every Computer action shares (`ark_computer::GRANT`).
+const COMPUTER: &str = "computer";
 
 /// The headline of a change asked again because it was cut short.
 pub const CUT_SHORT_TITLE: &str = "This was cut short and may already have happened. Do it again?";
@@ -76,8 +86,17 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
             choice("Deny", ApprovalDecision::Deny, None),
         ];
     }
-    // A grant narrower than the action names what it covers on its button: one app, one
-    // command. The question above already shows which.
+    // The computer is asked once, when an agent first takes it: a yes lasts the chat, and
+    // "Always" every chat in the project. Stop in the window takes it back.
+    if req.class == COMPUTER {
+        return vec![
+            choice("Allow in this chat", ApprovalDecision::AllowSession, None),
+            choice("Always allow", ApprovalDecision::AllowAlways, None),
+            choice("Deny", ApprovalDecision::Deny, None),
+        ];
+    }
+    // A grant narrower than the action names what it covers on its button: one command. The
+    // question above already shows which.
     if let Some(what) = grant_scope(req) {
         return vec![
             choice("Allow once", ApprovalDecision::AllowOnce, None),
@@ -111,16 +130,9 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
 }
 
 /// What a lasting answer covers when a grant is narrower than the action, as a button names
-/// it: the app (`WhatsApp`) for the Computer, `this command` for a process. `None`: the action.
+/// it: `this command` for a process. `None`: the action.
 pub fn grant_scope(req: &ApprovalRequest) -> Option<String> {
     match req.class.split_once(':') {
-        Some(("computer", _)) => req
-            .input
-            .get("app")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|a| !a.is_empty())
-            .map(str::to_string),
         Some(("process.start", _)) => Some("this command".into()),
         _ => None,
     }
@@ -260,15 +272,21 @@ mod tests {
         };
         let mut app = req();
         app.action = "computer.click".into();
-        app.class = "computer:whatsapp".into();
+        app.class = COMPUTER.into();
         app.input = serde_json::json!({ "app": "WhatsApp", "ref": 3, "name": "Send" });
+        assert_eq!(approval_title(&app), "ARK wants to use your computer:");
         assert_eq!(
-            labels(&app),
+            approval_choices(&app)
+                .into_iter()
+                .map(|c| (c.label, c.decision))
+                .collect::<Vec<_>>(),
             [
-                "Allow once",
-                "Allow WhatsApp for this session",
-                "Always allow WhatsApp",
-                "Deny"
+                (
+                    "Allow in this chat".to_string(),
+                    ApprovalDecision::AllowSession
+                ),
+                ("Always allow".to_string(), ApprovalDecision::AllowAlways),
+                ("Deny".to_string(), ApprovalDecision::Deny)
             ]
         );
         let mut cmd = req();

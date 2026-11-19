@@ -194,10 +194,9 @@ impl Approver for TurnOnComputer {
             return ApprovalDecision::AllowOnce;
         }
         let mut ask = request.clone();
-        // The line says what the yes allows (its first word is the button); the summary what
-        // it does not: each step still asks.
+        // The line says what the yes allows (its first word is the button).
         ask.preview = "Allow ARK to use the apps on this computer".into();
-        ask.summary = "It still asks before each step.".into();
+        ask.summary = String::new();
         match self.inner.decide(&ask).await {
             ApprovalDecision::Deny => ApprovalDecision::Deny,
             _ => ApprovalDecision::AllowOnce,

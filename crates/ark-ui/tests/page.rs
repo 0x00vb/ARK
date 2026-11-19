@@ -1497,6 +1497,7 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
     };
     let script = vec![
         call("computer.look", json!({ "app": "Notes" })),
+        call("notes.save", json!({})),
         call(
             "computer.click",
             json!({ "app": "Notes", "ref": 2, "name": "Save" }),
@@ -1513,10 +1514,10 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
     drive("computer", script, Duration::ZERO).await;
 }
 
-/// A picture the agent took shows under its step, and a click in it is asked with the picture and
-/// a ring on the spot (ADR 0042).
+/// A picture the agent took shows under its step (ADR 0042); an Auto chat asks nothing to use
+/// the computer (ADR 0128).
 #[tokio::test(flavor = "multi_thread")]
-async fn the_person_sees_what_the_agent_saw_and_where_it_will_click() {
+async fn an_auto_chat_uses_the_computer_unasked_and_shows_what_it_saw() {
     let call = |name: &str, args: Value| Completion {
         content: String::new(),
         tool_calls: vec![ToolCall {

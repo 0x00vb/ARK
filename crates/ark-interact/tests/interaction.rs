@@ -1266,7 +1266,7 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
                     p.request.action.starts_with("computer."),
                 )
             };
-            // Each app step is allowed once. The first turn-on gets "Always" (no grant may
+            // An app step, if asked, is allowed once. The first turn-on gets "Always" (no grant may
             // cover a later ask), then Not now.
             p.answer(if acquisition {
                 ApprovalDecision::AllowOnce
@@ -1300,17 +1300,14 @@ async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
     assert!(end.result.unwrap().answer.contains("open"));
     {
         let asked = asked.lock().unwrap();
-        assert_eq!(asked.len(), 2, "{asked:?}");
+        // Turning it on is the only question: an agent that acts alone uses it unasked
+        // (ADR 0128).
+        assert_eq!(asked.len(), 1, "{asked:?}");
         assert_eq!(asked[0].0, ACQUISITION);
-        assert_eq!(asked[0].1, "It still asks before each step.");
+        assert_eq!(asked[0].1, "");
         assert_eq!(asked[0].4, "Allow ARK to use the apps on this computer");
         assert_eq!(asked[0].2, ["Allow", "Not now"]);
         assert!(asked[0].3, "no grant covers a later request");
-        assert_eq!(asked[1].4, "computer.open(app=\"Lumen\")");
-        assert!(
-            asked[1].3,
-            "the app's own step asks each time, as an agent that acts alone"
-        );
     }
     assert!(svc.is_on());
     assert!(

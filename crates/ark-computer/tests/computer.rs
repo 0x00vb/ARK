@@ -1225,11 +1225,20 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
     // The card an agent reads.
     let (card, _) = distill(LOOK, &look).unwrap();
     assert!(card.contains("[2] button \"Save\""), "{card}");
-    // Every action but the list asks first, each time: no earlier answer covers it.
+    // Every action but the list asks first, and one answer covers them all
+    // (`tests/asks.rs`).
     let risky: Vec<String> = a
         .actions()
         .into_iter()
-        .filter(|d| !d.risk.auto_runs() && d.ask_each_time)
+        .filter(|d| !d.risk.auto_runs())
+        .inspect(|d| assert!(!d.ask_each_time, "{}", d.name))
+        .filter(|d| {
+            d.grant
+                .as_ref()
+                .and_then(|g| g.class(&json!({})))
+                .as_deref()
+                == Some(GRANT)
+        })
         .map(|d| d.name)
         .collect();
     assert_eq!(

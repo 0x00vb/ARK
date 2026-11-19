@@ -99,8 +99,8 @@ pub struct ActionDescriptor {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person_only: bool,
     /// What one "for this session" or "always" answer covers, when it is not the action name:
-    /// the calls of a group with the same values of some input fields (every Computer action in
-    /// one app). See [`GrantKey`].
+    /// the calls of a group with the same values of some input fields (one command), or every
+    /// action of a group (the Computer). See [`GrantKey`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<GrantKey>,
     /// This mutation is constrained to the selected project or contained runtime, so an
@@ -121,8 +121,9 @@ pub struct ActionDescriptor {
 }
 
 /// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
-/// the same values. The approval class is `group:value` (`computer:whatsapp`), with several
-/// fields joined by `@` (`process.start:npm run dev@web`).
+/// the same values. The approval class is `group:value`, with several fields joined by `@`
+/// (`process.start:npm run dev@web`). With no fields it is `group`: one answer covers every
+/// action of the group (`computer`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantKey {
     pub group: String,
@@ -137,6 +138,9 @@ impl GrantKey {
     /// then gets the default class). One empty field among others stays an empty value
     /// (`process.start:npm run dev@`), so a grant never widens to calls that left it out.
     pub fn class(&self, input: &serde_json::Value) -> Option<String> {
+        if self.fields.is_empty() {
+            return Some(self.group.clone());
+        }
         let values: Vec<String> = self
             .fields
             .iter()
@@ -296,6 +300,16 @@ mod tests {
         assert_eq!(
             any.class(&json!({ "app": "WhatsApp" })).as_deref(),
             Some("app:whatsapp")
+        );
+        // No fields: one class for the whole group, whatever the input.
+        let group = ActionDescriptor::new("screen.click", "click", RiskTier::Mutate)
+            .grant_per("screen", &[])
+            .grant
+            .unwrap();
+        assert_eq!(group.class(&json!({})).as_deref(), Some("screen"));
+        assert_eq!(
+            group.class(&json!({ "app": "Mail" })).as_deref(),
+            Some("screen")
         );
     }
 

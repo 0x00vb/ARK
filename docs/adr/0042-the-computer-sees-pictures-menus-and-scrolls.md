@@ -1,6 +1,6 @@
 # 0042. The Computer sees pictures, uses menus and scrolls
 
-Status: Accepted (amends 0018)
+Status: Accepted (amends 0018), amended by 0128 (asked once a chat, not in Auto)
 Date: 2026-10-06
 
 ## Context
@@ -49,8 +49,8 @@ ChatGPT, Spotify) found these limits:
 - `crates/ark-computer/tests/computer.rs`: typing as keys, menus by name (a greyed item refused),
   scrolling and double-click positions, a picture and a point mapped to the screen (refused
   outside the picture), and the 0018 checks.
-- `crates/ark-ui/tests/page.rs` (WebKit), `the_person_sees_what_the_agent_saw_and_where_it_will_click`:
-  the picture under its step, the ring at the spot, no caption, the click at the mapped point.
+- `crates/ark-ui/tests/page.rs` (WebKit), `an_auto_chat_uses_the_computer_unasked_and_shows_what_it_saw`:
+  the picture under its step, the click at the mapped point (the ring is no longer reached, ADR 0128).
 - `crates/ark-runtime/src/budget.rs`, `only_the_newest_picture_stays_and_it_counts`.
 - `crates/ark-model/src/{anthropic,openai,ollama}.rs`: where each puts a tool result's picture.
 - `crates/ark-core/src/action.rs`, `a_grant_key_splits_answers_by_input_and_never_widens`.

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ARK's Computer capability: agents use the apps on this computer through its accessibility interface, one at a time, every action asked."
+description = "ARK's Computer capability: agents use the apps on this computer through its accessibility interface, one at a time, with the person's consent."
 
 [dependencies]
 ark-core.workspace = true

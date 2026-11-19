@@ -9,7 +9,7 @@
 //! | Rule | How |
 //! |---|---|
 //! | One agent at a time on the screen | the first to act holds it; the others wait until it is done (its turn or task ends) or has left it idle for [`IDLE`] |
-//! | Every action that reads or changes an app asks first | `look`, `open`, `click`, `type` and `keys` are `Mutate`, through the approval gate; only `apps` (the names of the open apps) runs on its own |
+//! | Reading or changing an app needs the person's consent | every action but `apps` (the names of the open apps) is `Mutate`, through the approval gate, in one approval class ([`GRANT`]): an Auto chat runs them (the person's message asked for the work); a chat that asks asks once, and the answer lasts the chat |
 //! | The person comes first | an action waits until the person has left the keyboard and mouse alone for [`QUIET`] |
 //! | The person can take it back | [`ComputerService::take_back`]: the holder's next action fails and says so |
 //! | Elements are refused across apps | an element number is the agent's last `look`, in the app that `look` showed |
@@ -80,6 +80,11 @@ pub const PICTURE: u32 = 1280;
 
 /// How long the screen stays with an agent after its last action, while another waits.
 pub const IDLE: Duration = Duration::from_secs(30);
+
+/// The approval class of every Computer action: one answer lets an agent use the computer for
+/// the rest of the chat. An Auto chat does not ask; the person's own message asked for the work.
+pub const GRANT: &str = "computer";
+
 /// How long the person must have left the keyboard and mouse alone before an agent acts.
 pub const QUIET: Duration = Duration::from_millis(1500);
 /// How long an action waits for the person to pause before giving up.
@@ -2018,20 +2023,20 @@ impl Adapter for Computer {
                 RiskTier::Mutate,
             )
             .volatile()
-            .ask_each_time(),
+            .grant_per(GRANT, &[]),
             ActionDescriptor::new(
                 LOOK,
                 "see an app's front window: its text and the elements you can act on, each with a number",
                 RiskTier::Mutate,
             )
             .volatile()
-            .ask_each_time()
+            .grant_per(GRANT, &[])
             .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(OPEN, "start an app on this computer, or bring it to the front. When the person names an app, use it here, not its website", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(CLICK, "press an element of an app (a button, a link, a row, an item), by its number and name; double opens it (a file, a chat), right shows its menu", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "ref", "name"],
                     "properties": {
@@ -2040,7 +2045,7 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(TYPE, "type into a field of an app, by its number and name. This never submits a message", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "ref", "name", "text"],
                     "properties": {
@@ -2049,23 +2054,23 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(KEYS, "press a key or shortcut in an app: return, escape, tab, cmd+s, cmd+shift+n. Never use this to submit a message; use computer.draft and computer.send", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "keys"],
                     "properties": { "app": app(), "keys": { "type": "string" } }
                 })),
             ActionDescriptor::new(MENU, "use an app's menu bar: a path to an item (\"File > Export as PDF…\") chooses it; a path to a menu, or none, lists its items and their shortcuts", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app"],
                     "properties": { "app": app(), "path": { "type": "string", "description": "menu names joined by >, e.g. File > Export as PDF…" } }
                 })),
             ActionDescriptor::new(SEE, "a picture of an app's window, for when computer.look shows little (a canvas, a game, a video app); computer.point then clicks a spot in it", RiskTier::Mutate)
                 .volatile()
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(POINT, "click a spot in your last picture of an app (computer.see), by its pixel position; double opens, right shows a menu", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "x", "y"],
                     "properties": {
@@ -2077,7 +2082,7 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(SCROLL, "scroll an app's window, or the part of it holding an element, to see more", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "direction"],
                     "properties": {
@@ -2088,7 +2093,7 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(DRAFT, "draft a message in a native app after its accessibility tree proves the exact conversation and composer. This does not send", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object",
                     "required": ["app", "recipient", "conversation_ref", "conversation_name", "composer_ref", "composer_name", "text"],
@@ -2103,7 +2108,7 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(SEND, "send the exact staged draft to the exact recipient, then prove a new outgoing message. Never retry an unconfirmed send", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "recipient", "text"],
                     "properties": {
@@ -2113,7 +2118,7 @@ impl Adapter for Computer {
                     }
                 })),
             ActionDescriptor::new(CANCEL, "clear the exact unchanged staged draft. If the person edited it, ARK refuses and asks for manual cleanup", RiskTier::Mutate)
-                .ask_each_time()
+                .grant_per(GRANT, &[])
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "recipient", "text"],
                     "properties": {

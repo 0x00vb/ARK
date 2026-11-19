@@ -2728,55 +2728,45 @@ async function background(page) {
 }
 scenarios.background = background;
 
-// An agent using the computer shows who, and Stop takes it back: the click it then asks for
-// fails, and the pill goes away.
+// A chat that asks asks once to use the computer (ADR 0128): the yes covers the look and the
+// click after it. The pill shows who uses it, and Stop takes it back: the click then fails while
+// another question waits, and the pill goes away.
 async function computer(page) {
   const pill = page.locator("#computer-use");
   assert.equal(await pill.isVisible(), false, "nothing shows while nobody uses it");
+  await page.evaluate(() => window.ark.call("chat_execution_mode", { session: window.ark.summary().session.id, mode: "manual", revision: 0 }));
   await page.locator("#input").fill("Save my note in Notes, please");
   await page.keyboard.press("Enter");
   const look = page.locator("#thread .approval:not(.decided)");
   await look.waitFor();
+  assert.match(await look.innerText(), /use your computer/);
   assert.match(await look.innerText(), /Looking at Notes/);
-  await look.locator("button", { hasText: "Allow once" }).click();
-  const click = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking “Save” in Notes" });
-  await click.waitFor();
-  // Using the computer is asked each time: no answer covers later calls.
-  assert.deepEqual(await click.locator(".approval-actions button").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Allow once", "Deny"]);
+  assert.deepEqual(await look.locator(".approval-actions button").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Allow in this chat", "Always allow", "Deny"]);
+  await look.locator("button", { hasText: "Allow in this chat" }).click();
+  const save = page.locator("#thread .approval:not(.decided)");
+  await save.waitFor();
+  assert.doesNotMatch(await save.innerText(), /computer/, "the next question is not the computer's");
   await pill.waitFor();
   assert.match(await pill.innerText(), /ARK is using your computer/);
   await pill.locator("button", { hasText: "Stop" }).click();
   await pill.waitFor({ state: "hidden" });
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
-  await click.locator("button", { hasText: "Allow once" }).click();
+  await save.locator("button", { hasText: "Deny" }).click();
   await done;
   await page.locator(".answer", { hasText: "took the computer back" }).waitFor();
+  assert.equal(await page.locator("#thread .approval", { hasText: "Clicking" }).count(), 0, "the click was not asked");
   assert.equal(await pill.isVisible(), false);
 }
 scenarios.computer = computer;
 
-// ADR 0042: the picture the agent took shows under its step; a click in it is asked with the
-// picture and a ring on the spot, so the person judges the spot itself.
+// ADR 0042: the picture the agent took shows under its step. An Auto chat asks nothing to use
+// the computer (ADR 0128): the person's message asked for the work.
 async function computerPicture(page) {
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
   await page.locator("#input").fill("Press Save in Notes");
   await page.keyboard.press("Enter");
-  const see = page.locator("#thread .approval:not(.decided)");
-  await see.waitFor();
-  assert.match(await see.innerText(), /Taking a picture of Notes's window/);
-  await see.locator("button", { hasText: "Allow once" }).click();
-  const point = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking the Save button in Notes" });
-  await point.waitFor();
-  const shot = point.locator(".approval-shot");
-  await shot.waitFor();
-  assert.match(await shot.locator("img").getAttribute("src"), /^data:image\/png;base64,/);
-  // The fake picture is 400 by 300: (100, 150) is a quarter across and half down.
-  const ring = await shot.locator(".approval-spot").evaluate((r) => [r.style.left, r.style.top]);
-  assert.deepEqual(ring, ["25%", "50%"]);
-  assert.equal(await point.locator(".approval-class, .approval-summary").count(), 0, "no caption");
-  await point.locator("button", { hasText: "Allow once" }).click();
   await done;
-  // What the agent saw, under its step.
+  assert.equal(await page.locator("#thread .approval").count(), 0, "nothing asked");
   await page.locator(".act[data-action='computer.see'] .act-shot img").waitFor({ state: "attached" });
 }
 scenarios["computer-picture"] = computerPicture;
@@ -3622,7 +3612,7 @@ async function computerSwitch(page) {
   await card.waitFor();
   assert.equal(await card.locator(".approval-title").innerText(), "ARK needs this to finish:");
   assert.match(await card.innerText(), /Allow ARK to use the apps on this computer/);
-  assert.match(await card.innerText(), /It still asks before each step\./);
+  assert.doesNotMatch(await card.innerText(), /asks before each step/);
   const buttons = (await card.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
   assert.deepEqual(buttons, ["Allow", "Not now"]);
   await shot(page, "computer-allow-light");

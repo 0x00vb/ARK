@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Computer asks once, not at every action (ADR 0128). Every Computer action but `apps` shares the approval class `computer` and is no longer `ask_each_time`: an Auto chat uses the computer without a question, and a chat that asks asks once ("ARK wants to use your computer:", Allow in this chat, Always allow, Deny). An agent allowed to act alone uses it without a question.
+- `GrantKey` with no fields gives its group as the class: one answer covers every action of the group.
+
 ## [0.52.0] - 2026-11-17
 
 A note is sent back after each step, the first reply included; a rotated Claude Code session keeps its cached system prompt (ADR 0127).

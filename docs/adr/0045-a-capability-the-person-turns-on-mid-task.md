@@ -1,6 +1,6 @@
 # 0045. A capability the person turns on, asked for mid-task
 
-Status: Accepted (amends 0013 and 0018)
+Status: Accepted (amends 0013 and 0018), amended by 0128 (no "It still asks before each step.")
 Date: 2026-10-07
 
 ## Context

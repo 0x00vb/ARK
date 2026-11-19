@@ -1,6 +1,6 @@
 //! How often the person is asked while an agent uses the computer, through the real harness and
-//! approval gate: an Auto chat asks nothing (the person's own words asked for the work), and a
-//! chat that asks does so once, not at every look, click and keystroke.
+//! approval gate: an Auto chat asks nothing (the person's own words asked for the work), and
+//! otherwise once a turn, not at every look, click and keystroke (ADR 0128).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -47,8 +47,17 @@ fn answer() -> Completion {
     }
 }
 
-/// Look, type, click in Notes; returns (questions asked, what the screen did).
-async fn save_a_note(mode: ExecutionMode, reply: ApprovalDecision) -> (usize, Vec<String>) {
+struct Run {
+    mode: ExecutionMode,
+    reply: ApprovalDecision,
+    /// The agent may change things on its own (`Harness::allow_mutate`).
+    alone: bool,
+    turns: usize,
+}
+
+/// Look, type, click in Notes, once a turn, with one gate for every turn; returns (questions
+/// asked, what the screen did).
+async fn save_a_note(run: Run) -> (usize, Vec<String>) {
     let screen = FakeScreen::new().app("Notes", &[("text field", "Title"), ("button", "Save")]);
     let svc = ComputerService::with_screen(Arc::new(screen.clone()))
         .timing(Duration::from_millis(50), Duration::from_millis(50));
@@ -62,65 +71,104 @@ async fn save_a_note(mode: ExecutionMode, reply: ApprovalDecision) -> (usize, Ve
     let profile = AgentProfile::builder()
         .core_actions([LOOK, TYPE, CLICK])
         .build();
-    let mut script = vec![
-        step("c1", LOOK, json!({ "app": "Notes" })),
-        step(
-            "c2",
-            TYPE,
-            json!({ "app": "Notes", "ref": 1, "name": "Title", "text": "Plan" }),
-        ),
-        step(
-            "c3",
-            CLICK,
-            json!({ "app": "Notes", "ref": 2, "name": "Save" }),
-        ),
-    ];
-    script.extend(std::iter::repeat_with(answer).take(4));
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
     let asked = Arc::new(AtomicUsize::new(0));
-    Harness::new(ModelRouter::single(provider))
-        .planner(false)
-        .critic(false)
-        .execution_mode(mode)
-        .approvals(Some(Arc::new(ApprovalGate::new(Arc::new(Answers(
-            reply,
-            asked.clone(),
-        ))))))
-        .ask(
-            &engine,
-            &profile,
-            &project.id,
-            "Use Notes on my computer: save a note titled Plan",
-            |_| {},
-        )
-        .await
-        .unwrap();
+    let gate = Arc::new(ApprovalGate::new(Arc::new(Answers(
+        run.reply,
+        asked.clone(),
+    ))));
+    for _ in 0..run.turns {
+        let mut script = vec![
+            step("c1", LOOK, json!({ "app": "Notes" })),
+            step(
+                "c2",
+                TYPE,
+                json!({ "app": "Notes", "ref": 1, "name": "Title", "text": "Plan" }),
+            ),
+            step(
+                "c3",
+                CLICK,
+                json!({ "app": "Notes", "ref": 2, "name": "Save" }),
+            ),
+        ];
+        script.extend(std::iter::repeat_with(answer).take(4));
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
+        Harness::new(ModelRouter::single(provider))
+            .planner(false)
+            .critic(false)
+            .execution_mode(run.mode)
+            .allow_mutate(run.alone)
+            .approvals(Some(gate.clone()))
+            .ask(
+                &engine,
+                &profile,
+                &project.id,
+                "Use Notes on my computer: save a note titled Plan",
+                |_| {},
+            )
+            .await
+            .unwrap();
+    }
     let log = screen.log.lock().unwrap().clone();
     (asked.load(Ordering::SeqCst), log)
 }
 
-#[tokio::test]
-async fn an_auto_chat_uses_the_computer_without_asking() {
-    let (asked, log) = save_a_note(ExecutionMode::Auto, ApprovalDecision::Deny).await;
-    assert_eq!(asked, 0, "the person's message asked for the work");
-    assert!(log.contains(&"press Notes/Save".to_string()), "{log:?}");
+fn typed_and_saved(log: &[String]) -> bool {
+    log.contains(&"type \"Plan\"".to_string()) && log.contains(&"press Notes/Save".to_string())
 }
 
 #[tokio::test]
-async fn a_chat_that_asks_asks_once_for_the_computer() {
-    // The computer's question offers one yes, for the rest of the chat
-    // (`ark_interact::approval_choices`).
-    let (asked, log) = save_a_note(ExecutionMode::Manual, ApprovalDecision::AllowSession).await;
+async fn an_auto_chat_uses_the_computer_without_asking() {
+    let (asked, log) = save_a_note(Run {
+        mode: ExecutionMode::Auto,
+        reply: ApprovalDecision::Deny,
+        alone: false,
+        turns: 1,
+    })
+    .await;
+    assert_eq!(asked, 0, "the person's message asked for the work");
+    assert!(typed_and_saved(&log), "{log:?}");
+}
+
+#[tokio::test]
+async fn a_chat_that_asks_asks_once_a_turn_and_remembers_nothing() {
+    // Even an "always" answer covers only the rest of its turn.
+    let (asked, log) = save_a_note(Run {
+        mode: ExecutionMode::Manual,
+        reply: ApprovalDecision::AllowAlways,
+        alone: false,
+        turns: 2,
+    })
+    .await;
     assert_eq!(
-        asked, 1,
-        "one question, then the look, the typing and the click"
+        asked, 2,
+        "one question a turn for the look, the typing and the click"
     );
-    assert!(log.contains(&"press Notes/Save".to_string()), "{log:?}");
+    assert!(typed_and_saved(&log), "{log:?}");
+}
+
+#[tokio::test]
+async fn an_agent_that_acts_alone_still_asks_once_when_someone_can_answer() {
+    // A scheduled or delegated run does not drive the screen with nobody there.
+    let (asked, log) = save_a_note(Run {
+        mode: ExecutionMode::Manual,
+        reply: ApprovalDecision::AllowOnce,
+        alone: true,
+        turns: 1,
+    })
+    .await;
+    assert_eq!(asked, 1);
+    assert!(typed_and_saved(&log), "{log:?}");
 }
 
 #[tokio::test]
 async fn a_no_stops_the_computer() {
-    let (asked, log) = save_a_note(ExecutionMode::Manual, ApprovalDecision::Deny).await;
+    let (asked, log) = save_a_note(Run {
+        mode: ExecutionMode::Manual,
+        reply: ApprovalDecision::Deny,
+        alone: false,
+        turns: 1,
+    })
+    .await;
     assert!(asked >= 1);
     assert!(log.is_empty(), "nothing touched the screen: {log:?}");
 }

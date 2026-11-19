@@ -1,6 +1,6 @@
 # 0123. A named agent's chat turn follows the chat's mode
 
-Status: Accepted. Date: 2026-11-16. Builds on 0107 (every chat starts in Auto), 0104 (the chat's mode), 0109 (an agent has many chats), 0113 and 0117 (group-reached work asks), 0118 (`work.later`), 0120 (schedules read the chat's mode). Amends 0118 and 0120 where they say nothing reads the mode for an orchestrated agent.
+Status: Accepted. Date: 2026-11-16. Builds on 0107 (every chat starts in Auto), 0104 (the chat's mode), 0109 (an agent has many chats), 0113 and 0117 (group-reached work asks), 0118 (`work.later`), 0120 (schedules read the chat's mode). Amends 0118 and 0120 where they say nothing reads the mode for an orchestrated agent. Amended by 0128: the Computer no longer asks in Auto.
 
 ## Context
 

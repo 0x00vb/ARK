@@ -1,6 +1,6 @@
 # 0018. The Computer: one screen, one agent, every action asked
 
-Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures), 0045 (off until the person turns it on), ARK Desktop 0013 (ambient context) and 0128 (asked once a chat, not in Auto)
+Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures), 0045 (off until the person turns it on), ARK Desktop 0013 (ambient context) and 0128 (asked once a turn, not in Auto)
 Date: 2026-10-04
 
 ## Context

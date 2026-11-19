@@ -2728,21 +2728,21 @@ async function background(page) {
 }
 scenarios.background = background;
 
-// A chat that asks asks once to use the computer (ADR 0128): the yes covers the look and the
-// click after it. The pill shows who uses it, and Stop takes it back: the click then fails while
+// A chat that asks asks once a turn to use the computer (ADR 0128): the yes covers the look and
+// the click after it. The pill shows who uses it, and Stop takes it back: the click then fails while
 // another question waits, and the pill goes away.
 async function computer(page) {
   const pill = page.locator("#computer-use");
   assert.equal(await pill.isVisible(), false, "nothing shows while nobody uses it");
-  await page.evaluate(() => window.ark.call("chat_execution_mode", { session: window.ark.summary().session.id, mode: "manual", revision: 0 }));
+  assert.equal((await page.evaluate(() => window.ark.setExecutionMode("manual"))).execution_mode, "manual");
   await page.locator("#input").fill("Save my note in Notes, please");
   await page.keyboard.press("Enter");
   const look = page.locator("#thread .approval:not(.decided)");
   await look.waitFor();
   assert.match(await look.innerText(), /use your computer/);
   assert.match(await look.innerText(), /Looking at Notes/);
-  assert.deepEqual(await look.locator(".approval-actions button").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Allow in this chat", "Always allow", "Deny"]);
-  await look.locator("button", { hasText: "Allow in this chat" }).click();
+  assert.deepEqual(await look.locator(".approval-actions button").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Allow", "Deny"]);
+  await look.locator('button[data-decision="allow_once"]').click();
   const save = page.locator("#thread .approval:not(.decided)");
   await save.waitFor();
   assert.doesNotMatch(await save.innerText(), /computer/, "the next question is not the computer's");
@@ -2754,7 +2754,6 @@ async function computer(page) {
   await save.locator("button", { hasText: "Deny" }).click();
   await done;
   await page.locator(".answer", { hasText: "took the computer back" }).waitFor();
-  assert.equal(await page.locator("#thread .approval", { hasText: "Clicking" }).count(), 0, "the click was not asked");
   assert.equal(await pill.isVisible(), false);
 }
 scenarios.computer = computer;

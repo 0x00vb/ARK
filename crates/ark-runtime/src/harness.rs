@@ -810,6 +810,8 @@ impl Harness {
             .iter()
             .map(|i| call_digest(&i.action, &engine.canonical_input(project, i.input.clone())))
             .collect();
+        // Approval classes of `once_a_turn` actions the person allowed this turn.
+        let mut allowed_this_turn: HashSet<String> = HashSet::new();
         // When an action that changes state last ran this turn. Reads before it are not
         // reused after it.
         let mut changed_at = turn_started;
@@ -1370,15 +1372,24 @@ impl Harness {
                 let auto = self.execution_mode == ExecutionMode::Auto
                     && !desc.ask_each_time
                     && (self.approvals.is_some() || desc.auto_eligible);
+                let turn_class = desc.once_a_turn.then(|| {
+                    desc.grant
+                        .as_ref()
+                        .and_then(|g| g.class(&call.arguments))
+                        .unwrap_or_else(|| profile.approval_class(&call.name, &call.arguments))
+                });
+                let allowed_before = turn_class
+                    .as_ref()
+                    .is_some_and(|c| allowed_this_turn.contains(c));
                 let mut pending_invocation = None;
                 let mut approved = match &guarded {
                     Some(verdict) => {
                         *verdict == crate::guard::Verdict::Allow && !again && !desc.person_only
                     }
                     None => {
-                        let alone =
-                            self.allow_mutate && !(desc.ask_each_time && self.approvals.is_some());
-                        (alone || auto) && !again && !desc.person_only
+                        let asks = desc.ask_each_time || desc.once_a_turn;
+                        let alone = self.allow_mutate && !(asks && self.approvals.is_some());
+                        (alone || auto || allowed_before) && !again && !desc.person_only
                     }
                 };
                 if desc.risk == RiskTier::Mutate && !approved {
@@ -1416,6 +1427,7 @@ impl Harness {
                             approved = true;
                             pending_invocation = Some(*invocation);
                             cut_short.remove(&digest);
+                            allowed_this_turn.extend(turn_class);
                         }
                         ApprovalReply::Unavailable => {
                             on_event(HarnessEvent::NeedsApproval {
@@ -2302,7 +2314,7 @@ impl Harness {
             preview: preview_call(&call.name, &invocation.input),
             agent: None,
             task: None,
-            ask_each_time: desc.ask_each_time || cut_short || every_time,
+            ask_each_time: desc.ask_each_time || desc.once_a_turn || cut_short || every_time,
             cut_short,
         };
         if request.ask_each_time || !gate.is_granted(&request.class) {

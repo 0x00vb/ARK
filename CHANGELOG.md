@@ -4,8 +4,15 @@
 
 ### Changed
 
-- The Computer asks once, not at every action (ADR 0128). Every Computer action but `apps` shares the approval class `computer` and is no longer `ask_each_time`: an Auto chat uses the computer without a question, and a chat that asks asks once ("ARK wants to use your computer:", Allow in this chat, Always allow, Deny). An agent allowed to act alone uses it without a question.
-- `GrantKey` with no fields gives its group as the class: one answer covers every action of the group.
+- The Computer asks once a turn, not at every action (ADR 0128). Every Computer action but `apps` shares the approval class `computer` and is no longer `ask_each_time`. An Auto chat uses the computer without a question: the person's message asked for the work. Otherwise the first action of a turn asks ("ARK wants to use your computer:", Allow or Deny) and the yes covers the rest of the turn, sends included; it is never remembered. An agent allowed to act alone still asks once a turn when someone can answer.
+- Turning the Computer on no longer says "It still asks before each step.".
+- A click in a picture (`computer.point`) is no longer asked with the ring on the spot when the turn already allowed the computer.
+- A stored lasting grant `computer:<app>` no longer matches any call.
+
+### Added
+
+- `ActionDescriptor::once_a_turn` and `ask_once_a_turn()`: outside Auto one question a turn per approval class, never remembered.
+- `GrantKey` with no fields gives its group as the class. `ark_computer::GRANT`.
 
 ## [0.52.0] - 2026-11-17
 

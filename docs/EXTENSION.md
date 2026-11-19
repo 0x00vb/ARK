@@ -234,7 +234,7 @@ Tools each agent gets its own of (the web on its model, the browser) are `PerAge
 
 `ArkBuilder::computer(true)` lets agents use the apps on this computer (macOS for now; not
 offered elsewhere), read through the accessibility interface: a window is its text and a
-numbered list of controls, as a page is in the browser ([ADR 0018](adr/0018-the-computer-one-screen-every-action-asked.md)). An Auto chat uses it without asking; a chat that asks asks once, and the answer lasts the chat ([ADR 0128](adr/0128-the-computer-asks-once-and-not-in-auto.md)).
+numbered list of controls, as a page is in the browser ([ADR 0018](adr/0018-the-computer-one-screen-every-action-asked.md)). An Auto chat uses it without asking; otherwise the first action of a turn asks, and the yes lasts that turn ([ADR 0128](adr/0128-the-computer-asks-once-and-not-in-auto.md)).
 
 It starts off. While off, a turn carries one line saying the agent can ask for it, and no
 computer schema; an agent that needs an app calls `acquire_capability`, the person answers

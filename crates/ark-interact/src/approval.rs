@@ -21,7 +21,7 @@ pub fn approval_title(req: &ApprovalRequest) -> String {
             None => "ARK needs this to finish:".into(),
         };
     }
-    // One answer lets it use the computer for the rest of the chat: the question says so, and
+    // One answer lets it use the computer for the rest of the turn: the question says so, and
     // its first step follows.
     let what = if req.class == COMPUTER {
         " use your computer"
@@ -79,19 +79,18 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
             choice("Do it again", ApprovalDecision::AllowOnce, None),
         ];
     }
+    // The computer is asked once a turn, when an agent first takes it: the yes covers the rest
+    // of the turn and is never remembered. Stop in the window takes it back.
+    if req.class == COMPUTER {
+        return vec![
+            choice("Allow", ApprovalDecision::AllowOnce, None),
+            choice("Deny", ApprovalDecision::Deny, None),
+        ];
+    }
     // Nothing covers it ahead: each call is its own question.
     if req.ask_each_time {
         return vec![
             choice("Allow once", ApprovalDecision::AllowOnce, None),
-            choice("Deny", ApprovalDecision::Deny, None),
-        ];
-    }
-    // The computer is asked once, when an agent first takes it: a yes lasts the chat, and
-    // "Always" every chat in the project. Stop in the window takes it back.
-    if req.class == COMPUTER {
-        return vec![
-            choice("Allow in this chat", ApprovalDecision::AllowSession, None),
-            choice("Always allow", ApprovalDecision::AllowAlways, None),
             choice("Deny", ApprovalDecision::Deny, None),
         ];
     }
@@ -273,6 +272,7 @@ mod tests {
         let mut app = req();
         app.action = "computer.click".into();
         app.class = COMPUTER.into();
+        app.ask_each_time = true;
         app.input = serde_json::json!({ "app": "WhatsApp", "ref": 3, "name": "Send" });
         assert_eq!(approval_title(&app), "ARK wants to use your computer:");
         assert_eq!(
@@ -281,11 +281,7 @@ mod tests {
                 .map(|c| (c.label, c.decision))
                 .collect::<Vec<_>>(),
             [
-                (
-                    "Allow in this chat".to_string(),
-                    ApprovalDecision::AllowSession
-                ),
-                ("Always allow".to_string(), ApprovalDecision::AllowAlways),
+                ("Allow".to_string(), ApprovalDecision::AllowOnce),
                 ("Deny".to_string(), ApprovalDecision::Deny)
             ]
         );

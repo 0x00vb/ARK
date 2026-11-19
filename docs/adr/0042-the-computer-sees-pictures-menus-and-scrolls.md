@@ -1,6 +1,6 @@
 # 0042. The Computer sees pictures, uses menus and scrolls
 
-Status: Accepted (amends 0018), amended by 0128 (asked once a chat, not in Auto)
+Status: Accepted (amends 0018), amended by 0128 (asked once a turn, not in Auto)
 Date: 2026-10-06
 
 ## Context

@@ -103,6 +103,12 @@ pub struct ActionDescriptor {
     /// action of a group (the Computer). See [`GrantKey`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<GrantKey>,
+    /// Outside Auto the person is asked once a turn: a yes covers the calls of the same approval
+    /// class for the rest of that turn and is never remembered, and an agent allowed to change
+    /// things alone still asks when someone can answer. Auto runs it: the person's own message
+    /// asked for the work. For the person's own screen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub once_a_turn: bool,
     /// This mutation is constrained to the selected project or contained runtime, so an
     /// automation may run it with nobody there to ask. False is the safe default. A chat in
     /// [`ExecutionMode::Auto`] does not need it: the person is there.
@@ -181,6 +187,7 @@ impl ActionDescriptor {
             ask_each_time: false,
             person_only: false,
             grant: None,
+            once_a_turn: false,
             auto_eligible: false,
             stays_in_plan: false,
             ends_with_short_reply: false,
@@ -229,6 +236,12 @@ impl ActionDescriptor {
     /// Ask the person at every call; no earlier answer covers it ([`Self::ask_each_time`]).
     pub fn ask_each_time(mut self) -> Self {
         self.ask_each_time = true;
+        self
+    }
+
+    /// Ask once a turn outside Auto ([`Self::once_a_turn`]).
+    pub fn ask_once_a_turn(mut self) -> Self {
+        self.once_a_turn = true;
         self
     }
 

@@ -57,7 +57,7 @@ impl Tunnel {
         if cfg!(not(unix)) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
-                "Linking a computer over SSH needs Unix sockets, which this system does not offer",
+                "Linking a computer over SSH is not available on Windows yet",
             ));
         }
         private_dir(local_dir)?;

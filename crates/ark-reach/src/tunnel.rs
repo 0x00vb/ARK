@@ -54,6 +54,12 @@ impl Tunnel {
         local_dir: &Path,
         remote_socket: &str,
     ) -> std::io::Result<Tunnel> {
+        if cfg!(not(unix)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Linking a computer over SSH needs Unix sockets, which this system does not offer",
+            ));
+        }
         private_dir(local_dir)?;
         let config = ssh
             .config()
@@ -258,7 +264,7 @@ impl Job {
                 return Ended::Before(self.reason(&seen(&lines)));
             }
             if self.local.exists() {
-                if let Ok(s) = tokio::net::UnixStream::connect(&self.local).await {
+                if let Some(s) = probe(&self.local).await {
                     break s;
                 }
             }
@@ -287,8 +293,20 @@ impl Job {
     }
 }
 
+/// One connection to the local end of the tunnel.
+#[cfg(unix)]
+async fn probe(local: &Path) -> Option<tokio::net::UnixStream> {
+    tokio::net::UnixStream::connect(local).await.ok()
+}
+
+/// Tokio has no Unix sockets off Unix, and [`Tunnel::open`] refuses there before a job starts.
+#[cfg(not(unix))]
+async fn probe(_local: &Path) -> Option<tokio::io::Empty> {
+    None
+}
+
 /// True when the connection is closed from the far side within a second.
-async fn refused(mut s: tokio::net::UnixStream) -> bool {
+async fn refused(mut s: impl tokio::io::AsyncRead + Unpin) -> bool {
     let mut b = [0u8; 1];
     matches!(
         tokio::time::timeout(Duration::from_secs(1), s.read(&mut b)).await,

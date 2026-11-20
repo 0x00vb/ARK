@@ -361,8 +361,8 @@ pub(crate) struct AgentTools {
     pub task: String,
     /// Agents it may delegate to: (name, role).
     pub delegates: Vec<(String, String)>,
-    /// Agents it may message.
-    pub contacts: Vec<String>,
+    /// Agents it may message or start: (name, title).
+    pub contacts: Vec<(String, String)>,
     pub can_create: bool,
     /// On a chat turn: the schedule tools it may have, and whether the chat is in Auto
     /// (ADR 0120).
@@ -380,6 +380,15 @@ pub(crate) struct ScheduleOffer {
 }
 
 impl AgentTools {
+    fn contact_list(&self) -> String {
+        let pairs: Vec<(&str, &str)> = self
+            .contacts
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        crate::names::listed(&pairs, |_| true)
+    }
+
     /// Run `f` with the schedule tools of this turn's chat, if it has them.
     fn scheduling<T>(&self, f: impl FnOnce(&Scheduling<'_>, ScheduleOffer) -> T) -> Option<T> {
         let offer = self.schedule?;
@@ -430,7 +439,7 @@ impl Adapter for AgentTools {
         ).volatile().with_input_schema(json!({
             "type": "object", "required": ["to", "objective"],
             "properties": {
-                "to": { "type": "string", "description": format!("permitted contacts: {}; also agents you created", self.contacts.join(", ")) },
+                "to": { "type": "string", "description": format!("the agent's name: {}; also agents you created", self.contact_list()) },
                 "objective": { "type": "string", "maxLength": 8000, "description": if self.comes_back { "self-contained brief; returns immediately; when every colleague you started has finished, their results come back to this chat and you continue" } else { "self-contained brief; returns immediately, no waiting or automatic reply" } },
                 "context": { "type": "string", "maxLength": 16000, "description": "necessary information only; the recipient does not see your transcript" }
             }
@@ -482,7 +491,7 @@ impl Adapter for AgentTools {
             v.push(
                 ActionDescriptor::new(
                     MESSAGE,
-                    "send a short message to another agent",
+                    "send a short note to another agent; to give it work, use agents.start",
                     RiskTier::Observe,
                 )
                 .volatile()
@@ -490,7 +499,7 @@ impl Adapter for AgentTools {
                     "type": "object",
                     "required": ["to", "text"],
                     "properties": {
-                        "to": if self.can_create { json!({ "type": "string", "description": "a permitted contact, including an agent you just created" }) } else { json!({ "type": "string", "enum": self.contacts }) },
+                        "to": { "type": "string", "description": format!("the agent's name: {}{}", self.contact_list(), if self.can_create { "; also agents you created" } else { "" }) },
                         "text": { "type": "string" }
                     }
                 })),
@@ -564,6 +573,9 @@ impl Adapter for AgentTools {
                 ))
             }
             START => {
+                let to = orch
+                    .agent_named(&self.agent, &self.task, s("to"))
+                    .map_err(|e| AdapterError::bad_input(action, e))?;
                 if s("objective").is_empty()
                     || s("objective").chars().count() > 8000
                     || s("context").chars().count() > 16000
@@ -577,23 +589,22 @@ impl Adapter for AgentTools {
                     .start_conversation(
                         &self.agent,
                         &self.task,
-                        s("to"),
+                        &to,
                         TaskSpec::new(s("objective")).context(s("context")),
                     )
                     .await
                     .map_err(|e| AdapterError::Tool(e.to_string()))?;
                 Ok(ActionOutput::json(
-                    json!({ "task": id, "agent": s("to"), "independent": true, "comes_back": self.comes_back }),
+                    json!({ "task": id, "agent": to, "independent": true, "comes_back": self.comes_back }),
                 ))
             }
             DELEGATE => {
-                let to = s("to");
-                if !self.delegates.iter().any(|(n, _)| n == to) {
-                    return Err(AdapterError::bad_input(
-                        action,
-                        format!("you may not delegate to `{to}`"),
-                    ));
-                }
+                let delegates: Vec<String> =
+                    self.delegates.iter().map(|(n, _)| n.clone()).collect();
+                let to = orch
+                    .delegate_named(&self.agent, &delegates, s("to"))
+                    .map_err(|e| AdapterError::bad_input(action, e))?;
+                let to = to.as_str();
                 let artifacts: Vec<String> = input
                     .get("artifacts")
                     .and_then(Value::as_array)
@@ -653,13 +664,10 @@ impl Adapter for AgentTools {
                 })))
             }
             MESSAGE => {
-                let to = s("to");
-                if !orch.contact_allowed(&self.agent, to) {
-                    return Err(AdapterError::bad_input(
-                        action,
-                        format!("you may not message `{to}`"),
-                    ));
-                }
+                let to = orch
+                    .agent_named(&self.agent, &self.task, s("to"))
+                    .map_err(|e| AdapterError::bad_input(action, e))?;
+                let to = to.as_str();
                 // Text from a group member would steer a task that does not ask: work for such
                 // an agent goes through `agents.start`, which asks.
                 if orch.group_only(&self.agent, to) && orch.acts_alone(to) {
@@ -1230,13 +1238,16 @@ impl Adapter for ChatTools {
         let fail = |e: crate::OrchError| AdapterError::Tool(e.to_string());
         match action {
             DELEGATE => {
-                let to = s("to");
-                if !self.live(to) {
-                    return Err(AdapterError::bad_input(
-                        action,
-                        format!("no agent named `{to}`. {}", self.roster()),
-                    ));
-                }
+                let live: Vec<(String, String)> = self
+                    .orch
+                    .agents()
+                    .into_iter()
+                    .filter(|a| a.state != AgentState::Terminated)
+                    .map(|a| (a.name, a.spec.title))
+                    .collect();
+                let to = crate::names::resolve(s("to"), &live)
+                    .map_err(|e| AdapterError::bad_input(action, e))?;
+                let to = to.as_str();
                 let mut spec = TaskSpec::new(s("objective")).context(s("context"));
                 if spec.objective.is_empty() {
                     return Err(AdapterError::bad_input(action, "an objective is required"));

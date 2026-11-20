@@ -2860,7 +2860,7 @@ impl Inner {
                         && !t.cancel.is_cancelled()
                         && t.stop.is_none()
                 });
-                if !active || !Self::contact_allowed_in(&st, agent, owner) {
+                if !active || !Self::reach_allowed_in(&st, agent, task, owner) {
                     return Err(OrchError::NotAllowed(
                         "the sending turn stopped or its contact changed".into(),
                     ));
@@ -3709,7 +3709,7 @@ impl Inner {
                 .iter()
                 .filter_map(|c| st.tasks.get(c).map(|t| t.record.clone()))
                 .collect();
-            let roster: Vec<(String, String, AgentState)> = st
+            let roster: Vec<(String, String, AgentState, String)> = st
                 .agents
                 .values()
                 .map(|a| {
@@ -3717,6 +3717,7 @@ impl Inner {
                         a.record.name.clone(),
                         a.record.spec.role.clone(),
                         a.record.state,
+                        a.record.spec.title.clone(),
                     )
                 })
                 .collect();
@@ -3803,14 +3804,14 @@ impl Inner {
         let spec = &agent.spec;
         let mut delegates: Vec<(String, String)> = roster
             .iter()
-            .filter(|(n, _, s)| spec.may_delegate(n) && *s != AgentState::Terminated)
-            .map(|(n, r, _)| (n.clone(), r.clone()))
+            .filter(|(n, _, s, _)| spec.may_delegate(n) && *s != AgentState::Terminated)
+            .map(|(n, r, _, _)| (n.clone(), r.clone()))
             .collect();
         delegates.sort();
-        let mut contacts: Vec<String> = roster
+        let mut contacts: Vec<(String, String)> = roster
             .iter()
-            .filter(|(n, _, s)| self.contact_allowed(owner, n) && *s != AgentState::Terminated)
-            .map(|(n, _, _)| n.clone())
+            .filter(|(n, _, s, _)| self.reach_allowed(owner, id, n) && *s != AgentState::Terminated)
+            .map(|(n, _, _, t)| (n.clone(), t.clone()))
             .collect();
         contacts.sort();
 
@@ -4923,9 +4924,96 @@ impl Inner {
         Err(OrchError::NotAllowed("cyclic conversation origin".into()))
     }
 
+    #[cfg(test)]
     pub(crate) fn contact_allowed(&self, from: &str, to: &str) -> bool {
         let st = self.state.lock().unwrap();
         Self::contact_allowed_in(&st, from, to)
+    }
+
+    /// Whether `from`, working on `task`, may reach `to`: its contacts, or on the person's own
+    /// turn any live agent of theirs, since the person asks for it there (ADR 0130).
+    pub(crate) fn reach_allowed(&self, from: &str, task: &str, to: &str) -> bool {
+        let st = self.state.lock().unwrap();
+        Self::reach_allowed_in(&st, from, task, to)
+    }
+
+    fn reach_allowed_in(st: &State, from: &str, task: &str, to: &str) -> bool {
+        let live = |n: &str| {
+            st.agents
+                .get(n)
+                .is_some_and(|a| a.record.state != AgentState::Terminated)
+        };
+        Self::contact_allowed_in(st, from, to)
+            || (from != to
+                && live(from)
+                && live(to)
+                && st
+                    .tasks
+                    .get(task)
+                    .is_some_and(|t| t.record.owner == from && t.record.own_chat_turn()))
+    }
+
+    /// The agent `query` names, read the way a person writes it, when `from` may reach it on
+    /// `task` (ADR 0130). The name is read among every live agent, so it never turns into
+    /// another agent that `from` happens to reach. `Err` says what to name instead.
+    pub(crate) fn agent_named(
+        &self,
+        from: &str,
+        task: &str,
+        query: &str,
+    ) -> Result<String, String> {
+        let st = self.state.lock().unwrap();
+        Self::named_among(&st, from, query, |n| {
+            Self::reach_allowed_in(&st, from, task, n)
+        })
+    }
+
+    /// `agent_named` for `agents.delegate`: the name read among every live agent, then
+    /// checked against the agents `from` may delegate to.
+    pub(crate) fn delegate_named(
+        &self,
+        from: &str,
+        delegates: &[String],
+        query: &str,
+    ) -> Result<String, String> {
+        let st = self.state.lock().unwrap();
+        Self::named_among(&st, from, query, |n| delegates.iter().any(|d| d == n))
+    }
+
+    fn named_among(
+        st: &State,
+        from: &str,
+        query: &str,
+        allowed: impl Fn(&str) -> bool,
+    ) -> Result<String, String> {
+        let live: Vec<(String, String)> = st
+            .agents
+            .values()
+            .filter(|a| a.record.state != AgentState::Terminated && a.record.name != from)
+            .map(|a| (a.record.name.clone(), a.record.spec.title.clone()))
+            .collect();
+        let reach: Vec<(String, String)> =
+            live.iter().filter(|(n, _)| allowed(n)).cloned().collect();
+        let reach_list = || {
+            crate::names::listed(
+                &reach
+                    .iter()
+                    .map(|(n, t)| (n.as_str(), t.as_str()))
+                    .collect::<Vec<_>>(),
+                |_| true,
+            )
+        };
+        let all: Vec<(&str, &str)> = live.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        match crate::names::pick(query, &all) {
+            Ok(name) if reach.iter().any(|(n, _)| n == name) => Ok(name.to_string()),
+            Ok(name) => Err(format!(
+                "you may not reach `{name}`; you may reach: {}",
+                reach_list()
+            )),
+            // Two agents could be meant: say so, never pick the one it happens to reach.
+            Err(tied) if !tied.is_empty() => crate::names::resolve(query, &live),
+            Err(_) => crate::names::resolve(query, &reach),
+        }
     }
 
     /// Whether a task from `origin` reached `owner` only because the two share a group: no
@@ -5162,7 +5250,7 @@ impl Inner {
         spec: TaskSpec,
     ) -> Result<String, OrchError> {
         let _guard = self.conversations.lock().await;
-        if !self.contact_allowed(from, to) {
+        if !self.reach_allowed(from, task, to) {
             return Err(OrchError::NotAllowed(format!(
                 "{from} may not contact {to}"
             )));

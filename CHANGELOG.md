@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-11-20
+
+An agent reaches the person's agents by the name they write (ADR 0130).
+
+### Changed
+
+- On the person's own turn in an agent's chat, the agent may start (`agents.start`) and message any of the person's live agents. Before, it reached only its contacts (`delegates_to`, parent, agents it made, groups), and an agent asked to "delegate to Engineer censu" was refused three times. Delegated, started, scheduled, automation, group and Work item work keeps the contact rules; `agents.delegate` still goes only to `delegates_to`.
+- `agents.start`, `agents.message`, `agents.delegate` and the person's chat hand-off take the name as written: case, spaces, punctuation and word order do not matter, the title counts, and a name of six letters or more may have one typo in each six, never in a digit. A name two agents could have is not guessed. A name that matches nothing is answered with the agents it may reach, as `name (Title)`.
+- `to` lists the agents the sender may reach, with titles. `agents.message` says to use `agents.start` to give an agent work.
+
 ## [0.54.0] - 2026-11-20
 
 An agent does what it is asked (ADR 0129).

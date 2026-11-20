@@ -1,3 +1,16 @@
+# Core 0.55.0 release: an agent reaches the person's agents by the name they write (2026-11-20)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.55.0 (2026-11-20), over v0.54.0 (32ae9f2). ADR 0130 |
+| Why | The owner's censu-ceo chat (2026-11-20, Desktop 0.19.0): "delegale el trabajo del magic link al agent Engineer censu". Three `agents.message` calls (`Engineer censu`, `Censu-Engineer`, `Censu -Enginner`) failed "you may not message"; the agent had no contacts (`delegates_to: []`) and the stored name was `censu---engineer` |
+| Change | On the person's own chat turn an agent may start or message any of their live agents; other work (and `agents.delegate`) keeps ADR 0117's contacts. Names match ignoring case, spaces, punctuation and word order, title included, one typo per six letters (none under six), never guessed between two agents, never redirected to another agent. Errors list the agents it may reach. `to` lists them with titles; `agents.message` points to `agents.start` for work |
+| Tests | `names` unit tests (the three names, exact wins, ties, short names); `on_the_persons_turn_an_agent_reaches_any_of_their_agents_by_the_name_they_wrote` (a scheduled task still cannot); `groups.rs` `removing_a_member_ends_its_contact_and_its_rules` caught a first version that read `coo` as a typo of `ceo` |
+| Not verified | A live model on the fixed build: the Codex account hit its usage limit until 2026-12-08 (baseline runs failed on that, not on the bug), and live Claude runs need the owner's OK. Harness ready: `../board/evidence/agent-reach-20261120/delegate.py` |
+| Gates | qa (haiku) implementation review: 1 blocker (a tied name fell back to the agent the sender reached), 6 majors (digits read as typos, a Work item counted as the person's turn, docs said `delegate` was widened and claimed a measurement, no `allow_mutate` decision, test gaps), fixed with tests (`a_tied_name_is_not_resolved_to_the_one_agent_reached_and_only_a_chat_turn_reaches_all`, `a_number_is_not_read_as_a_typo`) or written into ADR 0130. Recheck (haiku): 1 blocker (`agents.delegate` still settled a tie by its delegates), fixed: `delegate_named` reads the name among every live agent, tested in the same test. Then ark-orchestrate 338 pass 0 fail, workspace clippy, release build and benchmark again: no delta. Release commit: see below |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests 1766 pass 0 fail, then (WebKit failed first: `playwright-core` missing in the new worktree, `npm ci` in `crates/ark-ui/tests/web`) node 22 of 22, WebKit 195 pass 0 fail, page suite 67 of 69 (the 2 known: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`), notification 3 of 3, release build, simulated benchmark no delta. Logs `../board/evidence/agent-reach-20261120/ark-0.55.0-ci.log`, `ark-0.55.0-ci-rest.log` |
+| Evidence | `../board/evidence/agent-reach-20261120/` |
+
 # Core 0.54.0 release: an agent does what it is asked (2026-11-20)
 
 | Item | State |

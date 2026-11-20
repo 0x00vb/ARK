@@ -559,7 +559,7 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
         agent: "reader".into(),
         task: "t-reader".into(),
         delegates: Vec::new(),
-        contacts: vec!["lead".into()],
+        contacts: vec![("lead".into(), String::new())],
         can_create: false,
         schedule: None,
         comes_back: false,
@@ -6778,4 +6778,134 @@ async fn a_chat_whose_mode_cannot_be_read_is_offered_no_schedule_tools() {
         )
         .unwrap();
     assert!(o.inner.schedule_offer(&agent.spec, &task, &agent).is_none());
+}
+
+/// ADR 0130: the owner's chat asked its agent to hand work to "Engineer censu", then
+/// "Censu-Engineer" and "Censu -Enginner"; each was refused ("you may not message"), the agent
+/// had no contacts, and the stored name was `censu---engineer`.
+#[tokio::test]
+async fn on_the_persons_turn_an_agent_reaches_any_of_their_agents_by_the_name_they_wrote() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("censu-ceo").tools(["agents.*"]))
+        .await
+        .unwrap();
+    let mut engineer = AgentSpec::new("censu---engineer");
+    engineer.title = "Censu - Engineer".into();
+    o.spawn(engineer).await.unwrap();
+    o.spawn(AgentSpec::new("engineer")).await.unwrap();
+
+    let mut asked = TaskSpec::new("delegate the magic link work to Engineer censu");
+    asked.person = true;
+    let turn = o
+        .inner
+        .create_task("censu-ceo", asked, Origin::External, None)
+        .unwrap();
+    for name in ["Engineer censu", "Censu-Engineer", "Censu -Enginner"] {
+        assert_eq!(
+            o.inner.agent_named("censu-ceo", &turn, name),
+            Ok("censu---engineer".to_string()),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        o.inner.agent_named("censu-ceo", &turn, "engineer"),
+        Ok("engineer".to_string())
+    );
+    let e = o
+        .inner
+        .agent_named("censu-ceo", &turn, "designer")
+        .unwrap_err();
+    assert!(e.contains("censu---engineer (Censu - Engineer)"), "{e}");
+    o.inner
+        .start_conversation(
+            "censu-ceo",
+            &turn,
+            "censu---engineer",
+            TaskSpec::new("plan, build, test and ship the magic link"),
+        )
+        .await
+        .unwrap();
+
+    // Work nobody asked for in a chat keeps the contacts the agent was given.
+    let scheduled = o
+        .inner
+        .create_task(
+            "censu-ceo",
+            TaskSpec::new("a scheduled run"),
+            Origin::External,
+            None,
+        )
+        .unwrap();
+    assert!(!o
+        .inner
+        .reach_allowed("censu-ceo", &scheduled, "censu---engineer"));
+    assert!(o
+        .inner
+        .agent_named("censu-ceo", &scheduled, "Censu - Engineer")
+        .is_err());
+}
+
+/// ADR 0130, review findings: a name two live agents could have is not guessed even when the
+/// sender reaches only one of them, and a Work item or a scheduled run the person admitted is
+/// not their own chat turn.
+#[tokio::test]
+async fn a_tied_name_is_not_resolved_to_the_one_agent_reached_and_only_a_chat_turn_reaches_all() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("lead").delegates_to(["engineer-censu"]))
+        .await
+        .unwrap();
+    let mut a = AgentSpec::new("censu---engineer");
+    a.title = "Censu - Engineer".into();
+    o.spawn(a).await.unwrap();
+    let mut b = AgentSpec::new("engineer-censu");
+    b.title = "Engineer censu".into();
+    o.spawn(b).await.unwrap();
+
+    let mut scheduled = TaskSpec::new("a scheduled run the person made");
+    scheduled.person = true;
+    let run = o
+        .inner
+        .create_task("lead", scheduled, Origin::External, None)
+        .unwrap();
+    o.inner
+        .state
+        .lock()
+        .unwrap()
+        .tasks
+        .get_mut(&run)
+        .unwrap()
+        .record
+        .schedule = Some("s1".into());
+    let e = o
+        .inner
+        .agent_named("lead", &run, "Censu Engineer")
+        .unwrap_err();
+    assert!(e.contains("could be"), "{e}");
+    assert!(!o.inner.reach_allowed("lead", &run, "censu---engineer"));
+    assert!(o.inner.reach_allowed("lead", &run, "engineer-censu"));
+
+    // `agents.delegate` reads the name the same way: a tie is not settled by its delegates.
+    let delegates = vec!["engineer-censu".to_string()];
+    let e = o
+        .inner
+        .delegate_named("lead", &delegates, "Censu Engineer")
+        .unwrap_err();
+    assert!(e.contains("could be"), "{e}");
+    assert_eq!(
+        o.inner.delegate_named("lead", &delegates, "Engineer-Censu"),
+        Ok("engineer-censu".to_string())
+    );
+    assert!(o
+        .inner
+        .delegate_named("lead", &delegates, "censu---engineer")
+        .unwrap_err()
+        .contains("may not reach `censu---engineer`"));
 }

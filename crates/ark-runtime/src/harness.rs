@@ -2916,7 +2916,7 @@ impl Harness {
     /// and projects of one profile, and a provider's prefix cache can serve it.
     async fn system_prompt(&self, engine: &Engine, profile: &AgentProfile) -> SystemPrompt {
         let rules = format!(
-            "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
+            "{}\n\nReason from what tools return. Call the actions the task needs, including ones that change things: when one needs the person's approval, the host asks them before it runs. Never ask for permission in text, and never say you are read-only; call the action instead.",
             profile.prompts.instructions
         );
         let index = crate::capmap::capability_index(
@@ -3328,7 +3328,7 @@ const MAX_IDENTICAL_FAILURES: u32 = 2;
 /// Replies that could not be used the model is asked to send again: in a row, and in a turn.
 const MAX_REPAIRS_IN_ROW: u32 = 2;
 const MAX_REPAIRS: u32 = 4;
-const VERIFY_NOTE: &str = "Check the change you made before you finish: read it back, run it, or look at it. If you cannot check it, say plainly that it is unchecked.";
+const VERIFY_NOTE: &str = "Check the change you made before you finish: read it back, run it, or look at it. If you cannot check it, say plainly that it is unchecked. The person has not seen your last reply, so then give your whole answer, with every result, name and value it needs.";
 
 /// What a turn did to its work, for `self_check`.
 #[derive(Clone, Copy)]

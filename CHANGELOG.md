@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-11-20
+
+An agent does what it is asked (ADR 0129).
+
+### Changed
+
+- The rule every agent's system prompt carries no longer says that "actions that change state need explicit human approval". It says to call the actions the task needs, including ones that change things, that the host asks the person when an approval is needed, and never to ask in text or to say it is read-only. Agents in Auto chats answered "the project is read-only" and did nothing.
+- Codex is told its read-only sandbox is only for itself and does not limit the host's tools. Codex passes its sandbox to the model, which then told the person it could not write.
+- `code.run` says to load `process.start` for a project's own commands when the session has a terminal. It said "when it is offered", and agents read an unloaded `process.start` as missing.
+- The check nudge (ADR 0108) says the person has not seen the reply it holds back and asks for the whole answer. A model answered "I already checked it" and the credentials it had made were lost.
+- `browser.click`, `browser.type` and `process.start` count as a look for the check nudge: their answer is the page or the command's output after they ran. They still ask where approvals ask. A navigation click no longer brings a "check your change" round, and tests run after an edit check that edit.
+- `find_capability` for an installed program says to run it with `process.start` (it said only "pnpm is installed.").
+
 ## [0.53.1] - 2026-11-19
 
 ### Fixed

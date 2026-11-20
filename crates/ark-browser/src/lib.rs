@@ -1051,11 +1051,13 @@ impl Adapter for Browser {
             )
             .volatile(),
             ActionDescriptor::new(CLICK, "click an element of the current page, by its number", RiskTier::Mutate)
+                .volatile()
                 .with_input_schema(json!({
                     "type": "object", "required": ["ref"],
                     "properties": { "ref": el("the element's number from the page's list") }
                 })),
             ActionDescriptor::new(TYPE, "type into a field of the current page, by its number; submit presses Enter", RiskTier::Mutate)
+                .volatile()
                 .with_input_schema(json!({
                     "type": "object", "required": ["ref", "text"],
                     "properties": {
@@ -1204,9 +1206,29 @@ async fn fresh_profile(root: &std::path::Path) -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{private_by_host, surface_image, this_computer, BrowserService, State};
+    use super::{private_by_host, surface_image, this_computer, Browser, BrowserService, State};
+    use ark_core::{Reuse, RiskTier};
+    use ark_tools::Adapter;
     use std::sync::OnceLock;
     use std::time::Duration;
+
+    /// Each action returns the page as it is after it ran, so the harness counts it as a look
+    /// and does not ask the agent to check a click it already saw (ADR 0108).
+    #[test]
+    fn every_action_returns_the_page_it_left_so_it_counts_as_a_look() {
+        let dir = tempfile::tempdir().unwrap();
+        let browser = Browser {
+            svc: BrowserService::new(dir.path()),
+            owner: "p/w".into(),
+        };
+        for d in browser.actions() {
+            assert!(
+                d.risk != RiskTier::Mutate || d.reuse == Reuse::Volatile,
+                "{} changes the page and shows it: it must be volatile",
+                d.name
+            );
+        }
+    }
 
     fn url(u: &str) -> reqwest::Url {
         reqwest::Url::parse(u).unwrap()

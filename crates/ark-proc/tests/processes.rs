@@ -372,3 +372,43 @@ async fn only_a_port_the_process_itself_listens_on_is_served() {
     assert!(p.serving(&project).is_empty(), "a stopped process");
     drop(theirs);
 }
+
+#[tokio::test]
+async fn an_installed_program_names_the_action_that_runs_it() {
+    use ark_runtime::AcquisitionProvider;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let pnpm = bin.join("pnpm");
+    std::fs::write(&pnpm, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&pnpm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let p = Processes::with_shell(
+        dir.path().join("store"),
+        Shell::fixed(
+            "/bin/sh",
+            env_with(&format!("{}:/usr/bin:/bin", bin.display())),
+        ),
+    )
+    .unwrap();
+    let found = ark_proc::Installs::new(p).find("pnpm").await;
+    assert!(found.contains("is installed"), "{found}");
+    assert!(found.contains("process.start"), "{found}");
+}
+
+#[test]
+fn starting_a_command_counts_as_looking_at_what_it_did() {
+    use ark_core::{Reuse, RiskTier};
+    use ark_tools::Adapter;
+    let dir = tempfile::tempdir().unwrap();
+    let tool = ark_proc::ProcessTool(service(dir.path()));
+    let start = tool
+        .actions()
+        .into_iter()
+        .find(|d| d.name == ark_proc::START)
+        .unwrap();
+    // Still a change that asks where approvals ask, and its answer is the command's output:
+    // the harness counts it as a look, so tests run after an edit check that edit.
+    assert_eq!(start.risk, RiskTier::Mutate);
+    assert_eq!(start.reuse, Reuse::Volatile);
+}

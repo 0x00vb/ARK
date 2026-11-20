@@ -1,3 +1,16 @@
+# Core 0.54.0 release: an agent does what it is asked (2026-11-20)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.54.0 (2026-11-20), over v0.53.1 (5cb052e). ADR 0129 |
+| Why | The owner's named agent on `codex:gpt-6-luna@medium` (Auto) said "the project is read-only", never wrote, and a "check your change" reply replaced its answer. ADR 0129 |
+| Change | Codex's own tools off (`CODEX_FEATURES_OFF`, both paths) and told its read-only sandbox does not limit the host tools; system rule: call the actions, the host asks, never claim read-only; `code.run` says to load `process.start`; `browser.click`, `browser.type`, `process.start` count as a look for the check nudge (still `Mutate`, approvals unchanged); the nudge asks for the whole answer; `find_capability` names `process.start` |
+| Measured | Live, same model, five requests x 3 through ARK Desktop `--serve` (named agent, Auto chat), one checker: Desktop 0.19.0 12 of 15 (onboarding 0 of 3, "solo lectura"); this code with Desktop 0.20.0's persona 15 of 15, fake reviews still declined 3 of 3. `../board/evidence/agent-does-it-20261120/README.md` |
+| Gates | qa (haiku) implementation review: 1 blocker overruled (the owner asked for the release), majors fixed (an exception for unlawful or harmful requests, the grader paired runs with their own folders, consumer names removed) or recorded in ADR 0129 (a command counts as its own check) |
+| Release commit | `ci.sh` with page tests: fmt, protocol, version, macOS 11 check, clippy, workspace tests 1822 pass, node 22 of 22, WebKit 195 pass 0 fail, page suite 67 of 69 (the 2 known: `an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`), then by hand: notification 3 of 3, release build, simulated benchmark same success, about 9 fewer tokens a request (shorter rule), baseline regenerated. Logs `../board/evidence/agent-does-it-20261120/ark-0.54.0-ci.log`, `ark-0.54.0-ci-rest.log` |
+| Not verified | The owner's own chat after the update; Claude and other models (only Codex was run live) |
+| Evidence | `../board/evidence/agent-does-it-20261120/` |
+
 # Core 0.53.1 release: ARK Desktop builds for Windows (2026-11-19)
 
 | Item | State |

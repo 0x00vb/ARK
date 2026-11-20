@@ -173,6 +173,9 @@ impl Adapter for ProcessTool {
                 "Run a command in the project with the person's own shell, programs and settings (their PATH: cargo, npm, python and the rest): the project's tests, a build, a dev server, a watcher. It keeps running after this call; the person sees its output and can stop it. Answers once it is ready (a local address in its output answers), has ended (with its exit code), or `wait` passed, with the end of its output; `process.list` with its id reads more. For tests or a build, pass a `wait` long enough for it to end. To show the person its page, pass `open`.",
                 RiskTier::Mutate,
             )
+            // Its answer is the command's output and exit code: running it is also looking at
+            // what it did, so the turn is not asked to check it again (ADR 0108).
+            .volatile()
             // "Always in this project" covers this command in this folder, never another.
             .grant_per(START, &["command", "folder"])
             .with_input_schema(json!({

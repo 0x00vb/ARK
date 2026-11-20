@@ -417,11 +417,10 @@ fn host_config(response: &Value) -> Result<Value, AppError> {
         .ok_or_else(|| {
             AppError::Broken("config/read returned no configuration; use isolated exec".into())
         })?;
-    let mut overrides = json!({
-        "features.shell_tool": false,
-        "features.apps": false,
-        "web_search": "disabled",
-    });
+    let mut overrides = json!({ "web_search": "disabled" });
+    for feature in crate::cli::CODEX_FEATURES_OFF {
+        overrides[format!("features.{feature}")] = json!(false);
+    }
     if let Some(servers) = config.get("mcp_servers").filter(|v| !v.is_null()) {
         let servers = servers.as_object().ok_or_else(|| {
             AppError::Broken("unsupported MCP configuration; use isolated exec".into())
@@ -473,6 +472,17 @@ mod tests {
         assert_eq!(settings["features.shell_tool"], false);
         assert_eq!(settings["features.apps"], false);
         assert_eq!(settings["web_search"], "disabled");
+        // Codex's own tools that waited for a person or a helper that never comes, and an
+        // `exec` the model used to call ARK's tools, which failed (2026-11-20 live runs).
+        for off in [
+            "multi_agent",
+            "collaboration_modes",
+            "sleep_tool",
+            "unified_exec",
+            "tool_suggest",
+        ] {
+            assert_eq!(settings[format!("features.{off}")], false, "{off}");
+        }
         let text = settings.to_string();
         for private in ["secret", "example.test", "user-model", "custom"] {
             assert!(!text.contains(private));

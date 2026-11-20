@@ -174,3 +174,4 @@ Local integration decisions:
 - [0126-started-colleagues-continue-the-chat-that-started-them](0126-started-colleagues-continue-the-chat-that-started-them.md)
 - [0127-a-note-is-sent-back-after-each-step-and-a-rotation-keeps-its-prompt](0127-a-note-is-sent-back-after-each-step-and-a-rotation-keeps-its-prompt.md)
 - [0128-the-computer-asks-once-and-not-in-auto](0128-the-computer-asks-once-and-not-in-auto.md)
+- [0129-an-agent-does-what-it-is-asked](0129-an-agent-does-what-it-is-asked.md)

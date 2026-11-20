@@ -1847,13 +1847,24 @@ fn until(at: u64) -> Option<String> {
 }
 
 /// Host-model calls run tools in ARK. This never configures an ACP worker or writes settings.
+/// Codex features that give the model tools of its own. ARK runs the tools, so each is off:
+/// with them on, the model waited on a person or a helper that never answered (a call ran
+/// 600 s and failed) and called ARK's tools through Codex's own runner, which failed and made it
+/// say it was read-only. An unknown name is ignored by Codex with a warning.
+pub(crate) const CODEX_FEATURES_OFF: &[&str] = &[
+    "shell_tool",
+    "apps",
+    "multi_agent",
+    "collaboration_modes",
+    "sleep_tool",
+    "unified_exec",
+    "tool_suggest",
+];
+
 pub(crate) fn host_codex_flags(cmd: &mut tokio::process::Command, search: bool) {
-    cmd.args([
-        "-c",
-        "features.shell_tool=false",
-        "-c",
-        "features.apps=false",
-    ]);
+    for feature in CODEX_FEATURES_OFF {
+        cmd.args(["-c", &format!("features.{feature}=false")]);
+    }
     if !search {
         cmd.args(["-c", "web_search=\"disabled\""]);
     }
@@ -1904,7 +1915,10 @@ now; no loading step is needed.\n\n"
 below and runs them. You have no tools of your own and must not try to run anything yourself. \
 The host tools are not tools you can call directly: calling one by name fails. You use them only \
 by putting them in tool_calls of your structured answer. Every tool listed below is available \
-now; no loading step is needed for it.\n\n"
+now; no loading step is needed for it. Your read-only sandbox is only for you, so you start \
+nothing yourself: the host tools write files, run commands and change things on the person's \
+computer, so never tell the person you are read-only. Never call exec or any other function of \
+your own to reach a host tool: it fails there.\n\n"
         }
     }
 }
@@ -2350,6 +2364,20 @@ done
         assert!(protocol(Some(Cli::Claude), "", &tools(), false)
             .contains("Your only tool is StructuredOutput"));
         assert!(!protocol(Some(Cli::Codex), "", &tools(), false).contains("StructuredOutput"));
+    }
+
+    /// Codex runs with a read-only sandbox so it starts nothing itself, and it tells the model
+    /// so. Agents on Codex then answered "this session is read-only" while the host's tools
+    /// could write and run (live runs 2026-11-20, `board/evidence/agent-does-it-20261120`).
+    #[test]
+    fn codex_is_told_its_sandbox_does_not_limit_the_host_tools() {
+        let p = protocol(Some(Cli::Codex), "", &tools(), false);
+        assert!(p.contains("read-only sandbox is only for you"), "{p}");
+        assert!(p.contains("never tell the person you are read-only"), "{p}");
+        assert!(
+            p.contains("Never call exec or any other function of your own"),
+            "{p}"
+        );
     }
 
     #[test]
@@ -3434,6 +3462,16 @@ done
         assert!(args.contains(&std::ffi::OsStr::new("features.shell_tool=false")));
         assert!(args.contains(&std::ffi::OsStr::new("features.apps=false")));
         assert!(args.contains(&std::ffi::OsStr::new("web_search=\"disabled\"")));
+        for off in [
+            "multi_agent",
+            "collaboration_modes",
+            "sleep_tool",
+            "unified_exec",
+            "tool_suggest",
+        ] {
+            let flag = format!("features.{off}=false");
+            assert!(args.contains(&std::ffi::OsStr::new(&flag)), "{flag}");
+        }
         let mut search = command(Path::new("codex"));
         host_codex_flags(&mut search, true);
         assert!(!search

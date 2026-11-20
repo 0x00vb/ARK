@@ -109,6 +109,7 @@ struct Run {
     answer: String,
     checks: Vec<(bool, String)>,
     nudges: usize,
+    nudge: Vec<String>,
     shown: String,
     withdrawn: Vec<String>,
 }
@@ -161,16 +162,20 @@ async fn run_with(script: Vec<Completion>, max_steps: usize) -> Run {
         )
         .await
         .unwrap();
-    let nudges = model.recorded()[model.recorded().len() - 1]
+    let last = model.recorded()[model.recorded().len() - 1].clone();
+    let nudge: Vec<String> = last
         .messages
         .iter()
         .filter(|m| m.content.contains("Check the change"))
-        .count();
+        .map(|m| m.content.clone())
+        .collect();
+    let nudges = nudge.len();
     Run {
         model_calls: model.recorded().len(),
         answer: out.answer,
         checks,
         nudges,
+        nudge,
         shown,
         withdrawn,
     }
@@ -190,6 +195,25 @@ async fn an_unchecked_change_gets_one_nudge_and_a_second_answer() {
     let (passed, detail) = r.checks.last().unwrap();
     assert!(!passed, "{detail}");
     assert!(detail.contains("changed 1; checked after: no"), "{detail}");
+}
+
+/// The reply before the nudge was held back, so the reply after it is all the person reads. A
+/// model told only to check answered "I already checked it" and dropped the credentials it had
+/// made (live run 2026-11-20, `board/evidence/agent-does-it-20261120`).
+#[tokio::test]
+async fn the_nudge_asks_for_the_whole_answer_because_the_person_never_saw_it() {
+    let r = run(vec![
+        step("notes.write", "w1"),
+        say("Saved note a: login a@x.com, password b."),
+        say("Saved note a: login a@x.com, password b. Unchecked."),
+    ])
+    .await;
+    assert_eq!(r.nudges, 1);
+    assert!(r.nudge[0].contains("has not seen"), "{}", r.nudge[0]);
+    assert!(r.nudge[0].contains("whole answer"), "{}", r.nudge[0]);
+    assert!(!r
+        .shown
+        .contains("Saved note a: login a@x.com, password b.\n"));
 }
 
 #[tokio::test]

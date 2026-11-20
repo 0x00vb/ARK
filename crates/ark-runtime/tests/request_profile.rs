@@ -194,7 +194,8 @@ async fn the_skills_catalog_is_counted_as_its_own_part() {
     assert!(r.task < r.skills, "the catalog is not counted as the task");
 }
 
-/// Permitted actions request approval through the host, rather than an inert reply.
+/// Agents call the actions a task needs and let the host ask, rather than asking in text or
+/// claiming they cannot change anything.
 #[tokio::test]
 async fn requests_explain_how_to_reach_the_approval_gate() {
     let dir = tempfile::tempdir().unwrap();
@@ -223,13 +224,16 @@ async fn requests_explain_how_to_reach_the_approval_gate() {
         .unwrap();
     let requests = model.recorded();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].system.contains(
-        "For an action you are allowed to propose, call it to request any required approval."
-    ));
-    assert!(requests[0]
-        .system
-        .contains("The host handles approval before execution."));
-    assert!(requests[0]
-        .system
-        .contains("Do not substitute a text-only permission request."));
+    let system = &requests[0].system;
+    for line in [
+        "Call the actions the task needs, including ones that change things",
+        "the host asks them before it runs",
+        "Never ask for permission in text",
+        "never say you are read-only",
+    ] {
+        assert!(system.contains(line), "missing: {line}");
+    }
+    // A sentence that every change needs approval made agents answer "I am read-only" in Auto,
+    // where nothing asks (an owner's named agent, 2026-11-20, ADR 0129).
+    assert!(!system.contains("need explicit human approval"));
 }

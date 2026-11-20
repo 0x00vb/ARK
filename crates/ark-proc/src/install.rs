@@ -127,7 +127,11 @@ impl AcquisitionProvider for Installs {
 
     async fn find(&self, need: &str) -> String {
         match self.plan(need).await {
-            Some(p) if p.installed => format!("{} is installed.", p.tool.label),
+            Some(p) if p.installed => format!(
+                "{} is installed. Run it with {}.",
+                p.tool.label,
+                crate::tool::START
+            ),
             Some(Plan {
                 tool,
                 command: Some(cmd),

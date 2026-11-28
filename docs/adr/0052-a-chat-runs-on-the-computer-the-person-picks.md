@@ -545,3 +545,20 @@ started and stopped a remote project process, read its output, listed the produc
 and rendered that process's remote loopback page through the Browser resource. The matching
 workspace path did not exist on the Mac. The temporary runtime, store, browser and tunnel were
 removed after the run. No address, token or key is recorded here.
+
+## Amendment (2026-11-28): a Mac serves in its login session
+
+The owner on 2026-11-27: agents should use a MacBook reached over SSH like this one (look at
+its apps, take pictures of its windows). Started with `nohup` under sshd, the program ran
+outside the login session: no window server, so the Computer there could neither see nor act.
+
+| Part | Now |
+|---|---|
+| Probe | On a Mac, `launchctl print gui/<uid>` answering means the person is logged in at its screen (`Facts.gui`) |
+| Start | Then a launchd agent, `~/Library/LaunchAgents/dev.aiark.<name>.plist`, bootstrapped into `gui/<uid>`: restarted if it stops, its output in the same log. An SSH-started copy is stopped first. Otherwise `nohup` as before |
+| Remove | `launchctl bootout` and the plist deleted |
+| Permission | The person allows ARK under Accessibility and Screen Recording on that Mac once, at its screen or over Screen Sharing. No VNC in ARK: the agent uses the Mac's own accessibility interface there |
+
+Known limit: the program copied to a Mac is signed ad hoc, so macOS asks for those permissions
+again after each update. A release-signed server build would keep them (card
+`computer-ssh-signed-build`).

@@ -120,6 +120,9 @@ pub struct Facts {
     /// `sshd` lets Unix sockets be forwarded. None: unknown (`sshd -T` needs root on most
     /// systems); the tunnel finds out.
     pub forwarding: Option<bool>,
+    /// A Mac with the person logged in at its screen (`launchctl print gui/<uid>` answers): the
+    /// program can run in that login session and use its apps.
+    pub gui: bool,
 }
 
 /// The service, after the Start step.
@@ -136,6 +139,9 @@ pub struct Started {
     pub linger_terminal: Option<Vec<String>>,
     /// It was started or restarted by this step.
     pub restarted: bool,
+    /// It runs in the login session of the person at that Mac's screen (a launchd agent), so
+    /// it can use that Mac's apps once they allow it there. False: started from SSH, no screen.
+    pub screen: bool,
 }
 
 /// What [`setup`] found and did.
@@ -223,7 +229,11 @@ pub async fn remove(
         (true, Some(s)) => Some(checked_store(&s, step)?),
         _ => None,
     };
-    let script = "u=$1; f=$2; pf=$3; b=$4; s=$5; st=$6; d=$7; store=$8
+    let script = "u=$1; f=$2; pf=$3; b=$4; s=$5; st=$6; d=$7; store=$8; ag=$9; lb=${10}
+if [ -f \"$ag\" ]; then
+  launchctl bootout \"gui/$(id -u)/$lb\" >/dev/null 2>&1
+  rm -f \"$ag\"
+fi
 if command -v systemctl >/dev/null 2>&1 && [ -f \"$f\" ]; then
   systemctl --user disable --now \"$u\" >/dev/null 2>&1
   rm -f \"$f\"
@@ -252,6 +262,8 @@ exit 0";
                 &p.state,
                 &p.dir,
                 &store,
+                &p.agent,
+                &p.label,
             ],
             Input::None,
             secs(60),
@@ -283,6 +295,10 @@ struct Paths {
     unit_dir: String,
     unit: String,
     unit_name: String,
+    home: String,
+    agent_dir: String,
+    agent: String,
+    label: String,
 }
 
 impl Paths {
@@ -299,6 +315,10 @@ impl Paths {
             log: format!("{state}/serve.log"),
             unit: format!("{unit_dir}/{name}.service"),
             unit_name: format!("{name}.service"),
+            home: home.to_string(),
+            agent_dir: format!("{home}/Library/LaunchAgents"),
+            agent: format!("{home}/Library/LaunchAgents/{}.plist", label(name)),
+            label: label(name),
             dir,
             state,
             sock_dir,
@@ -402,6 +422,50 @@ fn unit_text(contract: &dyn ServeContract, p: &Paths) -> String {
     text
 }
 
+/// The launchd label of the program named `name` on a Mac.
+fn label(name: &str) -> String {
+    format!("dev.aiark.{name}")
+}
+
+/// A launchd agent that serves in the login session of the person at the Mac's screen: it can
+/// reach the window server, so the Computer there can see and use apps. It restarts if it
+/// stops, and its output goes to the same log as the program started from SSH.
+fn agent_text(contract: &dyn ServeContract, p: &Paths) -> String {
+    let mut words = program(contract, p, contract.serve_args(&p.socket));
+    if words.first().is_some_and(|w| w == "env") {
+        words[0] = "/usr/bin/env".into();
+    }
+    let strings = words
+        .iter()
+        .map(|w| format!("    <string>{}</string>\n", xml_escape(w)))
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <!-- Written by the app that set this computer up. Removing the app's computer removes it. -->\n\
+         <plist version=\"1.0\">\n<dict>\n\
+         \x20 <key>Label</key>\n  <string>{label}</string>\n\
+         \x20 <key>ProgramArguments</key>\n  <array>\n{strings}  </array>\n\
+         \x20 <key>WorkingDirectory</key>\n  <string>{home}</string>\n\
+         \x20 <key>RunAtLoad</key>\n  <true/>\n\
+         \x20 <key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>\n\
+         \x20 <key>ProcessType</key>\n  <string>Interactive</string>\n\
+         \x20 <key>StandardOutPath</key>\n  <string>{log}</string>\n\
+         \x20 <key>StandardErrorPath</key>\n  <string>{log}</string>\n\
+         </dict>\n</plist>\n",
+        label = xml_escape(&p.label),
+        home = xml_escape(&p.home),
+        log = xml_escape(&p.log),
+    )
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// `glibc 2.36` from `getconf GNU_LIBC_VERSION` or the first line of `ldd --version`.
 fn libc_of(raw: &str) -> Option<String> {
     let raw = raw.trim();
@@ -457,6 +521,7 @@ fn read_facts(contract: &dyn ServeContract, home: &str, stdout: &str) -> (Facts,
         systemd: false,
         linger: None,
         forwarding: None,
+        gui: false,
     };
     let mut fwd_seen = false;
     let mut fwd_refused = false;
@@ -471,6 +536,7 @@ fn read_facts(contract: &dyn ServeContract, home: &str, stdout: &str) -> (Facts,
             "libc" => f.libc = libc_of(v),
             "disk" => f.free_kib = v.parse().ok(),
             "systemd" => f.systemd = v == "yes",
+            "gui" => f.gui = v == "yes",
             "Linger" | "linger" => {
                 f.linger = match v {
                     "yes" => Some(true),
@@ -540,6 +606,7 @@ g=$(getconf GNU_LIBC_VERSION 2>/dev/null)
 echo \"libc=$g\"
 echo \"disk=$(df -Pk \"$HOME\" 2>/dev/null | awk 'NR==2 {print $4}')\"
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then echo systemd=yes; fi
+if [ \"$(uname)\" = Darwin ] && launchctl print \"gui/$(id -u)\" >/dev/null 2>&1; then echo gui=yes; fi
 u=$(id -un)
 if [ -e \"/var/lib/systemd/linger/$u\" ]; then echo linger=yes
 elif command -v loginctl >/dev/null 2>&1; then loginctl show-user \"$u\" -p Linger 2>/dev/null; fi
@@ -597,6 +664,24 @@ else
   nohup \"$@\" >> \"$log\" 2>&1 < /dev/null &
 fi
 echo $! > \"$pf\"
+echo restarted";
+
+const LAUNCHD: &str = "set -e
+dir=$1; f=$2; label=$3; r=$4; pf=$5; b=$6
+mkdir -p \"$dir\"
+t=\"$f.new\"
+cat > \"$t\"
+if [ -f \"$f\" ] && cmp -s \"$t\" \"$f\"; then rm -f \"$t\"; else mv -f \"$t\" \"$f\"; r=1; fi
+o=$(cat \"$pf\" 2>/dev/null || true)
+if [ -n \"$o\" ] && kill -0 \"$o\" 2>/dev/null && ps -o command= -p \"$o\" 2>/dev/null | grep -qF \"$b\"; then kill \"$o\"; r=1; fi
+rm -f \"$pf\"
+d=\"gui/$(id -u)\"
+if launchctl print \"$d/$label\" >/dev/null 2>&1; then
+  if [ \"$r\" != 1 ]; then echo running; exit 0; fi
+  launchctl bootout \"$d/$label\" >/dev/null 2>&1 || true
+  i=0; while launchctl print \"$d/$label\" >/dev/null 2>&1 && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+fi
+launchctl bootstrap \"$d\" \"$f\"
 echo restarted";
 
 const WAIT: &str = "s=$1; i=0
@@ -801,7 +886,27 @@ impl Session {
             return Err(self.failed(step, "Could not start on", &ran));
         }
         let flag = if restart { "1" } else { "0" };
-        let (ran, systemd) = if facts.systemd {
+        let screen = facts.os == "macos" && facts.gui;
+        let (ran, systemd) = if screen {
+            let text = agent_text(contract, &p);
+            let ran = self
+                .script(
+                    step,
+                    LAUNCHD,
+                    &[
+                        p.agent_dir.as_str(),
+                        p.agent.as_str(),
+                        p.label.as_str(),
+                        flag,
+                        p.pid.as_str(),
+                        p.bin.as_str(),
+                    ],
+                    Input::Bytes(text.as_bytes()),
+                    secs(60),
+                )
+                .await?;
+            (ran, false)
+        } else if facts.systemd {
             let unit = unit_text(contract, &p);
             let ran = self
                 .script(
@@ -881,6 +986,7 @@ impl Session {
             linger,
             linger_terminal,
             restarted,
+            screen,
         })
     }
 
@@ -1053,6 +1159,146 @@ mod tests {
             "{text}"
         );
         assert_eq!(unit_quote("a\"b\\c"), "\"a\\\"b\\\\c\"");
+    }
+
+    #[test]
+    fn a_mac_with_someone_at_its_screen_serves_from_a_launchd_agent() {
+        let (facts, _) = read_facts(&Fake, "/Users/me", "user=me\nuname=Darwin arm64\ngui=yes\n");
+        assert!(facts.gui);
+        let (facts, _) = read_facts(&Fake, "/Users/me", "user=me\nuname=Darwin arm64\n");
+        assert!(
+            !facts.gui,
+            "nobody at the screen: started from SSH as before"
+        );
+
+        let p = Paths::new("/Users/me/", "app");
+        assert_eq!(
+            p.agent,
+            "/Users/me/Library/LaunchAgents/dev.aiark.app.plist"
+        );
+        let text = agent_text(&Fake, &p);
+        for part in [
+            "<string>dev.aiark.app</string>",
+            "<string>/usr/bin/env</string>",
+            "<string>APP_HOME=100% $HOME</string>",
+            "<string>/Users/me/.local/share/app/app</string>",
+            "<string>/Users/me/.local/state/app/sock/serve.sock</string>",
+            "<string>/Users/me/.local/state/app/serve.log</string>",
+            "<string>/Users/me</string>",
+        ] {
+            assert!(text.contains(part), "{part} missing in {text}");
+        }
+        assert_eq!(xml_escape("a<b & \"c\">"), "a&lt;b &amp; &quot;c&quot;&gt;");
+        #[cfg(target_os = "macos")]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("agent.plist");
+            std::fs::write(&file, &text).unwrap();
+            let lint = std::process::Command::new("plutil")
+                .arg("-lint")
+                .arg(&file)
+                .output()
+                .unwrap();
+            assert!(
+                lint.status.success(),
+                "{}",
+                String::from_utf8_lossy(&lint.stdout)
+            );
+        }
+    }
+
+    /// On this Mac, with `ARK_REACH_LAUNCHD=1`: the start script bootstraps a throwaway agent
+    /// (`/bin/sleep`) into the login session, a second run finds it running, and the remove
+    /// script takes it out. Nothing is left in `~/Library/LaunchAgents`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_launchd_scripts_start_and_remove_an_agent_in_the_login_session() {
+        if std::env::var_os("ARK_REACH_LAUNCHD").is_none() {
+            eprintln!("skipped: set ARK_REACH_LAUNCHD=1 to bootstrap a throwaway agent here");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let label = format!("dev.aiark.reach-test-{}", std::process::id());
+        let agent = dir.path().join(format!("{label}.plist"));
+        let pid = dir.path().join("serve.pid");
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>/bin/sleep</string><string>600</string></array><key>RunAtLoad</key><true/></dict></plist>\n"
+        );
+        let run = |script: &str, args: &[&str], input: &str| {
+            use std::io::Write as _;
+            let mut child = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(script)
+                .arg("sh")
+                .args(args)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let d = dir.path().to_str().unwrap();
+        let (a, p) = (agent.to_str().unwrap(), pid.to_str().unwrap());
+        assert_eq!(
+            run(LAUNCHD, &[d, a, &label, "0", p, "/bin/sleep"], &plist),
+            "restarted"
+        );
+        let uid = String::from_utf8(
+            std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let target = format!("gui/{}/{label}", uid.trim());
+        // The agent may still be spawning (`xpcproxy`) for a moment.
+        let mut shown = String::new();
+        for _ in 0..50 {
+            let print = std::process::Command::new("launchctl")
+                .args(["print", &target])
+                .output()
+                .unwrap();
+            shown = String::from_utf8_lossy(&print.stdout).to_string();
+            if shown.contains("state = running") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if !shown.contains("state = running") {
+            let _ = std::process::Command::new("launchctl")
+                .args(["bootout", &target])
+                .output();
+            panic!("{shown}");
+        }
+        assert_eq!(
+            run(LAUNCHD, &[d, a, &label, "0", p, "/bin/sleep"], &plist),
+            "running"
+        );
+        let remove = "ag=$1; lb=$2\nif [ -f \"$ag\" ]; then\n  launchctl bootout \"gui/$(id -u)/$lb\" >/dev/null 2>&1\n  rm -f \"$ag\"\nfi";
+        run(remove, &[a, &label], "");
+        assert!(!agent.exists());
+        let gone = std::process::Command::new("launchctl")
+            .args(["print", &target])
+            .output()
+            .unwrap();
+        assert!(
+            !gone.status.success(),
+            "the agent is gone from the login session"
+        );
     }
 
     #[test]

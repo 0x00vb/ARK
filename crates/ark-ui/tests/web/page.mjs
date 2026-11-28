@@ -23,7 +23,7 @@ async function shape(page) {
       if (cls.contains("steered")) out.push(`steer: ${text}`);
       else if (cls.contains("answer")) out.push(`answer: ${text}`);
       else if (cls.contains("prose")) out.push(`text: ${text}`);
-      else if (cls.contains("work")) out.push(`work: ${el.querySelector(".work-summary").innerText.trim()}`);
+      else if (cls.contains("work")) { if (el.dataset.summary != null) out.push(`work: ${el.querySelector(".work-summary").innerText.trim()}`); }
       else out.push(`${el.className}: ${text}`);
     }
     return out;
@@ -475,7 +475,7 @@ const scenarios = {
     assert.deepEqual(result.drift, {});
     assert.equal(result.kept, true, "an unchanged turn is not drawn again");
     assert.equal(result.note, "From planner");
-    assert.equal(result.open, "true", "work still going keeps its block open");
+    assert.equal(result.open, "false", "work still going: the working line says what runs, its steps stay folded");
     assert.match(result.elapsed, /^\d+s$/, "elapsed time without an Esc hint");
     assert.equal(result.inspectable, false);
     assert.equal(result.controls, 0);
@@ -492,12 +492,11 @@ const scenarios = {
     const live = await shape(page);
     assert.deepEqual(live, [
       "text: Reading the notes now.",
-      "work: Reading notes",
       "answer: The notes mention a locket.",
     ]);
-    // The head shows through an attribute, not :has(:empty), which the macOS web view does
-    // not re-evaluate when the summary text arrives.
-    assert.equal(await page.locator(".work[data-summary] > .work-head").isVisible(), true);
+    // A finished turn shows its answer, not its steps: no line for work that went right.
+    assert.equal(await page.locator(".turn .work").first().isVisible(), false);
+    assert.equal(await page.getByText(/more step/).count(), 0);
   },
 
   // A model call that breaks off after some text is tried again: its text leaves the page, the
@@ -509,7 +508,9 @@ const scenarios = {
     assert.ok(!all.includes("then I wi"), all);
     assert.equal(live.filter((s) => s === "text: Reading the notes now.").length, 1, all);
     assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, all);
-    assert.ok(all.includes("retrying"), all);
+    // The retry is a quiet step (ADR 0131): kept in the page, no line of its own.
+    assert.equal(await page.locator('.turn .act[data-label*="retrying" i]').count() > 0, true, all);
+    assert.ok(!all.includes("retrying"), all);
     await page.reload();
     await page.locator(".turn.stored").first().waitFor();
     assert.deepEqual(await shape(page), live);
@@ -535,8 +536,9 @@ const scenarios = {
     assert.ok(!all.includes("Writing the edit now."), all);
     assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, all);
     const text = await page.locator(".turn").last().innerText();
-    assert.ok(text.includes("Redoing its last step"), text);
-    assert.ok(!/not JSON|malformed|retrying/i.test(text), text);
+    // The redo is a quiet step (ADR 0131): kept in the page, not shown.
+    assert.equal(await page.locator('.turn .act[data-label*="Redoing its last step"]').count(), 1);
+    assert.ok(!/not JSON|malformed|retrying|Redoing/i.test(text), text);
     await shot(page, "repair");
   },
 
@@ -624,7 +626,7 @@ const scenarios = {
     await finished(page, () => page.locator("#input").fill(ask).then(() => page.keyboard.press("Enter")));
     const live = await shape(page);
     assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, live.join("\n"));
-    assert.ok(live.some((s) => s.startsWith("work: ") && s.includes("ungrounded")), live.join("\n"));
+    assert.ok(!live.some((s) => s.startsWith("work: ")), `a self-check note is no step line: ${live.join("\n")}`);
     const agent = await page.locator(".turn .agent").last().innerText();
     assert.equal(agent.split("a locket").length - 1, 1, agent);
   },
@@ -681,7 +683,7 @@ const scenarios = {
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    assert.deepEqual(await wide(), { sidebarWidth: 236, sidebarPadding: 10, mainLeft: 236, hscroll: false });
+    assert.deepEqual(await wide(), { sidebarWidth: 272, sidebarPadding: 10, mainLeft: 272, hscroll: false });
     assert.equal(await page.locator(".destinations, #toggle-sidebar").count(), 0, "no fixed rail, no hide button");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+b" : "Control+b");
     await page.waitForTimeout(350);
@@ -705,7 +707,7 @@ const scenarios = {
     await page.click("#reveal-sidebar");
     await page.waitForTimeout(350);
     const open = await state();
-    assert.deepEqual(open, { compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 236, sidebarPadding: 10, mainBottom: 800, hscroll: false });
+    assert.deepEqual(open, { compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 272, sidebarPadding: 10, mainBottom: 800, hscroll: false });
     for (const button of await page.locator("#search-chats, #new-agent").all()) {
       const box = await button.boundingBox();
       assert.ok(box.width >= 32 && box.height >= 32, JSON.stringify(box));
@@ -794,7 +796,6 @@ const scenarios = {
     const after = await shape(page);
     assert.deepEqual(after, [
       `text: ${NARRATION}`,
-      "work: Reading notes",
       "answer: The notes mention a locket.",
     ]);
     assert.equal(await page.locator(".turn").count(), 1, "one turn, not a copy");
@@ -955,8 +956,11 @@ async function agentChat(page) {
 
   // Drawn afresh from `task`, the finished task keeps its work block; a tool row opens on its call.
   await page.evaluate(async () => { window.probe.view.reset(); await window.probe.draw(); });
+  // Its steps are folded and out of sight; an app's inspector still loads a row's call (the
+  // person reaches it from a step that went wrong). Open the block as a carried row does.
   const work = pane.locator(".turn .work").first();
-  await work.locator(".work-head").click();
+  assert.equal(await work.isVisible(), false, "a finished block with no problem is not shown");
+  await work.evaluate((el) => { el.dataset.open = "true"; });
   const row = work.locator(".act.inspectable").first();
   await row.locator(".act-line").click();
   const detail = row.locator(".act-more .call-body");
@@ -2758,7 +2762,8 @@ async function computer(page) {
 }
 scenarios.computer = computer;
 
-// ADR 0042: the picture the agent took shows under its step. An Auto chat asks nothing to use
+// ADR 0042, ADR 0131: the picture the agent took shows under the turn's folded steps, in sight
+// after the turn. An Auto chat asks nothing to use
 // the computer (ADR 0128): the person's message asked for the work.
 async function computerPicture(page) {
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
@@ -2766,7 +2771,9 @@ async function computerPicture(page) {
   await page.keyboard.press("Enter");
   await done;
   assert.equal(await page.locator("#thread .approval").count(), 0, "nothing asked");
-  await page.locator(".act[data-action='computer.see'] .act-shot img").waitFor({ state: "attached" });
+  const shot = page.locator(".turn .act-shot img").last();
+  await shot.waitFor({ state: "visible" });
+  assert.equal(await shot.evaluate((img) => !!img.closest(".work")), false, "outside the folded steps");
 }
 scenarios["computer-picture"] = computerPicture;
 

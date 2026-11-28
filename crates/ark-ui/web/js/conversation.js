@@ -20,6 +20,16 @@ const greeted = new Set();
 
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
 
+/// A block's one line: the first step that failed, was denied or was refused, at once while the
+/// turn runs and after it. Work that went right has no line.
+function problemLine(block) {
+  if (!block) return;
+  const problem = block.querySelector('.act[data-status="failed"], .act[data-status="denied"], .act[data-status="refused"]');
+  block.querySelector(".work-summary").textContent = problem ? clip(problem.dataset.label || "", 60) : "";
+  if (problem) block.dataset.summary = "";
+  else delete block.dataset.summary;
+}
+
 export class Thread {
   /// `inspect: false` for turns with no call to open: their tool rows do not open. A function
   /// `(turn, row)` loads a row's call instead of the chat's `call` (an app's own run).
@@ -385,25 +395,20 @@ class TurnView {
     if (this.block) return this.block;
     const rows = h("div.work-rows");
     const head = h("button.work-head", { type: "button" }, icon("chevron-right", "chev"), h("span.work-summary"));
-    const b = h("div.work", { "data-open": "true" }, head, h("div.disclose", h("div.disclose-inner", rows)));
+    const b = h("div.work", { "data-open": "false" }, head, h("div.disclose", h("div.disclose-inner", rows)));
     head.addEventListener("click", () => (b.dataset.open = b.dataset.open === "true" ? "false" : "true"));
-    this.block = { el: b, rows, tools: 0, labels: [] };
+    this.block = { el: b, rows };
     this.agent.append(b);
     this.textEl = null;
     this.keepWorkingLast();
     return this.block;
   }
 
+  /// A finished turn shows its answer, not its steps. A block keeps one line only when a step
+  /// went wrong: that step's words open the rows.
   closeBlocks() {
     for (const b of this.agent.querySelectorAll(".work")) {
-      const n = Number(b.dataset.tools || 0);
-      const first = b.dataset.firstTool || b.dataset.first || "";
-      const s = b.querySelector(".work-summary");
-      // What it did first, in the app's words, and how many steps followed.
-      const rest = n > 1 ? ` and ${n - 1} more step${n === 2 ? "" : "s"}` : "";
-      s.textContent = first ? clip(first, 60) + rest : n > 0 ? `${n} step${n === 1 ? "" : "s"}` : "";
-      if (s.textContent) b.dataset.summary = "";
-      else delete b.dataset.summary;
+      problemLine(b);
       b.dataset.open = "false";
     }
     this.block = null;
@@ -438,21 +443,17 @@ class TurnView {
       a.items?.length ? h("ol.act-items", a.items.map((i) => h("li", i))) : null,
     );
     if (a.tone && a.tone !== "normal") row.classList.add(`tone-${a.tone}`);
-    if (!blk.labels.length) blk.el.dataset.first = a.label;
-    blk.labels.push(a.label);
     if (kind === "tool") {
       const n = ++this.calls;
       row.dataset.n = n;
-      if (!blk.el.dataset.firstTool) blk.el.dataset.firstTool = a.label;
       row.dataset.action = a.action || "";
       row.dataset.call = a.call || "";
-      blk.el.dataset.tools = Number(blk.el.dataset.tools || 0) + 1;
       this.rows.set(a.call, row);
       if (this.thread.inspect) {
         row.classList.add("inspectable");
         row.querySelector(".act-line").addEventListener("click", () => this.toggleCall(row));
       }
-      this.working("Working");
+      this.working(clip(a.label, 80));
     }
     blk.rows.append(row);
   }
@@ -464,6 +465,7 @@ class TurnView {
     if (!row) return;
     mark(row);
     this.detail(row, text || a.label, a.tone);
+    problemLine(row.closest(".work"));
   }
 
   detail(row, text, tone) {
@@ -485,6 +487,7 @@ class TurnView {
     // Replayed from records: "warning" is a call cut short by the stop, or never run.
     if (row.dataset.status === "running") row.dataset.status = !ev && a.tone === "warning" ? "cut" : ok ? "ok" : "failed";
     if (a.label) this.detail(row, a.label, ok ? "muted" : "error");
+    problemLine(row.closest(".work"));
     if (ev?.duration_ms != null) row.querySelector(".act-meta").textContent = secs(ev.duration_ms);
     const renderer = ok && registry.toolRenderers.find(renderer => typeof renderer.renderInline === "function" && renderer.match(row.dataset.action, a));
     if (renderer && !row.dataset.inlineResult) {
@@ -502,13 +505,14 @@ class TurnView {
       };
       void load();
     }
-    // A picture the agent took of a window: what it saw, under its step. Click to enlarge.
+    // A picture the agent took of a window: what it saw, under its folded steps. Click to enlarge.
     if (ok && ev?.invocation && /^computer\.(see|point)$/.test(row.dataset.action)) {
       this.api.call("picture", { invocation: ev.invocation }).then((p) => {
         if (!p?.data) return;
         const img = h("img", { alt: "", src: `data:${p.media_type};base64,${p.data}` });
         const shot = h("button.act-shot", { type: "button", onclick: () => shot.classList.toggle("open") }, img);
-        row.querySelector(".act-detail")?.after(shot) || row.querySelector(".act-line").after(shot);
+        (row.closest(".work") || row).after(shot);
+        this.keepWorkingLast();
       }).catch(() => {});
     }
   }

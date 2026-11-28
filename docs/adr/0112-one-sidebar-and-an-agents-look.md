@@ -44,3 +44,18 @@ an agent in another folder goes through two window calls, `agent_end` and `agent
 chat-scoped resource calls name another `project`; review rejected it, because a chat reference
 must act only on its own chat's folder (`resource.rs`, ADR 0052). Delete ends the agent (its
 chats and records stay); Undo restores the same spec. Hard delete is cut.
+
+## Amendment (2026-11-28): two columns, big faces, the last message
+
+The owner on 2026-11-27, with a reference screenshot: the sidebar should read like it (two big
+faces on top, then rows of face, name and the last message), and step lines clutter the chat.
+
+| Part | Now |
+|---|---|
+| Tiles | Two columns, 64 px faces. ARK and the pins, in pin order; at least two (the most recent fill), at most eight. A third tile starts a centered row. Arrow keys move by a row of two |
+| Rows | 40 px face, the name, one line of the agent's last message. No date; "Needs you" stays |
+| Preview | `agents {all}` `preview` is the first line with words of the newest answer in the agent's latest chat (Markdown marks at the line start, code fences, `**` and backticks dropped), else the chat's title. One turn is read, four when the newest has no answer; a chat that does not read shows its title |
+| Width | 272 px by default with a fine pointer (was 236), 288 px otherwise (was 252) |
+
+Rejected: a date on every row (the order already says it, and it took the preview's space);
+three columns of 64 px faces (names cut to a few letters at the default width).

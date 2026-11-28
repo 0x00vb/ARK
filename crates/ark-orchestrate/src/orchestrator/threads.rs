@@ -239,7 +239,7 @@ pub fn agent_threads(
 }
 
 /// The person's own tasks in `project` (not Work's, an automation's or another agent's), oldest
-/// first. Read once per project and passed to [`latest_thread_title`].
+/// first. Read once per project and passed to [`latest_thread_preview`].
 pub fn person_tasks(engine: &Engine, project: &str) -> Result<Vec<TaskRecord>, OrchError> {
     let mut tasks: Vec<TaskRecord> = Vec::new();
     for value in engine.store.list_records(TASK, Some(project))? {
@@ -290,8 +290,9 @@ fn clip_title(text: &str) -> String {
     }
 }
 
-/// The title of `agent`'s latest conversation with turns, read from the store.
-pub fn latest_thread_title(
+/// What the sidebar shows under `agent`: the last answer of its latest conversation with turns,
+/// as one plain line, else that conversation's title. Read from the store.
+pub fn latest_thread_preview(
     engine: &Engine,
     agent: &AgentRecord,
     tasks: &[TaskRecord],
@@ -302,12 +303,79 @@ pub fn latest_thread_title(
     let Some(latest) = latest else {
         return Ok(None);
     };
+    // The newest turn first; older ones only when it has no answer (a failed or stopped turn).
+    // A chat that does not read shows its title: one bad record does not empty the sidebar.
+    let mut answer = None;
+    for page in [1, 4] {
+        match last_answer(engine, latest.id.as_str(), page) {
+            Ok(Some(line)) => {
+                answer = Some(line);
+                break;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(session = %latest.id, %error, "the latest chat's answer did not read; its title shows");
+                break;
+            }
+        }
+    }
+    if let Some(answer) = answer {
+        return Ok(Some(answer));
+    }
     let mut objectives = first_objectives(agent, tasks);
     Ok(Some(
         objectives
             .remove(latest.id.as_str())
             .unwrap_or(latest.title),
     ))
+}
+
+/// The newest answer with words among the last `turns` turns of `session`, as [`plain_line`].
+fn last_answer(engine: &Engine, session: &str, turns: usize) -> Result<Option<String>, OrchError> {
+    let Some(session) = Session::open(engine, session)? else {
+        return Ok(None);
+    };
+    Ok(session
+        .transcript_page(engine, None, turns)?
+        .into_iter()
+        .rev()
+        .find_map(|turn| plain_line(&turn.answer)))
+}
+
+/// The first line of `text` with words in it, clipped like a title, without the marks Markdown
+/// puts at a line's start (`#` runs, `>`, and `-`, `*`, `+` with a space), code fences, `**` and backticks.
+fn plain_line(text: &str) -> Option<String> {
+    let mut fenced = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("```") || line.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        let mut rest = line;
+        loop {
+            let heading = rest.trim_start_matches('#');
+            let after = if heading.len() < rest.len() && heading.starts_with(' ') {
+                heading
+            } else if let Some(after) = [">", "- ", "* ", "+ "]
+                .iter()
+                .find_map(|mark| rest.strip_prefix(mark))
+            {
+                after
+            } else {
+                break;
+            };
+            rest = after.trim_start();
+        }
+        let plain = rest.replace("**", "").replace('`', "");
+        let plain = plain.trim();
+        if plain.chars().any(char::is_alphanumeric) {
+            return Some(clip_title(plain));
+        }
+    }
+    None
 }
 
 fn refuse_program(agent: &AgentRecord) -> Result<(), OrchError> {
@@ -867,5 +935,30 @@ mod tests {
         assert!(same_thread(None, None, Some("s-1")));
         assert!(!same_thread(Some("s-2"), None, Some("s-1")));
         assert!(same_thread(Some("s-2"), Some("s-2"), Some("s-1")));
+    }
+
+    #[test]
+    fn a_preview_is_the_first_line_with_words_without_markdown_marks() {
+        assert_eq!(
+            plain_line("\n## **Listo.** El `video` está\nsegunda").as_deref(),
+            Some("Listo. El video está")
+        );
+        assert_eq!(
+            plain_line("- worker_one done").as_deref(),
+            Some("worker_one done")
+        );
+        assert_eq!(plain_line("> - **Done**").as_deref(), Some("Done"));
+        assert_eq!(plain_line("-3 degrees").as_deref(), Some("-3 degrees"));
+        assert_eq!(
+            plain_line("#hashtag time").as_deref(),
+            Some("#hashtag time")
+        );
+        assert_eq!(plain_line("5 * 3 is 15").as_deref(), Some("5 * 3 is 15"));
+        assert_eq!(
+            plain_line("```python\nprint(1)\n```\nRan it.").as_deref(),
+            Some("Ran it.")
+        );
+        assert_eq!(plain_line("---\n\n"), None);
+        assert_eq!(plain_line(&"a".repeat(70)).unwrap().chars().count(), 61);
     }
 }

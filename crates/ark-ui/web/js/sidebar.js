@@ -3,7 +3,7 @@
 // kept here that could drift from the store, except the person's pins and the folders they hid.
 // The foot holds the person (profile, which opens Settings) and the app's views as buttons.
 
-import { h, icon, clear, ago, $, agentFace } from "./dom.js";
+import { h, icon, clear, $, agentFace } from "./dom.js";
 import { bindContextMenu, contextMenu } from "./context-menu.js";
 import { registry } from "./ext.js";
 import { SETTINGS } from "./settings.js";
@@ -12,9 +12,10 @@ import { label as keyLabel } from "./keys.js";
 export const ARK = "ark";
 const HIDDEN_PROJECTS = "ark-hidden-projects";
 // ARK, then pins, then the most recent, until this many tiles; pins may take it up to MAX_TILES.
-const TILES = 6;
-const MAX_TILES = 9;
-const COLUMNS = 3;
+const TILES = 2;
+const MAX_TILES = 8;
+const COLUMNS = 2;
+const FACE = { tile: 64, row: 40 };
 const LONG_PRESS = 500;
 const WIDTH_KEY = "ark-sidebar-width";
 export const WIDTH = { min: 200, max: 400, close: 150 };
@@ -344,14 +345,14 @@ export class Sidebar {
     const button = item.firstElementChild;
     const mark = this.mark(entry);
     const sub = entry.twin ? entry.project_name : kind === "row" ? entry.preview : null;
-    const end = kind === "row" ? (mark === "asking" ? "Needs you" : entry.updated_ms ? ago(entry.updated_ms) : "") : "";
+    const end = kind === "row" && mark === "asking" ? "Needs you" : "";
     const signature = JSON.stringify([kind, entry.label, sub, end, mark, entry.ark ? this.nav.arkFaceKey?.() ?? "" : entry.group ? entry.members.map((m) => m.look) : entry.look]);
     item.dataset.kind = kind;
     button.dataset.name = entry.label.toLocaleLowerCase();
     if (button.dataset.signature !== signature) {
       button.dataset.signature = signature;
       button.replaceChildren(
-        h("span.agent-face-box", this.face(entry, kind === "tile" ? 40 : 22),
+        h("span.agent-face-box", this.face(entry, FACE[kind]),
           mark ? h("span.agent-mark", { "data-mark": mark }, mark === "asking" ? icon("alert") : null) : null),
         h("span.agent-text", h("span.agent-name", entry.label), sub ? h("span.agent-sub", sub) : null),
         end ? h("span.agent-end", { "data-mark": mark || null }, end) : "");

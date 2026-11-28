@@ -1,6 +1,6 @@
 use super::*;
 use ark_interact::ark_orchestrate::{
-    agent_threads, latest_thread_title, person_tasks, AgentRecord, AgentState, AgentThread,
+    agent_threads, latest_thread_preview, person_tasks, AgentRecord, AgentState, AgentThread,
     OrchError, Origin, TaskRecord, TaskSpec, TaskState,
 };
 use ark_sdk::prelude::ark_runtime::session::SessionRecord;
@@ -502,7 +502,7 @@ impl Host {
             if !tasks_in.contains_key(project) {
                 tasks_in.insert(project.to_string(), person_tasks(&self.engine, project)?);
             }
-            let preview = latest_thread_title(&self.engine, agent, &tasks_in[project])?;
+            let preview = latest_thread_preview(&self.engine, agent, &tasks_in[project])?;
             let own_folder = self
                 .engine
                 .store

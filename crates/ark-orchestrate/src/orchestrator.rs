@@ -77,7 +77,7 @@ pub use resolution::{WorkFailure, WorkRunRef};
 mod threads;
 pub use exchange::{known, said, Known, Said};
 pub use threads::{
-    agent_chat_scope, agent_threads, latest_thread_title, person_tasks, AgentThread,
+    agent_chat_scope, agent_threads, latest_thread_preview, person_tasks, AgentThread,
 };
 mod work;
 mod work_snapshot;

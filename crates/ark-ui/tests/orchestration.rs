@@ -1156,7 +1156,10 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
         assert_eq!(row["asking"], false);
         assert_eq!(row["program"], false);
         assert_eq!(row["running"], json!([]));
-        assert!(row["preview"].is_string(), "{row}");
+        assert_eq!(
+            row["preview"], "Done.",
+            "the sidebar shows the agent's last answer, not the chat's title: {row}"
+        );
         assert!(row["updated_ms"].as_u64().unwrap() > 0);
     }
     {
@@ -1170,12 +1173,20 @@ async fn an_agent_has_conversations_of_its_own_and_the_window_lists_every_agent_
                 &json!({"damaged": true}),
             )
             .unwrap();
+        ark.engine()
+            .store
+            .put_session_turn(&conversation, 0, &json!({"damaged": true}))
+            .unwrap();
     }
     let all = host.call("agents", json!({"all":true})).await.unwrap();
     assert_eq!(
         all.as_array().unwrap().len(),
         1,
         "a damaged task record hides no agent: {all}"
+    );
+    assert_eq!(
+        all[0]["preview"], "Draft it",
+        "a latest turn that does not read shows the chat's title: {all}"
     );
 
     let general = host

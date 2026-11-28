@@ -178,11 +178,12 @@ test("with no app that draws agents' chats, the sidebar is ARK alone and never a
   await shot(page, "sidebar-ark-only-light");
 }, { agentView: false }));
 
-test("tiles: ARK, pins in pin order, then latest activity; rows after; a pin past six makes more tiles", async () => {
+test("tiles: ARK and pins in pin order, two at least; rows after by latest activity; each pin makes a tile up to eight", async () => {
   await fixture(async (page) => {
     const order = await keys(page);
-    assert.deepEqual(order.slice(0, 6), [["tile", "ark"], ["tile", "c/Editor"], ["tile", "a/Mia"], ["tile", "b/Writer"], ["tile", "d/Scout"], ["tile", "e/Planner"]]);
-    assert.deepEqual(order.slice(6).map(([kind]) => kind), Array(order.length - 6).fill("row"));
+    assert.deepEqual(order.slice(0, 2), [["tile", "ark"], ["tile", "c/Editor"]]);
+    assert.deepEqual(order.slice(2, 6), [["row", "a/Mia"], ["row", "b/Writer"], ["row", "d/Scout"], ["row", "e/Planner"]]);
+    assert.deepEqual(order.slice(2).map(([kind]) => kind), Array(order.length - 2).fill("row"));
     assert.equal(order.at(-1)[1], "b/Mia", "the oldest last");
     // Pin from the tile menu: it moves after the pins, the menu offers Unpin next time.
     await agent(page, "f", "Archivist").click({ button: "right" });
@@ -196,7 +197,7 @@ test("tiles: ARK, pins in pin order, then latest activity; rows after; a pin pas
   const many = agentRows(12).slice(0, 12);
   await fixture(async (page) => {
     const order = await keys(page);
-    assert.equal(order.filter(([kind]) => kind === "tile").length, 9, "eight pins and ARK");
+    assert.equal(order.filter(([kind]) => kind === "tile").length, 8, "ARK and seven pins; the eighth pin is a row");
   }, { agents: many, pins: many.slice(0, 8).map((row) => [row.project, row.name]) });
 });
 
@@ -397,14 +398,14 @@ test("the list is one tab stop: arrows by tile row, Home, End, typeahead and the
   const second = await focused();
   await page.keyboard.press("ArrowDown");
   const order = (await keys(page)).map(([, key]) => key);
-  assert.equal(await focused(), order[4], "down moves by a row of three tiles");
+  assert.equal(await focused(), order[3], "down moves by a row of two tiles");
   await page.keyboard.press("ArrowDown");
-  assert.equal(await focused(), order[6], "past the tiles: the first row");
+  assert.equal(await focused(), order[4], "past the tiles: the first row");
   await page.keyboard.press("ArrowDown");
-  assert.equal(await focused(), order[7]);
-  await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), order[5]);
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await focused(), order[3], "up from the first row: the last tile");
   await page.keyboard.press("End");
   assert.equal(await focused(), order.at(-1));
   await page.keyboard.press("Home");
@@ -421,7 +422,7 @@ test("the list is one tab stop: arrows by tile row, Home, End, typeahead and the
   await page.keyboard.press("Enter");
   await page.getByText(/Chat with Planner/).waitFor();
   assert.notEqual(second, "ark");
-}, { agents: agentRows(10) }));
+}, { agents: agentRows(10), pins: agentRows(10).slice(0, 3).map((row) => [row.project, row.name]) }));
 
 test("an agents call that fails leaves ARK working with a way to try again", () => fixture(async (page, { control }) => {
   await page.getByText("Agents unavailable", { exact: true }).waitFor();
@@ -481,7 +482,7 @@ const centers = (page) => page.evaluate(() => {
   });
 });
 
-test("tiles sit centered: one alone, two side by side, a fourth alone on the next row", async () => {
+test("tiles sit centered: one alone, two side by side, a third alone on the next row", async () => {
   await fixture(async (page) => {
     assert.deepEqual((await centers(page)).map(([, dx]) => dx), [0], "ARK alone is centered");
   }, { agents: [] });
@@ -489,16 +490,16 @@ test("tiles sit centered: one alone, two side by side, a fourth alone on the nex
     const tiles = await centers(page);
     assert.equal(tiles.length, 2);
     assert.equal(tiles[0][0], tiles[1][0], "one row");
-    assert.equal(tiles[0][1], -tiles[1][1], "the pair is centered");
+    assert.ok(Math.abs(tiles[0][1] + tiles[1][1]) <= 1, "the pair is centered");
   }, { agents: agentRows(1) });
   await fixture(async (page) => {
     const tiles = await centers(page);
-    assert.equal(tiles.length, 4);
-    assert.equal(tiles[1][1], 0, "the middle of three is centered");
-    assert.ok(tiles[3][0] > tiles[0][0], "the fourth starts a row");
-    assert.equal(tiles[3][1], 0, "and is centered on it");
-    await shot(page, "sidebar-centered-4");
-  }, { agents: agentRows(3) });
+    assert.equal(tiles.length, 3);
+    assert.ok(Math.abs(tiles[0][1] + tiles[1][1]) <= 1, "the first pair is centered");
+    assert.ok(tiles[2][0] > tiles[0][0], "the third starts a row");
+    assert.equal(tiles[2][1], 0, "and is centered on it");
+    await shot(page, "sidebar-centered-3");
+  }, { agents: agentRows(3), pins: agentRows(3).slice(0, 2).map((row) => [row.project, row.name]) });
 });
 
 test("+ makes an agent through the app; with no app it starts a chat", () => fixture(async (page, { calls }) => {

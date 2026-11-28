@@ -1,3 +1,16 @@
+# Core 0.56.0 release: chat without step lines, Grok-like sidebar, the Computer behind the person's window, a Mac over SSH in its login session (2026-11-28)
+
+| Item | State |
+|---|---|
+| Latest tag | v0.56.0 (2026-11-28), over v0.55.0 (982faac). ADR 0131, ADR 0132, ADR 0112 and ADR 0052 amendments. Released from worktree `ark-grok-ux` (branch `grok-ux`) |
+| Change | ADR 0131 (a finished turn shows its answer, a line only for a step that went wrong); ADR 0112 amendment (two columns, 64/40 px faces, `preview` = last answer); ADR 0132 (Computer headless first, borrow with give-back); ADR 0052 amendment (launchd agent in `gui/<uid>`) |
+| Release commit | `ARK_UI_PAGE_TESTS=1 scripts/ci.sh`: fmt, protocol, version, macOS 11 check, clippy, workspace tests pass; WebKit 197 of 198 (exchange failed on the clock past midnight, fixed in ed54d86, 19 of 19 after); then by hand: page suite 64 of 69, the 3 new failures expected the old step lines and picture place and were updated (3 of 3), leaving the 2 known (`an_apps_conversation_draws_exactly_as_the_chat`, `primary_buttons_read_in_light_and_dark_with_any_accent`); notification 3 of 3; release build; simulated benchmark no delta |
+| Live | Computer on the owner's Mac (`ARK_COMPUTER_LIVE=1`): Safari stayed in front while TextEdit was typed into and Calculator pressed. launchd scripts on this Mac (`ARK_REACH_LAUNCHD=1`). Desktop built against this tree, `--serve` on a store copy: no step lines, files once, last messages in the sidebar |
+| Reviews | qa (haiku): UI lane 1 blocker + 3 majors fixed, recheck pass; Computer lane 3 blockers + 3 majors fixed, recheck pass after the 12 s budget fix. SSH lane not reviewed yet |
+| Not done | The MacBook over SSH live (offline); a background send to a messaging app; simulated benchmark (the Computer `open` description changed); release |
+| Prompt size | Owner asked to cut the ~50k tokens per call on long turns. Measured: Claude Code and Codex routes, 85 to 99% cached; the growth is the turn's own tool results, which Claude Code keeps too; ARK's native path already compresses old rounds (about 15k at step 16). No change: cutting vendor history risks quality, and agent turns keep no per-step trace to prove a cut safe (card `agent-turn-step-traces`) |
+| Next | Desktop 0.22.0 on this tag |
+
 # Core 0.55.0 release: an agent reaches the person's agents by the name they write (2026-11-20)
 
 | Item | State |

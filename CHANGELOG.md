@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-11-28
+
+The chat and the sidebar read like the owner's reference (answers without step lines, big faces for pinned agents, each agent's last message under its name); the Computer works behind the person's window (ADR 0132); a Mac set up over SSH serves in its login session.
+
+### Changed
+
+- A finished turn shows no step summary ("Writing package.json and 1 more step" is gone, ADR 0131). A block has one line only when a step failed, was denied or was refused, shown as soon as it happens; the line names that step and opens the steps. While a turn runs, its steps stay folded and the working line names the step that runs. A picture the Computer took shows under the folded steps.
+- Sidebar (ADR 0112 amendment): tiles in two columns with 64 px faces, ARK and pins first, two tiles at least, at most eight. Rows have a 40 px face, the name and one line of the agent's last message; the date is gone (rows still say "Needs you"). The default width is 272 px (was 236).
+- `agents {all}` rows: `preview` is the first line with words of the newest answer in the agent's latest chat, without Markdown marks or code fences, else that chat's title as before (also when that turn does not read). One turn is read, four when the newest has no answer. A chat another agent started showed "Task t-… delegated".
+
+- The Computer uses a Mac app behind the person's window (ADR 0132): `open` starts or finds the app without bringing it forward, presses and checkboxes use the app's accessibility actions, `type` sets the field's value (select-all and typing only when the field does not take it), keys go to the app's process. Only a step with no such way (a point, a scroll, a control without an action, a key to an app with nothing focused) brings the app forward, after the person has paused, and then gives back their window and pointer; while they keep typing it is refused with "try again when they pause". Nothing else waits for the person, and nothing asks for the app to be in front. Checked live on this Mac: Safari stayed in front while TextEdit was typed into and Calculator pressed.
+- `Screen::in_background` (default `false`): a screen that acts behind the person's window. `FakeScreen::background()` for tests.
+- An app behind the person's window with several windows is acted on in the window the agent last looked at or opened, else its front-most visible one (was: refused, "No unique focused native window").
+
+- A Mac set up over SSH with the person logged in at its screen serves from a launchd agent in that login session (`~/Library/LaunchAgents/dev.aiark.<name>.plist`, `launchctl bootstrap gui/<uid>`), not from `nohup` under sshd, so the Computer there can see and use its apps once the person allows ARK on that Mac. An old SSH-started copy is stopped first; removing the computer boots the agent out and deletes it. Without anyone at its screen it starts as before. `Facts.gui` and `Started.screen` say which. Checked on this Mac: the start script bootstraps a throwaway agent, a second run finds it running, the remove script takes it out (`ARK_REACH_LAUNCHD=1`).
+
+### Breaking
+
+- `ark_reach::Facts` has a new field `gui` (struct literals add `gui: false`).
+- `ark_orchestrate::latest_thread_title` is now `latest_thread_preview` (same arguments; it returns the last answer's first line before the title).
+
 ## [0.55.0] - 2026-11-20
 
 An agent reaches the person's agents by the name they write (ADR 0130).

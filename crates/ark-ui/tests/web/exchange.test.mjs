@@ -33,6 +33,10 @@ import { setAgentIdentity } from "/js/dom.js";
 setAgentIdentity((name, look) => look || "ink");
 const now = Date.now();
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+// Calendar days, not hours back from now: the stamps say Yesterday and Today at any hour.
+const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+const yesterday = startOfToday - 9 * HOUR;
+const earlierToday = Math.max(startOfToday + MIN, now - 2 * HOUR);
 const person = (agent, name, look) => ({ agent, name, look });
 const ceo = person("ceo", "CEO", "ink");
 const cmo = person("cmo", "CMO", "blue");
@@ -45,10 +49,10 @@ const state = {
   ],
   talks: {
     cmo: [
-      { author: "ceo", text: "Draft the launch post for **Friday**.", at_ms: now - DAY - 3 * HOUR, work: "w1" },
-      { author: "cmo", text: "Draft ready: three options, the second is my pick.", at_ms: now - DAY - 3 * HOUR + 4 * MIN, work: "w1" },
-      { author: "ceo", text: "Go with the second.", at_ms: now - 2 * HOUR },
-      { author: "cmo", text: "", at_ms: now - 2 * HOUR + MIN, work: "w2", failed: true },
+      { author: "ceo", text: "Draft the launch post for **Friday**.", at_ms: yesterday, work: "w1" },
+      { author: "cmo", text: "Draft ready: three options, the second is my pick.", at_ms: yesterday + 4 * MIN, work: "w1" },
+      { author: "ceo", text: "Go with the second.", at_ms: earlierToday },
+      { author: "cmo", text: "", at_ms: earlierToday + MIN, work: "w2", failed: true },
     ],
     cso: [{ author: "ceo", text: "Who are our first ten buyers?", at_ms: now - 30 * MIN, work: "w3", pending: true }],
   },

@@ -176,3 +176,5 @@ Local integration decisions:
 - [0128-the-computer-asks-once-and-not-in-auto](0128-the-computer-asks-once-and-not-in-auto.md)
 - [0129-an-agent-does-what-it-is-asked](0129-an-agent-does-what-it-is-asked.md)
 - [0130-an-agent-reaches-the-persons-agents-by-the-name-they-write](0130-an-agent-reaches-the-persons-agents-by-the-name-they-write.md)
+- [0131-a-finished-turn-shows-its-answer-not-its-steps](0131-a-finished-turn-shows-its-answer-not-its-steps.md)
+- [0132-the-computer-works-behind-the-persons-window](0132-the-computer-works-behind-the-persons-window.md)

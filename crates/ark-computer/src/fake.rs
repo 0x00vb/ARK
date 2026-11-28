@@ -39,6 +39,7 @@ struct Inner {
     sends_on_return: bool,
     return_fails: bool,
     input_window_mismatch: bool,
+    background: bool,
 }
 
 #[derive(Clone)]
@@ -180,6 +181,12 @@ impl FakeScreen {
     /// Return reports an error, which cannot prove whether the app received it.
     pub fn return_fails(self) -> Self {
         self.inner.lock().unwrap().return_fails = true;
+        self
+    }
+
+    /// Acts behind the person's window, as the macOS screen does ([`Screen::in_background`]).
+    pub fn background(self) -> Self {
+        self.inner.lock().unwrap().background = true;
         self
     }
 
@@ -456,6 +463,9 @@ impl Screen for FakeScreen {
     }
     fn since_input(&self) -> Option<Duration> {
         self.inner.lock().unwrap().person_typed.map(|t| t.elapsed())
+    }
+    fn in_background(&self) -> bool {
+        self.inner.lock().unwrap().background
     }
     /// Every app has a menu bar of File (Save, cmd+s; Export › PDF) and Edit (Undo, greyed).
     fn menu(&self, app: &str, path: &[String]) -> Result<Menu, String> {

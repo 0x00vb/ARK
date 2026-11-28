@@ -10,7 +10,7 @@
 //! |---|---|
 //! | One agent at a time on the screen | the first to act holds it; the others wait until it is done (its turn or task ends) or has left it idle for [`IDLE`] |
 //! | Reading or changing an app needs the person's consent | every action but `apps` (the names of the open apps) is `Mutate`, through the approval gate, in one approval class ([`GRANT`]), asked once a turn: an Auto chat runs them (the person's message asked for the work); otherwise the first asks, and a yes covers the rest of the turn |
-//! | The person comes first | an action waits until the person has left the keyboard and mouse alone for [`QUIET`] |
+//! | The person keeps working | on macOS an app is used where it is, behind the person's window: its accessibility actions, its value set, keys to its process. A step with no such way (a point, a scroll, a control without an action) waits until the person has left the keyboard and mouse alone for [`QUIET`], brings the app forward, then gives back their window and pointer (ADR 0132). A screen that cannot work in the background waits for [`QUIET`] before every action |
 //! | The person can take it back | [`ComputerService::take_back`]: the holder's next action fails and says so |
 //! | Elements are refused across apps | an element number is the agent's last `look`, in the app that `look` showed |
 //!
@@ -466,7 +466,7 @@ pub trait Screen: Send + Sync {
         }
         Ok(vec![look])
     }
-    /// Start the app, or bring it to the front.
+    /// Start the app, or find it; a screen in the background leaves it behind the person's window.
     fn open(&self, app: &str) -> std::result::Result<(), String>;
     /// A key or a shortcut (`return`, `cmd+s`) to the app in front.
     fn keys(&self, keys: &str) -> std::result::Result<(), String>;
@@ -491,6 +491,13 @@ pub trait Screen: Send + Sync {
     /// A picture of the front window of `app` only (never the whole screen), its longer side at
     /// most `max` pixels.
     fn capture(&self, app: &str, max: u32) -> std::result::Result<Shot, String>;
+    /// Acts on an app where it is, behind the person's window, without moving the pointer: the
+    /// person keeps working. A step with no other way brings the app forward itself, after the
+    /// person pauses, and gives their window and pointer back. Nothing then waits for the person
+    /// before an action, and nothing asks for the app to be in front.
+    fn in_background(&self) -> bool {
+        false
+    }
 }
 
 /// A control as the owner's last look listed it, and the handle to act on it.
@@ -1391,18 +1398,21 @@ impl Computer {
             self.svc.activity(app, action, ActivityPhase::Refused, None);
             return Err(tool(error));
         }
-        if self
-            .svc
-            .screen
-            .since_input()
-            .is_some_and(|since| since < self.svc.quiet)
-        {
-            self.svc
-                .activity(app, action, ActivityPhase::WaitingPerson, None);
-        }
-        if let Err(error) = self.svc.person_quiet().await {
-            self.svc.activity(app, action, ActivityPhase::Refused, None);
-            return Err(tool(error));
+        // In the background a step waits for the person only if it must take their window.
+        if !self.svc.screen.in_background() {
+            if self
+                .svc
+                .screen
+                .since_input()
+                .is_some_and(|since| since < self.svc.quiet)
+            {
+                self.svc
+                    .activity(app, action, ActivityPhase::WaitingPerson, None);
+            }
+            if let Err(error) = self.svc.person_quiet().await {
+                self.svc.activity(app, action, ActivityPhase::Refused, None);
+                return Err(tool(error));
+            }
         }
         // The person may have taken it back while this waited.
         if !self.svc.holds(&self.owner) {
@@ -2033,7 +2043,7 @@ impl Adapter for Computer {
             .volatile()
             .grant_per(GRANT, &[]).ask_once_a_turn()
             .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
-            ActionDescriptor::new(OPEN, "start an app on this computer, or bring it to the front. When the person names an app, use it here, not its website", RiskTier::Mutate)
+            ActionDescriptor::new(OPEN, "start an app on this computer, or find it if it is open. When the person names an app, use it here, not its website", RiskTier::Mutate)
                 .grant_per(GRANT, &[]).ask_once_a_turn()
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(CLICK, "press an element of an app (a button, a link, a row, an item), by its number and name; double opens it (a file, a chat), right shows its menu", RiskTier::Mutate)
@@ -2432,6 +2442,9 @@ impl Adapter for Computer {
 /// Bring `app` to the front and make sure it is there, before keys that go to whatever is in
 /// front. Nothing is sent when it is not.
 fn in_front(s: &dyn Screen, app: &str) -> std::result::Result<(), String> {
+    if s.in_background() {
+        return Ok(());
+    }
     s.open(app)?;
     for _ in 0..10 {
         std::thread::sleep(Duration::from_millis(150));

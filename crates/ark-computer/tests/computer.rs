@@ -1581,6 +1581,42 @@ async fn the_person_comes_first_and_can_take_the_computer_back() {
     run(&again, LOOK, json!({ "app": "Notes" })).await.unwrap();
 }
 
+/// The macOS screen works behind the person's window: a look does not wait for them to pause,
+/// and keys reach an app that stays behind another one, where a foreground screen refuses.
+#[tokio::test]
+async fn in_the_background_the_person_keeps_working_and_the_app_stays_behind() {
+    for background in [false, true] {
+        let screen = if background {
+            notes().front_stays_elsewhere().background()
+        } else {
+            notes().front_stays_elsewhere()
+        };
+        let svc = service(&screen);
+        let a = svc.for_owner("session:s1");
+        screen.person_types();
+        let t = Instant::now();
+        run(&a, LOOK, json!({ "app": "Notes" })).await.unwrap();
+        assert_eq!(
+            t.elapsed() < Duration::from_millis(250),
+            background,
+            "only a foreground screen waits for the person to pause"
+        );
+        let keys = run(&a, KEYS, json!({ "app": "Notes", "keys": "cmd+s" })).await;
+        if background {
+            keys.unwrap();
+            let log = screen.log.lock().unwrap();
+            assert!(log.iter().any(|l| l == "keys cmd+s"), "{log:?}");
+            assert!(
+                !log.iter().any(|l| l.starts_with("open ")),
+                "nothing was brought forward: {log:?}"
+            );
+        } else {
+            let e = keys.unwrap_err();
+            assert!(e.contains("did not come to the front"), "{e}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn permission_is_asked_once_and_the_action_goes_on() {
     let screen = notes().not_allowed_until_asked(Duration::from_millis(100));
@@ -1623,6 +1659,161 @@ async fn the_native_screen_lists_apps_and_reads_the_front_window() {
             .or_insert(0) += 1;
     }
     eprintln!("{} lines of text; elements: {roles:?}", look["lines"]);
+}
+
+/// The real screen, in the background: with `ARK_COMPUTER_LIVE=1` where ARK may use apps, it
+/// types into a new TextEdit document behind the app in front, and that app stays in front.
+/// The document is closed without saving at the end; TextEdit keeps its empty window until it
+/// next comes forward (close it with cmd+w).
+#[tokio::test]
+async fn the_native_screen_types_into_an_app_behind_the_persons_window() {
+    let Some(svc) = ComputerService::native() else {
+        eprintln!("skipped: no native screen on this platform");
+        return;
+    };
+    if std::env::var_os("ARK_COMPUTER_LIVE").is_none() || svc.access() != Access::Allowed {
+        eprintln!("skipped: set ARK_COMPUTER_LIVE=1 where ARK may use apps");
+        return;
+    }
+    let script = |source: &str| {
+        let out = std::process::Command::new("osascript")
+            .args(["-e", source])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let a = svc.for_owner("test");
+    let front = || async {
+        let apps = run(&a, APPS, json!({})).await.unwrap();
+        apps["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|app| app["front"] == json!(true))
+            .map(|app| app["name"].as_str().unwrap().to_string())
+    };
+    let before = front().await;
+    assert_ne!(
+        before.as_deref(),
+        Some("TextEdit"),
+        "put another app in front first"
+    );
+    script("tell application \"TextEdit\" to make new document with properties {name:\"ark-background-check\"}");
+    std::thread::sleep(Duration::from_millis(800));
+    let shown = run(&a, OPEN, json!({ "app": "TextEdit" })).await.unwrap();
+    assert_eq!(
+        front().await,
+        before,
+        "open left the app in front where it was"
+    );
+    let area = shown["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["role"] == "text area" || e["identifier"] == "First Text View")
+        .unwrap_or_else(|| panic!("no document text in {shown}"))
+        .clone();
+    run(
+        &a,
+        TYPE,
+        json!({ "app": "TextEdit", "ref": area["ref"], "name": area["name"], "text": "typed by ARK in the background" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        front().await,
+        before,
+        "typing left the app in front where it was"
+    );
+    let text = script("tell application \"TextEdit\" to get text of document 1");
+    let closed = script("tell application \"TextEdit\" to close document 1 saving no");
+    eprintln!("front before and after: {before:?}; closed: {closed:?}");
+    assert_eq!(text, "typed by ARK in the background");
+}
+
+/// The real screen, in the background: with `ARK_COMPUTER_LIVE=1` where ARK may use apps, it
+/// presses Calculator's 7 and sends it Escape while another app stays in front.
+#[tokio::test]
+async fn the_native_screen_presses_and_keys_an_app_behind_the_persons_window() {
+    let Some(svc) = ComputerService::native() else {
+        eprintln!("skipped: no native screen on this platform");
+        return;
+    };
+    if std::env::var_os("ARK_COMPUTER_LIVE").is_none() || svc.access() != Access::Allowed {
+        eprintln!("skipped: set ARK_COMPUTER_LIVE=1 where ARK may use apps");
+        return;
+    }
+    let a = svc.for_owner("test");
+    let front = || async {
+        let apps = run(&a, APPS, json!({})).await.unwrap();
+        apps["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|app| app["front"] == json!(true))
+            .map(|app| app["name"].as_str().unwrap().to_string())
+    };
+    let before = front().await;
+    assert_ne!(
+        before.as_deref(),
+        Some("Calculator"),
+        "put another app in front first"
+    );
+    let shown = run(&a, OPEN, json!({ "app": "Calculator" })).await.unwrap();
+    assert_eq!(
+        front().await,
+        before,
+        "open left the app in front where it was"
+    );
+    let seven = shown["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["role"] == "button" && e["name"] == "7")
+        .unwrap_or_else(|| panic!("no 7 in {shown}"))
+        .clone();
+    let after = run(
+        &a,
+        CLICK,
+        json!({ "app": "Calculator", "ref": seven["ref"], "name": "7" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        front().await,
+        before,
+        "a press left the app in front where it was"
+    );
+    eprintln!(
+        "after 7: {}",
+        after["text"]
+            .as_str()
+            .unwrap_or("")
+            .lines()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+    // Calculator has no focused field to post a key to, so Escape must bring it forward: that
+    // waits for the person to pause, and refuses while they keep working.
+    match run(&a, KEYS, json!({ "app": "Calculator", "keys": "escape" })).await {
+        Ok(_) => eprintln!("escape: sent during a pause, the person's window given back"),
+        Err(e) => {
+            assert!(e.contains("try again when they pause"), "{e}");
+            eprintln!("escape: refused while the person was working");
+        }
+    }
+    assert_eq!(
+        front().await,
+        before,
+        "a key left the app in front where it was"
+    );
+    eprintln!("front before and after: {before:?}");
 }
 
 fn switch_file(name: &str) -> std::path::PathBuf {

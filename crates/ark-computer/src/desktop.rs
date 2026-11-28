@@ -15,6 +15,14 @@ mod guard;
 mod queue_tests;
 
 const TIMEOUT: Duration = Duration::from_secs(12);
+/// How long a step that must bring the app forward waits for the person to pause.
+const BORROW_WAIT: Duration = Duration::from_secs(2);
+/// One borrowed step's budget, inside one native call ([`TIMEOUT`], 12 s): the headless try
+/// [`STEP_MS`], the wait for a pause [`BORROW_WAIT`], focusing [`FOCUS_MS`], the step itself
+/// [`STEP_MS`], the give-back [`GIVE_BACK_MS`]: 10.5 s at most.
+const STEP_MS: u64 = 3000;
+const FOCUS_MS: u64 = 1000;
+const GIVE_BACK_MS: u64 = 1500;
 const LIMIT_CONTROLS: usize = 4096;
 const LIMIT_TEXT: usize = 1024 * 1024;
 type Reply<T> = Result<T, String>;
@@ -66,10 +74,31 @@ fn error(error: ad::AdapterError) -> String {
 fn deadline() -> Reply<ad::Deadline> {
     ad::Deadline::after(8000).map_err(error)
 }
+/// Nothing reached the app: another way may try without doing it twice.
+fn not_delivered(error: &ad::AdapterError) -> bool {
+    error.disposition == ad::DeliverySemantics::NotDelivered
+}
+/// Wait until the person has left the keyboard and mouse alone for [`crate::QUIET`], at most
+/// [`BORROW_WAIT`]: a step that brings an app forward must not land in what they type.
+fn person_paused() -> Reply<()> {
+    paused_within(BORROW_WAIT, crate::macos::since_input)
+}
+fn paused_within(wait: Duration, since_input: impl Fn() -> Option<Duration>) -> Reply<()> {
+    let until = std::time::Instant::now() + wait;
+    while since_input().is_some_and(|since| since < crate::QUIET) {
+        if std::time::Instant::now() >= until {
+            return Err("The person is using the computer and this step needs the app in front; try again when they pause [delivery=NotDelivered]".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
+}
 
+/// The app's windows, starting it once when it has none. A launch that produced a window hands
+/// it back: an app just started without coming forward may not be listed by name yet.
 fn windows_for_open<T>(
     mut list: impl FnMut() -> Result<Vec<T>, Box<ad::AdapterError>>,
-    launch: impl FnOnce() -> Result<(), Box<ad::AdapterError>>,
+    launch: impl FnOnce() -> Result<Option<T>, Box<ad::AdapterError>>,
 ) -> Result<Vec<T>, Box<ad::AdapterError>> {
     let windows = match list() {
         Ok(windows) => windows,
@@ -77,8 +106,10 @@ fn windows_for_open<T>(
         Err(error) => return Err(error),
     };
     if windows.is_empty() {
-        launch()?;
-        list()
+        match launch()? {
+            Some(window) => Ok(vec![window]),
+            None => list(),
+        }
     } else {
         Ok(windows)
     }
@@ -310,7 +341,7 @@ impl Worker {
                 .into_iter()
                 .find(|window| window.id == id)
                 .ok_or("The recovery window disappeared")?,
-            None => choose_window(windows)?,
+            None => choose_window(windows, self.target.as_ref().or(self.input_target.as_ref()))?,
         };
         let captures_before = retained.capture_count();
         let snapshot =
@@ -339,24 +370,107 @@ impl Worker {
             native: &self.native,
             authority,
         };
-        // A second headed focus would collapse the selection made by select-all.
-        let request = if matches!(action, Action::TypeText(_))
+        // The app's own accessibility actions first: they reach it behind the person's window.
+        // Typing and menus have no other way (a second headed focus would collapse the
+        // selection made by select-all).
+        let semantic_only = matches!(action, Action::TypeText(_))
             || matches!(
                 entry.source.source_surface,
                 ad::SnapshotSurface::Menubar | ad::SnapshotSurface::Menu
-            ) {
-            ActionRequest::headless(action)
-        } else {
-            ActionRequest::headed(action)
-        };
-        ad::ref_action::execute_entry_with_context(
+            );
+        let sent = ad::ref_action::execute_entry_with_context(
             &adapter,
             entry,
-            request.with_timeout_ms(Some(8000)),
+            ActionRequest::headless(action.clone()).with_timeout_ms(Some(STEP_MS)),
             &ad::CommandContext::default(),
-        )
-        .map_err(error)?;
-        Ok(())
+        );
+        match sent {
+            Ok(_) => Ok(()),
+            Err(err) if !semantic_only && not_delivered(&err) => {
+                let window = self.observed_window()?;
+                self.borrowed(authority, &window, |worker| {
+                    let adapter = guard::Guarded {
+                        native: &worker.native,
+                        authority,
+                    };
+                    ad::ref_action::execute_entry_with_context(
+                        &adapter,
+                        entry,
+                        ActionRequest::headed(action).with_timeout_ms(Some(STEP_MS)),
+                        &ad::CommandContext::default(),
+                    )
+                    .map(|_| ())
+                    .map_err(error)
+                })
+            }
+            Err(err) => Err(error(err)),
+        }
+    }
+
+    /// The window the last look or `open` showed: the one a borrowed step brings forward.
+    fn observed_window(&self) -> Reply<ad::WindowInfo> {
+        self.input_target
+            .clone()
+            .or_else(|| self.target.clone())
+            .ok_or_else(|| "Take a fresh look before acting [delivery=NotDelivered]".to_string())
+    }
+
+    /// A step with no way that leaves the person's window alone: wait until they pause, bring
+    /// `window` forward, do it, then give back the window they had in front and the pointer.
+    fn borrowed<T>(
+        &mut self,
+        authority: &Authority,
+        window: &ad::WindowInfo,
+        step: impl FnOnce(&mut Self) -> Reply<T>,
+    ) -> Reply<T> {
+        person_paused()?;
+        let pointer = crate::macos::pointer_at();
+        let (before, focused) = {
+            let adapter = guard::Guarded {
+                native: &self.native,
+                authority,
+            };
+            let lease = adapter
+                .acquire_interaction_lease(ad::Deadline::after(FOCUS_MS).map_err(error)?)
+                .map_err(error)?;
+            let before = adapter.focused_window(lease.deadline()).map_err(error)?;
+            // From here the person's window may have moved: it is given back on every path.
+            (before, adapter.focus_window(window, &lease).map_err(error))
+        };
+        let out = focused.and_then(|()| step(self));
+        self.give_back(window, before, pointer);
+        out
+    }
+
+    /// The person's window to the front again and the pointer where it was. This restores the
+    /// person's own state, not an agent's action, so it runs without the operation's authority:
+    /// a call that timed out meanwhile still gives the window back. A failure is logged: the
+    /// step itself already ran, and its answer stands.
+    fn give_back(
+        &self,
+        borrowed: &ad::WindowInfo,
+        before: Option<ad::WindowInfo>,
+        pointer: Option<crate::macos::PointerAt>,
+    ) {
+        if let Some(before) = before.filter(|before| {
+            before.id != borrowed.id || before.process_instance != borrowed.process_instance
+        }) {
+            let restored = ad::Deadline::after(GIVE_BACK_MS)
+                .map_err(error)
+                .and_then(|deadline| {
+                    let lease = self
+                        .native
+                        .acquire_interaction_lease(deadline)
+                        .map_err(error)?;
+                    self.native.focus_window(&before, &lease).map_err(error)
+                });
+            if let Err(err) = restored {
+                tracing::warn!(%err, "the person's window could not be put back in front");
+            }
+        }
+        if let Some(Err(err)) = pointer.map(crate::macos::put_pointer) {
+            tracing::warn!(%err, "the pointer could not be put back");
+        }
     }
     fn look(&mut self, desktop: Desktop, authority: &Authority, app: &str) -> Reply<Look> {
         self.look_in_window(desktop, authority, app, None, None)
@@ -652,12 +766,31 @@ impl NativeControl {
             .entry
             .clone()
             .ok_or("This element has no native field reference")?;
-        self.desktop(permit)?.act(
-            entry,
+        let desktop = self.desktop(permit)?;
+        // The field's value set at once reaches an app behind the person's window. A field that
+        // does not take it, or reads back something else, gets select-all and typing; either
+        // way the whole value is replaced, so the second try cannot double it.
+        let set = desktop.act(
+            entry.clone(),
             self.epoch.clone(),
-            replacement(text)?,
+            vec![Action::SetValue(text.into())],
             Some(text.into()),
-        )
+        );
+        match set {
+            Ok(()) => Ok(()),
+            // Only a value that never reached the field is tried the other way; a value that
+            // reached it and read back wrong is reported, not typed over.
+            Err(err) if err.contains("[delivery=NotDelivered]") => {
+                tracing::debug!(%err, "the field did not take its value; select-all and typing");
+                desktop.act(
+                    entry,
+                    self.epoch.clone(),
+                    replacement(text)?,
+                    Some(text.into()),
+                )
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 impl Control for NativeControl {
@@ -868,18 +1001,20 @@ impl Screen for Desktop {
                         .launch_app(
                             &app,
                             &ad::system::launch_options::LaunchOptions {
-                                activate: true,
+                                activate: false,
                                 ..Default::default()
                             },
                             &lease,
                         )
-                        .map(|_| ())
+                        .map(|launched| launched.window)
                         .map_err(Box::new)
                 },
             )
             .map_err(|err| error(*err))?;
-            let window = choose_window(windows)?;
-            adapter.focus_window(&window, &lease).map_err(error)?;
+            // The app stays where it is: behind the person's window, or started without
+            // coming forward. Later steps reach this window by its process.
+            let window = choose_window(windows, worker.input_target.as_ref())?;
+            drop(lease);
             if worker.target.as_ref().is_some_and(|previous| {
                 previous.id != window.id || previous.process_instance != window.process_instance
             }) {
@@ -904,20 +1039,55 @@ impl Screen for Desktop {
                 .as_ref()
                 .ok_or("Open the target app before sending keys [delivery=NotDelivered]")?;
             require_input_window(target, &expected_window)?;
-            let adapter = guard::Guarded {
-                native: &worker.native,
-                authority,
+            // A key bound to a proved window (sending a message) goes only to that window in
+            // front: posted to the app's process it would reach whatever the app has focused,
+            // which may be another chat the person opened meanwhile.
+            let bound = !expected_window.is_empty();
+            let (window, sent) = {
+                let adapter = guard::Guarded {
+                    native: &worker.native,
+                    authority,
+                };
+                let lease = adapter
+                    .acquire_interaction_lease(ad::Deadline::after(STEP_MS).map_err(error)?)
+                    .map_err(error)?;
+                let window = adapter
+                    .resolve_window_strict(target, lease.deadline())
+                    .map_err(error)?;
+                let sent = if bound {
+                    None
+                } else {
+                    Some(adapter.press_key_for_window(
+                        &window,
+                        &combo,
+                        ad::InteractionPolicy::headless(),
+                        &lease,
+                    ))
+                };
+                (window, sent)
             };
-            let lease = adapter
-                .acquire_interaction_lease(deadline()?)
-                .map_err(error)?;
-            let window = adapter
-                .resolve_window_strict(target, lease.deadline())
-                .map_err(error)?;
-            adapter
-                .press_key_for_window(&window, &combo, ad::InteractionPolicy::headed(), &lease)
-                .map_err(error)?;
-            Ok(())
+            match sent {
+                Some(Ok(_)) => Ok(()),
+                Some(Err(err)) if !not_delivered(&err) => Err(error(err)),
+                None | Some(Err(_)) => worker.borrowed(authority, &window, |worker| {
+                    let adapter = guard::Guarded {
+                        native: &worker.native,
+                        authority,
+                    };
+                    let lease = adapter
+                        .acquire_interaction_lease(ad::Deadline::after(STEP_MS).map_err(error)?)
+                        .map_err(error)?;
+                    adapter
+                        .press_key_for_window(
+                            &window,
+                            &combo,
+                            ad::InteractionPolicy::headed(),
+                            &lease,
+                        )
+                        .map(|_| ())
+                        .map_err(error)
+                }),
+            }
         })
     }
     fn type_text(&self, text: &str) -> Reply<()> {
@@ -938,6 +1108,9 @@ impl Screen for Desktop {
     }
     fn since_input(&self) -> Option<Duration> {
         crate::macos::since_input()
+    }
+    fn in_background(&self) -> bool {
+        true
     }
     fn menu(&self, app: &str, path: &[String]) -> Reply<Menu> {
         let app = app.to_owned();
@@ -998,33 +1171,39 @@ impl Screen for Desktop {
         }
         self.call(move |worker, authority| {
             let (x, y) = at.center();
-            worker.pointer(
-                authority,
-                x,
-                y,
-                ad::MouseEventKind::Wheel {
-                    delta_x: 0.0,
-                    delta_y: pages * 30.0,
-                },
-                ad::MouseButton::Left,
-            )
+            let window = worker.observed_window()?;
+            worker.borrowed(authority, &window, |worker| {
+                worker.pointer(
+                    authority,
+                    x,
+                    y,
+                    ad::MouseEventKind::Wheel {
+                        delta_x: 0.0,
+                        delta_y: pages * 30.0,
+                    },
+                    ad::MouseButton::Left,
+                )
+            })
         })
     }
     fn pointer(&self, x: f64, y: f64, how: Pointer) -> Reply<()> {
         self.call(move |worker, authority| {
-            worker.pointer(
-                authority,
-                x,
-                y,
-                ad::MouseEventKind::Click {
-                    count: if how == Pointer::Double { 2 } else { 1 },
-                },
-                if how == Pointer::Right {
-                    ad::MouseButton::Right
-                } else {
-                    ad::MouseButton::Left
-                },
-            )
+            let window = worker.observed_window()?;
+            worker.borrowed(authority, &window, |worker| {
+                worker.pointer(
+                    authority,
+                    x,
+                    y,
+                    ad::MouseEventKind::Click {
+                        count: if how == Pointer::Double { 2 } else { 1 },
+                    },
+                    if how == Pointer::Right {
+                        ad::MouseButton::Right
+                    } else {
+                        ad::MouseButton::Left
+                    },
+                )
+            })
         })
     }
     fn capture(&self, app: &str, max: u32) -> Reply<Shot> {
@@ -1076,18 +1255,33 @@ impl Screen for Desktop {
         })
     }
 }
-fn choose_window(mut windows: Vec<ad::WindowInfo>) -> Reply<ad::WindowInfo> {
+/// The app's window to act in: its only one; the one with the focus; the one this agent last
+/// looked at or opened, while it is still there; else its front-most visible one (the system
+/// lists windows front to back). An app behind the person's window has no focused window.
+fn choose_window(
+    mut windows: Vec<ad::WindowInfo>,
+    kept: Option<&ad::WindowInfo>,
+) -> Reply<ad::WindowInfo> {
     if windows.len() == 1 {
         return Ok(windows.remove(0));
     }
-    let mut focused: Vec<_> = windows
-        .into_iter()
-        .filter(|window| window.state.is_focused)
+    let focused: Vec<usize> = (0..windows.len())
+        .filter(|&i| windows[i].state.is_focused)
         .collect();
-    if focused.len() == 1 {
-        return Ok(focused.remove(0));
+    if let [only] = focused[..] {
+        return Ok(windows.remove(only));
     }
-    Err("No unique focused native window; choose the target window first".into())
+    if let Some(at) = kept.and_then(|kept| {
+        windows.iter().position(|window| {
+            window.id == kept.id && window.process_instance == kept.process_instance
+        })
+    }) {
+        return Ok(windows.remove(at));
+    }
+    windows
+        .into_iter()
+        .find(|window| window.state.visible != Some(false) && window.state.minimized != Some(true))
+        .ok_or_else(|| "The app has no window to act in; open one first".into())
 }
 fn same_window_inventory(before: &[ad::WindowInfo], after: &[ad::WindowInfo]) -> bool {
     let identities = |windows: &[ad::WindowInfo]| {
@@ -1300,6 +1494,60 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_borrowed_step_waits_for_a_pause_and_refuses_while_the_person_keeps_typing() {
+        assert!(paused_within(Duration::from_millis(100), || None).is_ok());
+        assert!(paused_within(Duration::from_millis(100), || Some(crate::QUIET)).is_ok());
+        let started = std::time::Instant::now();
+        let refused =
+            paused_within(Duration::from_millis(120), || Some(Duration::ZERO)).unwrap_err();
+        assert!(started.elapsed() >= Duration::from_millis(120));
+        assert!(
+            refused.contains("try again when they pause")
+                && refused.contains("[delivery=NotDelivered]"),
+            "{refused}"
+        );
+        // The person stops: the wait ends at their pause, not at the cap.
+        let typed = std::time::Instant::now();
+        let quiet_at = crate::QUIET.saturating_sub(Duration::from_millis(80));
+        let started = std::time::Instant::now();
+        paused_within(Duration::from_secs(2), || Some(typed.elapsed() + quiet_at)).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+    #[test]
+    fn a_background_app_acts_in_the_window_kept_else_its_front_most_visible_one() {
+        let window = |id: &str, focused: bool, minimized: bool| -> ad::WindowInfo {
+            serde_json::from_value(serde_json::json!({"id":id,"title":id,"app_name":"Fixture","pid":1,"process_instance":"generation-1","is_focused":focused,"minimized":minimized})).unwrap()
+        };
+        let three = || {
+            vec![
+                window("w-1", false, true),
+                window("w-2", false, false),
+                window("w-3", false, false),
+            ]
+        };
+        assert_eq!(
+            choose_window(three(), None).unwrap().id,
+            "w-2",
+            "the front-most visible one"
+        );
+        let kept = window("w-3", false, false);
+        assert_eq!(
+            choose_window(three(), Some(&kept)).unwrap().id,
+            "w-3",
+            "the one the agent looked at"
+        );
+        let gone = window("w-9", false, false);
+        assert_eq!(choose_window(three(), Some(&gone)).unwrap().id, "w-2");
+        let mut focused = three();
+        focused[2].state.is_focused = true;
+        assert_eq!(choose_window(focused, Some(&kept)).unwrap().id, "w-3");
+        assert!(choose_window(
+            vec![window("w-1", false, true), window("w-2", false, true)],
+            None
+        )
+        .is_err());
+    }
     #[test]
     fn recovery_inventory_uses_exact_identity_and_refuses_changed_or_duplicate_windows() {
         let first: ad::WindowInfo = serde_json::from_value(serde_json::json!({"id":"w-1","title":"Same title","app_name":"Fixture","pid":1,"process_instance":"generation-1","is_focused":true})).unwrap();

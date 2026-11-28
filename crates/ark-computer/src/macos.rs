@@ -26,9 +26,43 @@ extern "C" {
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+    fn CGEventCreate(source: CFTypeRef) -> CFTypeRef;
+    fn CGEventGetLocation(event: CFTypeRef) -> PointerAt;
+    fn CGWarpMouseCursorPosition(at: PointerAt) -> i32;
     fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> CFTypeRef;
 }
 const ON_SCREEN: u32 = (1 << 0) | (1 << 4);
+
+/// A point on the screen, as CoreGraphics' `CGPoint`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PointerAt {
+    x: f64,
+    y: f64,
+}
+
+/// Where the pointer is now.
+pub(crate) fn pointer_at() -> Option<PointerAt> {
+    // SAFETY: a null source asks for the current state; the event follows the create rule.
+    let event = unsafe { CGEventCreate(std::ptr::null()) };
+    if event.is_null() {
+        return None;
+    }
+    let event = unsafe { CFType::wrap_under_create_rule(event) };
+    // SAFETY: `event` is a valid CGEvent for the duration of the call.
+    Some(unsafe { CGEventGetLocation(event.as_CFTypeRef()) })
+}
+
+/// Put the pointer back at `at` without sending the apps an event.
+pub(crate) fn put_pointer(at: PointerAt) -> Result<(), String> {
+    // SAFETY: plain values; CoreGraphics clamps a point off every display.
+    match unsafe { CGWarpMouseCursorPosition(at) } {
+        0 => Ok(()),
+        code => Err(format!(
+            "the pointer could not be put back (CoreGraphics {code})"
+        )),
+    }
+}
 struct Win {
     owner: String,
     pid: i32,

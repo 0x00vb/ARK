@@ -210,11 +210,25 @@ fn stopped_app_launches_once_and_refreshes_its_windows() {
         },
         || {
             launches += 1;
-            Ok(())
+            Ok(None)
         },
     )
     .unwrap();
     assert_eq!((windows, lists, launches), (vec![42], 2, 1));
+}
+
+#[test]
+fn a_window_the_launch_produced_is_used_without_listing_again() {
+    let mut lists = 0;
+    let windows = windows_for_open(
+        || {
+            lists += 1;
+            Ok(Vec::new())
+        },
+        || Ok(Some(7)),
+    )
+    .unwrap();
+    assert_eq!((windows, lists), (vec![7], 1));
 }
 
 #[test]
@@ -256,7 +270,7 @@ fn post_launch_inventory_error_does_not_relaunch() {
         },
         || {
             launches += 1;
-            Ok(())
+            Ok(None)
         },
     );
     assert_eq!(result.unwrap_err().code, ad::ErrorCode::AppNotFound);
